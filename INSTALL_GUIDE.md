@@ -1,0 +1,73 @@
+# HelixSR Decky: beginner installation guide
+
+HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on SteamOS. You install the Decky plugin once, then install HelixSR separately for each game. A game listed as a candidate still needs a successful gameplay test. Control Ultimate Edition and PRAGMATA are currently being tested; this guide does not claim verified gameplay for either.
+
+## 1. Download the plugin in Desktop Mode
+
+1. Finish any Steam game download or update. Close the game you want to modify.
+2. Open the Steam power menu and choose **Switch to Desktop**.
+3. Download the packaged **HelixSR-Decky release ZIP**, such as `HelixSR-Decky-0.1.0.zip`, from the supplied release. Keep it in **Downloads** and leave it zipped. Do not select GitHub's **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
+4. Once published, releases will be available on the [HelixSR Decky release page](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases). Until then, use the supplied ZIP. That public repository and its release page are not yet available.
+
+## 2. Install Decky Loader if needed
+
+1. Skip this section if Decky already appears in your Quick Access menu.
+2. Download the [official Decky installer](https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/decky_installer.desktop). Follow the [official installation instructions](https://github.com/SteamDeckHomebrew/decky-loader#installation). If Firefox adds `.download` to the filename, rename it to `decky_installer.desktop`.
+3. Move the installer to the desktop, open it, and choose the stable **Latest Release**. Follow its own prompts. Decky's installer permissions are separate from HelixSR's per-game operation.
+4. Open **Return to Gaming Mode** on the desktop.
+
+## 3. Install the plugin ZIP in Gaming Mode
+
+1. Press the **Quick Access button**, the button with three dots on the right of the Deck. Open the **Decky** plug icon.
+2. Open Decky's **gear icon** for Settings. Select **Developer**.
+3. If Developer is missing, open **General**, enable **Developer mode**, then return to Developer. You do not need Valve's internal developer menu or remote debugging.
+4. Under **Install Plugin from ZIP File**, choose **Browse**. Open your **Downloads** folder and select the packaged HelixSR-Decky ZIP.
+5. Confirm the installation prompt. Wait for Decky to finish, then return to its plugin list and open **HelixSR Decky**. The ZIP picker selects a local file; you do not need to paste a URL or extract it.
+
+If Decky disappears after a SteamOS update, follow Decky's own recovery instructions before troubleshooting this plugin.
+
+## 4. Install HelixSR for one game
+
+1. Open the **Game** dropdown at the top. Select your installed game. Choose **Refresh library and status** if you recently installed it. Steam, supported Steam shortcuts, Heroic, Legendary and Lutris records are detected automatically.
+2. Read its status and route. **Needs review** or an unavailable game has a reason shown in the panel. Do not bypass a block. If asked, enable **Game is set to DirectX 12** only after confirming that renderer in the game's launch selection or settings.
+3. Select the purple **Install HelixSR** button directly beneath the game selector. An existing managed or supported legacy installation shows **Update HelixSR** instead.
+4. Review the selected game, changed files, download details and linked terms. Choose **Accept terms and install** when you agree. Preparation uses the [HelixSR license](https://github.com/lonewolf0622/HelixSR/blob/main/LICENSE), [NVIDIA DLSS license](https://github.com/NVIDIA/DLSS/blob/v310.7.0/LICENSE.txt) and required dependencies. Acceptance is tied to the release version and archive digest.
+5. Allow downloads and local network preparation to finish. Required portable dependencies are handled automatically. A verified package already prepared on that drive can be reused. Keep the game closed. You can close the Quick Access panel while the background job continues.
+6. Wait for the completion notification and check that the selected game says HelixSR is enabled. A failure notice needs attention before launch. Installed files and a completed job do not prove correct rendering or stability.
+
+Keep locally generated network files on your device. Do not upload prepared packages, weights or kernels with a bug report.
+
+## 5. Select the renderer and upscaler
+
+1. Launch the game's **DirectX 12** version. Native Linux, Vulkan-only, DirectX 11 and 32-bit games are unsupported by this workflow.
+2. For **Native FSR 3.1 replacement**, choose **AMD FSR** in the game. That selection reaches the replaced native upscaler.
+3. For **OptiScaler proxy**, select the supported input shown for that game, commonly **DLSS**, or a supported XeSS/FSR input. OptiScaler forwards that input into HelixSR. The DLSS option is the game input; HelixSR executes DLSS Model E through its own shaders rather than NVIDIA's native runtime.
+4. For a Steam OptiScaler game, use **Review Proton proxy launch option** if required. Review the proposed `WINEDLLOVERRIDES="dxgi=n,b"` change and confirm it once. The plugin preserves your other launch options and verifies the saved change. For Heroic or Lutris, apply the shown override in that launcher's settings instead.
+5. Check the image, useful game audio, controller operation and stability during play. **Show diagnostics and logs** distinguishes configuration from recent runtime evidence. HelixSR supplies no frame generation of its own; native FG, LSFG-VK and MAKO remain separate settings.
+
+## 6. Control Ultimate Edition
+
+1. Wait until Steam's download and update are fully complete, then close Control and refresh the plugin library.
+2. Select Control only if it is an installation candidate. Prefer its **DirectX 12** launch choice.
+3. Follow the displayed route. Control may require the OptiScaler proxy and the reviewed Proton override. With that route, choose **DLSS as the input** feeding HelixSR.
+4. The [upstream Control OptiScaler page](https://github.com/OptiScaler/OptiScaler/wiki/Control-Ultimate-Edition) lists OptiScaler 0.9.4, Windows 11 24H2 and DLSS input. This Windows result is not proof of SteamOS compatibility. Record your actual outcome and versions if testing fails.
+
+## 7. Add several game folders
+
+1. Open **Manage Games Folders**, then **Add Games Folder**. Select one game's installation directory containing its Windows executable.
+2. Repeat for each additional game. Choose individual game folders, not your entire home folder, drive or a parent holding many unrelated games.
+3. Select **Import selected folders** to save the batch. The queue survives closing the Quick Access panel, but a plugin reload clears it. Every folder is checked before the batch is saved. Use **Remove folder** for an invalid entry, or **Clear selected folders** to start again, then retry.
+4. Use writable folders owned by the Deck user. HelixSR runs without root and does not change SteamOS system packages. A read-only mount or another user's folder needs its location permissions resolved first. Administrator access cannot fix an unsupported renderer or protected game.
+
+## 8. Updates, removal and troubleshooting
+
+1. Choose **Check for updates**, select a game, then **Update HelixSR** and review the change. Updates apply per game. Close it and wait for completion again.
+2. **Disable HelixSR** restores original files while retaining what is needed to enable it again. **Remove and restore originals** removes the managed installation. If used, separately choose **Restore plugin launch-option change**. Removing the Decky plugin itself does not remove game modifications.
+3. For **game running** or incomplete Steam downloads, close it or wait, then refresh. For network failures, reconnect and retry after reviewing the message. For other injector conflicts, resolve the existing mod through its own installer before retrying; do not overwrite unknown DLLs.
+4. For changed hashes, stop and review whether Steam updated the game. **Recover interrupted file transaction** restores only a matching transaction. File or build conflicts stop recovery before restoration. Steam verification may be needed; it can also remove other mods.
+
+## 9. Report a problem
+
+Use [GitHub Issues](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new/choose). Include the game, plugin/HelixSR versions, SteamOS, Proton, route, OptiScaler and FG setup, steps, expected result and actual result. Paste only a short sanitized diagnostic excerpt. Reports are public: remove usernames, account details and private paths; never attach credentials, full home-folder data or generated network files. No email address is required.
+
+Reports are assigned to the project owner. The owner can choose **Watch → All Activity**. GitHub inbox and email delivery follow the owner's [notification preferences](https://docs.github.com/en/subscriptions-and-notifications/concepts/about-notifications).

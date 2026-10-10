@@ -1,0 +1,10 @@
+{
+  "name": "HelixSR Decky",
+  "author": "HelixSR Decky contributors",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["graphics", "upscaling", "proton"],
+    "description": "Per-game HelixSR management, compatibility assessment, updates and rendering diagnostics."
+  }
+}

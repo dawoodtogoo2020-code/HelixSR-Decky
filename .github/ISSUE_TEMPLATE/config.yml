@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Installation guide
+    url: https://github.com/dawoodtogoo2020-code/HelixSR-Decky/blob/main/INSTALL_GUIDE.md
+    about: Read the installation, renderer, import and troubleshooting steps before reporting a bug.

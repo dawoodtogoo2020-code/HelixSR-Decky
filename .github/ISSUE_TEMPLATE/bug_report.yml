@@ -1,0 +1,103 @@
+name: Bug report
+description: Report a reproducible HelixSR Decky problem.
+title: "[Bug] "
+labels: [bug]
+assignees: [dawoodtogoo2020-code]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        GitHub reports are public. Remove personal details, usernames and private paths.
+        Do not attach credentials, full home-folder data, prepared packages, generated weights or kernels.
+        No email address is required. Use "Unknown" when you cannot find a version or setting.
+  - type: input
+    id: game
+    attributes:
+      label: Game and launcher
+      description: Include the edition and Steam app ID if known.
+      placeholder: Control Ultimate Edition, Steam
+    validations:
+      required: true
+  - type: input
+    id: plugin_version
+    attributes:
+      label: HelixSR Decky plugin version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: helix_version
+    attributes:
+      label: Installed HelixSR version
+      description: Use the game panel; say "Not installed" for a preparation failure.
+    validations:
+      required: true
+  - type: dropdown
+    id: route
+    attributes:
+      label: Installation route
+      options:
+        - Native FSR 3.1 replacement
+        - OptiScaler proxy
+        - No route detected
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: steam_os
+    attributes:
+      label: SteamOS version and update channel
+      description: Find this in Steam Settings, System. Include Stable, Beta or Preview.
+    validations:
+      required: true
+  - type: input
+    id: proton
+    attributes:
+      label: Proton version
+      description: Include the exact version or GE build, or say "Default / unknown".
+    validations:
+      required: true
+  - type: input
+    id: optiscaler
+    attributes:
+      label: OptiScaler version and status
+      description: Include any existing installation. Say "Not used" or "Unknown" if appropriate.
+    validations:
+      required: true
+  - type: textarea
+    id: framegen
+    attributes:
+      label: Frame generation and other mods
+      description: List native FG, OptiScaler FG, LSFG-VK, MAKO and other injectors. Distinguish settings from observed activation.
+      placeholder: Native FG off; LSFG-VK not used; no other injectors.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the renderer, chosen upscaler input and the action that fails.
+      placeholder: |
+        1. Close the game and select it in HelixSR Decky.
+        2. Choose Install HelixSR and accept the reviewed terms.
+        3. Describe what happens next.
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected and actual result
+      description: Include the exact error or status. Say whether installation, launch or gameplay fails.
+      placeholder: |
+        Expected:
+        Actual:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized diagnostic excerpt (optional)
+      description: Paste a short relevant excerpt from Show diagnostics and logs. Remove personal information before submitting. Do not upload generated network files.
+      render: text
+    validations:
+      required: false
