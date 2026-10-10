@@ -131,12 +131,18 @@ def awareness(game, tree, home, route, target=None):
                 fg.append(evidence(feature, 'Steam launch route', 'present; activation unknown', 'Steam launch options', 'launch route'))
     h, appid = Path(home), str(game.get('appid', ''))
     mako = h / '.config/mako-render/conf.toml'
-    metadata = read_json(h / '.config/mako-render/profile-metadata.json').get('profiles', {})
+    metadata = read_json(h / '.config/mako-render/profile-metadata.json')
+    metadata = metadata.get('profiles', {}) if isinstance(metadata, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
     associated = set()
     exenames = {n.lower() for _, ns in tree for n in ns if n.lower().endswith('.exe')}
     for name, meta in metadata.items():
+        if not isinstance(name, str) or not isinstance(meta, dict):
+            continue
+        captured = meta.get('captured_processes', [])
+        captured = captured if isinstance(captured, list) else []
         if (appid and str(meta.get('steam_app_id')) == appid or
-                any(str(p).lower() in exenames for p in meta.get('captured_processes', []))):
+                any(str(p).lower() in exenames for p in captured)):
             associated.add(name)
     if re.search(r'mako', options, re.I):
         match = re.search(r'--profile\s+["\']?([^\s"\']+)', options)

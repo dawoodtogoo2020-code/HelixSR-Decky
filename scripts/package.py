@@ -5,7 +5,11 @@ import json
 import sys
 import zipfile
 root = Path(__file__).resolve().parents[1]
-out = root.parent / 'HelixSR-Decky-0.1.0.zip'
+sys.path.insert(0, str(root / 'py_modules'))
+from plugin_updates import semver, validate_zip
+version = json.loads((root / 'package.json').read_text())['version']
+semver(version)
+out = root.parent / f'HelixSR-Decky-{version}.zip'
 allowed = ['main.py', 'plugin.json', 'package.json', 'LICENSE', 'README.md', 'INSTALL_GUIDE.md', 'THIRD_PARTY_NOTICES.md']
 license_files = [
     'licenses/decky-api-LGPL-2.1.txt',
@@ -30,5 +34,8 @@ if not (root / 'dist/index.js').is_file():
 with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
     for p in sorted(files):
         z.write(p, 'HelixSR-Decky/' + p.relative_to(root).as_posix())
-print(json.dumps({'path':str(out), 'size':out.stat().st_size, 'sha256':hashlib.sha256(out.read_bytes()).hexdigest(),
+validate_zip(out, version)
+digest = hashlib.sha256(out.read_bytes()).hexdigest()
+out.with_suffix('.zip.sha256').write_text(f'{digest}  {out.name}\n')
+print(json.dumps({'path':str(out), 'size':out.stat().st_size, 'sha256':digest,
                   'contents':[p.relative_to(root).as_posix() for p in files]}))

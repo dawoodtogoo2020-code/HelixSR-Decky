@@ -5,15 +5,25 @@ import decky
 
 sys.path.insert(0, str(Path(__file__).parent / 'py_modules'))
 from manager import Manager
+from plugin_updates import PluginUpdates
 
 
 class Plugin:
     async def _main(self):
         self.manager = Manager(decky.DECKY_USER_HOME, decky.DECKY_PLUGIN_SETTINGS_DIR)
         self.api_lock = asyncio.Lock()
+        self.plugin_updates = PluginUpdates(decky.DECKY_PLUGIN_SETTINGS_DIR, Path(__file__).parent / 'package.json')
+        await asyncio.to_thread(self.plugin_updates.cleanup_installed)
+        self.update_task = asyncio.create_task(self._plugin_update_loop())
+        self.updating_plugin = False
         decky.logger.info('HelixSR Decky loaded without root permissions')
 
     async def _unload(self):
+        self.update_task.cancel()
+        try:
+            await self.update_task
+        except asyncio.CancelledError:
+            pass
         for job in list(self.manager.jobs.values()):
             if job['state'] == 'running':
                 self.manager.cancel_job(job['id'])
@@ -23,6 +33,43 @@ class Plugin:
     async def _uninstall(self):
         # Game payloads and original files are intentionally retained. Remove per game first.
         pass
+
+    async def _plugin_update_loop(self):
+        while True:
+            try:
+                # due() uses the same thread lock as downloads. Keep the whole
+                # check off asyncio's loop so RPCs and cancellation stay usable.
+                await asyncio.to_thread(self.plugin_updates.check)
+            except Exception as exc:
+                decky.logger.warning('Plugin update check failed: %s', exc)
+            await asyncio.sleep(60)
+
+    def _allow_game_change(self):
+        if self.updating_plugin or self.plugin_updates.pending:
+            raise ValueError('Finish or cancel the pending Decky plugin update first')
+
+    async def plugin_update_status(self):
+        return await asyncio.to_thread(self.plugin_updates.status)
+
+    async def check_plugin_updates(self, force=True):
+        return await asyncio.to_thread(self.plugin_updates.check, bool(force))
+
+    async def set_plugin_auto_check(self, enabled):
+        return await asyncio.to_thread(self.plugin_updates.set_auto, enabled)
+
+    async def prepare_plugin_update(self):
+        async with self.api_lock:
+            if any(job['state'] == 'running' for job in self.manager.jobs.values()) or self.manager.transaction:
+                raise ValueError('Wait for the current HelixSR operation before updating the plugin')
+            self.updating_plugin = True
+            try:
+                return await asyncio.to_thread(self.plugin_updates.prepare)
+            finally:
+                self.updating_plugin = False
+
+    async def cancel_plugin_update(self):
+        async with self.api_lock:
+            return await asyncio.to_thread(self.plugin_updates.cancel)
 
     async def library(self):
         async with self.api_lock:
@@ -51,15 +98,16 @@ class Plugin:
         return await asyncio.to_thread(self.manager.accept_license, accepted)
 
     async def remember_launch_options(self, gid, before, after):
-        from manager import atomic_json
-        game = self.manager.get_game(gid)
-        receipt = self.manager.companion(game) / 'records/launch-options.json'
-        if before == after:
-            receipt.unlink(missing_ok=True)
+        async with self.api_lock:
+            self._allow_game_change()
+            from manager import atomic_json
+            game = self.manager.get_game(gid)
+            receipt = self.manager.companion(game) / 'records/launch-options.json'
+            if before == after:
+                receipt.unlink(missing_ok=True)
+                return True
+            atomic_json(receipt, {'before': before, 'after': after})
             return True
-        atomic_json(receipt,
-                    {'before': before, 'after': after})
-        return True
 
     async def owned_launch_options(self, gid):
         from manager import load_json
@@ -67,7 +115,9 @@ class Plugin:
         return load_json(self.manager.companion(game) / 'records/launch-options.json', None) or None
 
     async def prepare(self, gid):
-        return self.manager.start_job('prepare', gid)
+        async with self.api_lock:
+            self._allow_game_change()
+            return self.manager.start_job('prepare', gid)
 
     async def job_status(self):
         return [dict(x) for x in self.manager.jobs.values()]
@@ -84,8 +134,11 @@ class Plugin:
             return await asyncio.to_thread(self.manager.preview_latest, gid, dx12_confirmed)
 
     async def install_latest(self, token):
-        return self.manager.execute_latest(token)
+        async with self.api_lock:
+            self._allow_game_change()
+            return self.manager.execute_latest(token)
 
     async def apply_action(self, token):
         async with self.api_lock:
+            self._allow_game_change()
             return await asyncio.to_thread(self.manager.execute, token)

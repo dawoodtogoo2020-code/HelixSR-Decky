@@ -4,10 +4,11 @@ An independent Decky Loader plugin for managing HelixSR on SteamOS. It does not 
 
 Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https://github.com/lonewolf0622/HelixSR); this plugin is an independent integration.
 
-[Download the plugin ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.0) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
+[Download the plugin ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.1) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
 
 ## Features
 
+* Checks this Decky plugin's own GitHub releases on startup and once a day, with a saved opt-out and manual check. Shows current/latest plugin versions separately from HelixSR. Downloads and verifies the update's SHA256, size, manifests, required modules and complete ZIP before opening Decky's confirmation. Plugin updates wait for game operations to finish; they do not update per-game HelixSR installations.
 * Discovers installed Steam games across library drives, Steam shortcuts with executable paths, Heroic, Legendary and Lutris installation records. Import other Windows game folders through the file picker. Native Linux games, emulators and unresolved launcher wrappers remain unsupported or require a folder import.
 * Separates static compatibility candidates, managed file state and recent runtime evidence. HelixSR requires DirectX 12, x64 Windows game binaries through Proton and AMD RDNA 1 or newer. A DLL filename does not prove a game uses a supported renderer.
 * Checks upstream stable releases with a six-hour metadata cache, ETag support, bounded downloads and SHA256 verification. Version 1.7.0 additionally has an independently pinned archive digest. Updates are applied per game only after review.
@@ -19,7 +20,7 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 ## Install
 
 1. Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader).
-2. Open Decky Settings, Developer, and install `HelixSR-Decky-0.1.0.zip` from a file. The ZIP is built from this source tree and contains the plugin's code only.
+2. Open Decky Settings, Developer, and install `HelixSR-Decky-0.1.1.zip` from a file. The ZIP is built from this source tree and contains the plugin's code only. Users of v0.1.0 need this one manual upgrade to get the plugin updater.
 3. Open HelixSR Decky and choose a game from the **Game** dropdown. Choose **Install HelixSR** or **Update HelixSR** directly below it, review the change and accept local preparation terms. The plugin handles required downloads, local preparation and per-game installation in one background operation and notifies you when it completes.
 4. Select AMD FSR for a direct native replacement; for the OptiScaler route select the appropriate DLSS/XeSS/FSR input. See the included [installation guide](INSTALL_GUIDE.md) for multiple folder imports, permissions and removal.
 5. An OptiScaler proxy may need `WINEDLLOVERRIDES="dxgi=n,b"` before the existing Steam launch command. Preserve other options. The plugin reports the route and logs, but does not rewrite Steam's live VDF files. See [OptiScaler installation](https://github.com/OptiScaler/OptiScaler/wiki/Installation).
@@ -35,6 +36,9 @@ pnpm install
 pnpm typecheck
 pnpm build
 python3 tests/test_backend.py
+pnpm test:frontend
+python3 -m unittest discover -s tests -p 'test_*.py'
+pnpm audit --audit-level=low
 python3 scripts/package.py
 ```
 
@@ -43,6 +47,10 @@ python3 scripts/package.py
 Tests cover synthetic file/API fixtures, transactions, conflict detection, safe extraction, library imports and source-aware diagnostics. Real rendering depends on game, Proton, driver and upstream HelixSR version. Recent logs are evidence of the current process only when their timestamp is after its start; visual quality, controller navigation, frame pacing and prolonged stability require device testing. The plugin never labels static candidates as proven compatible. Anti-cheat detection is conservative but cannot enumerate every proprietary protection system.
 
 This plugin is independent of the HelixSR, OptiScaler and Decky projects. It cannot make unsupported renderers compatible, cannot inject into arbitrary native Vulkan/Linux titles, and cannot guarantee zero defects across all games.
+
+## Plugin updates
+
+Open **Plugin updates** to check or install a newer version of HelixSR Decky. Automatic checks only notify you; they never silently replace the plugin. Confirm **Update** in Decky's installer and wait for the plugin to reload. Its **Current plugin** version confirms which code is installed. If you cancel, first dismiss Decky's prompt, then choose **Continue without updating** to clear the staged update and resume game operations. If the Decky installer bridge is unavailable, use the release ZIP through Decky Settings → Developer instead. Network failures retain the last successful check with an explicit error; automatic retries wait an hour. **HelixSR updates** remains the separate section for game payloads.
 
 ## Bug reports
 

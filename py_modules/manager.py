@@ -73,6 +73,32 @@ def sync_directory(path):
             os.close(fd)
 
 
+def durable_directory(path):
+    """Persist each new directory entry before a recovery journal depends on it."""
+    missing, parent = [], Path(path)
+    while not parent.exists():
+        missing.append(parent)
+        parent = parent.parent
+    for directory in reversed(missing):
+        directory.mkdir()
+        sync_directory(directory.parent)
+
+
+def durable_copy(src, dst, expected=None):
+    """Persist verified recovery bytes and every newly created directory entry."""
+    src, dst = Path(src), Path(dst)
+    durable_directory(dst.parent)
+    expected = expected or sha(src)
+    shutil.copy2(src, dst)
+    if sha(dst) != expected or sha(src) != expected:
+        raise ValueError('Recovery copy changed or failed verification')
+    # POSIX permits syncing a read-only descriptor, preserving original modes.
+    # Windows' CRT requires a writable descriptor for its fsync implementation.
+    with dst.open('rb' if os.name == 'posix' else 'r+b') as stream:
+        os.fsync(stream.fileno())
+    sync_directory(dst.parent)
+
+
 def https_context():
     # Decky's bundled Python may retain a build-host CA path. Use SteamOS's trust store.
     if os.name == 'posix':
@@ -800,7 +826,7 @@ class Manager:
         size = sum((root / p).stat().st_size for p in paths if (root / p).is_file())
         if shutil.disk_usage(root).free < size * 3 + (128 << 20):
             raise ValueError('Insufficient free space for safe file transaction')
-        tx.mkdir(parents=True)
+        durable_directory(tx)
         before = {}
         previous = self.record(game)
         atomic_json(tx / 'journal.json', {'state': 'snapshotting', 'action': action})
@@ -809,8 +835,7 @@ class Manager:
             before[rel] = sha(p) if p.is_file() else None
             if p.is_file():
                 dst = tx / 'snapshot' / rel
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(p, dst)
+                durable_copy(p, dst, before[rel])
         build = game.get('build')
         if game.get('manifest'):
             from library import vdf
@@ -828,8 +853,7 @@ class Manager:
                     baseline[rel] = before[rel]
                     if p.is_file():
                         dst = companion / 'originals' / rel
-                        dst.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(p, dst)
+                        durable_copy(p, dst, before[rel])
                 previous = dict(route=data['route'], target=data['target'], targets=data['targets'],
                                 baseline=baseline, enabled=False, version=None)
             if action == 'adopt':
@@ -838,7 +862,7 @@ class Manager:
                     rel = str(target.relative_to(root))
                     orig = target.with_name(target.stem + '.original.dll')
                     dst = companion / 'originals' / rel
-                    shutil.copy2(orig, dst)
+                    durable_copy(orig, dst)
                     previous['baseline'][rel] = sha(orig)
                     previous['baseline'][str(orig.relative_to(root))] = None
                     for n in NETWORK + ('helixsr-install.json',):
