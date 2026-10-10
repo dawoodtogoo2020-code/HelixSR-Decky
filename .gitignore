@@ -1,5 +1,6 @@
 node_modules/
 dist/
+release/
 __pycache__/
 *.pyc
 .test-data/
