@@ -7,7 +7,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
 3. Download the packaged **HelixSR-Decky release ZIP**, such as `HelixSR-Decky-0.1.0.zip`, from the supplied release. Keep it in **Downloads** and leave it zipped. Do not select GitHub's **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
-4. Once published, releases will be available on the [HelixSR Decky release page](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases). Until then, use the supplied ZIP. That public repository and its release page are not yet available.
+4. Download the packaged plugin ZIP from the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.0). Choose **HelixSR-Decky-0.1.0.zip**, rather than GitHub's automatically generated source-code archive.
 
 ## 2. Install Decky Loader if needed
 
