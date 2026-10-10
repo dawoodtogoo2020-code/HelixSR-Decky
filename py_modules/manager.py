@@ -19,7 +19,7 @@ import zipfile
 import platform
 import ssl
 from functools import lru_cache
-from library import discover, safe_root, scan_tree, text
+from library import discover, discover_launcher, safe_root, scan_tree, text
 from awareness import awareness, active_processes, text_tail
 
 REPO = 'lonewolf0622/HelixSR'
@@ -300,6 +300,22 @@ class Manager:
         return dict(games=games, warnings=warnings, release=load_json(self.settings / 'release.json'),
                     license_accepted=bool(self.cfg.get('license')) and self.cfg.get('license') == license_key(load_json(self.settings / 'release.json')),
                     jobs=list(self.jobs.values()))
+
+    def import_launcher(self, launcher):
+        # Read installed records only. Never run a launcher or change its files.
+        found, notes = discover_launcher(self.home, launcher)
+        before = {entry['folder'] for entry in self.entries.values()}
+        result = self.refresh()
+        folders = {entry['folder'] for entry in found}
+        matched = [game for game in result['games'] if game['folder'] in folders]
+        result['launcher_import'] = dict(
+            launcher=launcher, found=len(matched),
+            added=sum(game['folder'] not in before for game in matched),
+            candidates=sum(game['compatibility'] == 'candidate' for game in matched),
+            unavailable=sum(game['compatibility'] != 'candidate' for game in matched),
+            game_ids=[game['id'] for game in matched], warnings=notes)
+        result['warnings'] = list(dict.fromkeys(result['warnings'] + notes))
+        return result
 
     def recovery_available(self, game):
         try:

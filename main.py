@@ -87,6 +87,11 @@ class Plugin:
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.import_folders, folders)
 
+    async def import_launcher(self, launcher):
+        async with self.api_lock:
+            self._allow_game_change()
+            return await asyncio.to_thread(self.manager.import_launcher, launcher)
+
     async def forget_game(self, gid):
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.forget, gid)

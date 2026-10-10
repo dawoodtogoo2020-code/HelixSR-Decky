@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.1) and download **HelixSR-Decky-0.1.1.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
+3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.2) and download **HelixSR-Decky-0.1.2.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -52,7 +52,15 @@ Keep locally generated network files on your device. Do not upload prepared pack
 3. Follow the displayed route. Control may require the OptiScaler proxy and the reviewed Proton override. With that route, choose **DLSS as the input** feeding HelixSR.
 4. The [upstream Control OptiScaler page](https://github.com/OptiScaler/OptiScaler/wiki/Control-Ultimate-Edition) lists OptiScaler 0.9.4, Windows 11 24H2 and DLSS input. This Windows result is not proof of SteamOS compatibility. Record your actual outcome and versions if testing fails.
 
-## 7. Add several game folders
+## 7. Import games from other launchers
+
+1. Scroll down to **Import games**. Open **Import Games From** and select **Heroic Games Launcher** or **Lutris**. **Legendary**, **Steam non-Steam shortcuts** and **All supported launchers** are also available.
+2. Select **Import Now**. Wait for the result and notification showing how many installed games were found, how many are new and how many are installation candidates. Both native and Flatpak launcher records are checked. Heroic's installed Epic, GOG and Amazon games are supported. You do not need to open or sign in to the launcher.
+3. Return to the **Game** dropdown and select a candidate. Select **Install HelixSR** and follow section 4. Importing finds games; it does not install HelixSR by itself. Unavailable games retain their compatibility reasons.
+4. Import again after installing or moving a launcher game. Repeated imports do not duplicate games. A game already registered through Steam keeps its existing Steam entry. Launcher selection and the result survive closing the Quick Access panel, but reset when the plugin reloads.
+5. If no games appear, confirm they are installed and their drive is mounted. Open **Discovery notes** if detection warnings are reported. For a custom launcher location, Heroic sideload app or unresolved shortcut, use the folder steps below.
+
+### Add several game folders manually
 
 1. Open **Manage Games Folders**, then **Add Games Folder**. Select one game's installation directory containing its Windows executable.
 2. Repeat for each additional game. Choose individual game folders, not your entire home folder, drive or a parent holding many unrelated games.
@@ -63,7 +71,7 @@ Keep locally generated network files on your device. Do not upload prepared pack
 
 For the **Decky plugin itself**:
 
-1. Users with v0.1.0 must install the v0.1.1 ZIP through Decky Settings once. Later versions can use the built-in updater.
+1. Users with v0.1.0 must install the current release ZIP through Decky Settings once. Users with v0.1.1 or newer can use the built-in updater.
 2. Open **Plugin updates**. It shows **Current plugin** and **Latest plugin**. Leave **Check plugin updates automatically** on for a check when the plugin starts and once a day, or turn it off and choose **Check plugin updates** yourself.
 3. When a newer plugin is available, finish any HelixSR preparation or game-file operation, then choose **Update Decky plugin**. The download is verified before Decky's installer opens.
 4. Review Decky's confirmation, choose **Update**, and wait for the plugin to reload. Check **Current plugin** afterward. The confirmation opening alone does not mean the update finished.

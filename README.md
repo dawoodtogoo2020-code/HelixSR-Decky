@@ -4,12 +4,12 @@ An independent Decky Loader plugin for managing HelixSR on SteamOS. It does not 
 
 Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https://github.com/lonewolf0622/HelixSR); this plugin is an independent integration.
 
-[Download the plugin ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.1) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
+[Download the plugin ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.2) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
 
 ## Features
 
 * Checks this Decky plugin's own GitHub releases on startup and once a day, with a saved opt-out and manual check. Shows current/latest plugin versions separately from HelixSR. Downloads and verifies the update's SHA256, size, manifests, required modules and complete ZIP before opening Decky's confirmation. Plugin updates wait for game operations to finish; they do not update per-game HelixSR installations.
-* Discovers installed Steam games across library drives, Steam shortcuts with executable paths, Heroic, Legendary and Lutris installation records. Import other Windows game folders through the file picker. Native Linux games, emulators and unresolved launcher wrappers remain unsupported or require a folder import.
+* Discovers installed Steam games across library drives, Steam shortcuts with executable paths, Heroic, Legendary and Lutris installation records. **Import Games From → Import Now** rescans a selected launcher and reports found games, new entries and installation candidates without duplicates. Native and Flatpak launcher locations are supported. Import other Windows game folders through the file picker. Native Linux games, emulators and unresolved launcher wrappers remain unsupported or require a folder import.
 * Separates static compatibility candidates, managed file state and recent runtime evidence. HelixSR requires DirectX 12, x64 Windows game binaries through Proton and AMD RDNA 1 or newer. A DLL filename does not prove a game uses a supported renderer.
 * Checks upstream stable releases with a six-hour metadata cache, ETag support, bounded downloads and SHA256 verification. Version 1.7.0 additionally has an independently pinned archive digest. Updates are applied per game only after review.
 * Prepares locally generated network files as a cancellable background job. Acceptance is tied to the selected release digest. Uses upstream portable dependencies and a separate compiler prefix; never changes SteamOS system packages or a game prefix.
@@ -20,7 +20,7 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 ## Install
 
 1. Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader).
-2. Open Decky Settings, Developer, and install `HelixSR-Decky-0.1.1.zip` from a file. The ZIP is built from this source tree and contains the plugin's code only. Users of v0.1.0 need this one manual upgrade to get the plugin updater.
+2. Open Decky Settings, Developer, and install `HelixSR-Decky-0.1.2.zip` from a file. The ZIP is built from this source tree and contains the plugin's code only. Users of v0.1.0 need this one manual upgrade to get the plugin updater. Users of v0.1.1 can use **Plugin updates**.
 3. Open HelixSR Decky and choose a game from the **Game** dropdown. Choose **Install HelixSR** or **Update HelixSR** directly below it, review the change and accept local preparation terms. The plugin handles required downloads, local preparation and per-game installation in one background operation and notifies you when it completes.
 4. Select AMD FSR for a direct native replacement; for the OptiScaler route select the appropriate DLSS/XeSS/FSR input. See the included [installation guide](INSTALL_GUIDE.md) for multiple folder imports, permissions and removal.
 5. An OptiScaler proxy may need `WINEDLLOVERRIDES="dxgi=n,b"` before the existing Steam launch command. Preserve other options. The plugin reports the route and logs, but does not rewrite Steam's live VDF files. See [OptiScaler installation](https://github.com/OptiScaler/OptiScaler/wiki/Installation).
@@ -51,6 +51,12 @@ This plugin is independent of the HelixSR, OptiScaler and Decky projects. It can
 ## Plugin updates
 
 Open **Plugin updates** to check or install a newer version of HelixSR Decky. Automatic checks only notify you; they never silently replace the plugin. Confirm **Update** in Decky's installer and wait for the plugin to reload. Its **Current plugin** version confirms which code is installed. If you cancel, first dismiss Decky's prompt, then choose **Continue without updating** to clear the staged update and resume game operations. If the Decky installer bridge is unavailable, use the release ZIP through Decky Settings → Developer instead. Network failures retain the last successful check with an explicit error; automatic retries wait an hour. **HelixSR updates** remains the separate section for game payloads.
+
+## Import launcher games
+
+Scroll to **Import games**, choose **Import Games From**, select **Heroic Games Launcher**, **Lutris**, **Legendary**, **Steam non-Steam shortcuts** or **All supported launchers**, then choose **Import Now**. This reads local installed-game records and refreshes compatibility. Heroic's installed Epic, GOG and Amazon records are supported. Games you own but have not installed are not imported. Existing Steam entries keep their Steam identity when a launcher points to the same folder. Importing does not install HelixSR; select an installation candidate in **Game**, then use **Install HelixSR**.
+
+Custom launcher locations, Heroic sideload apps and shortcut wrappers may need **Manage Games Folders → Add Games Folder**. The selected launcher and last import result survive closing the Quick Access panel; a plugin reload resets them. Detection warnings appear in **Discovery notes**.
 
 ## Bug reports
 

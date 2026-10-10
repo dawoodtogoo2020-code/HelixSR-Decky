@@ -46,7 +46,10 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
   launch_options: string; logs?: { path: string; modified: number; excerpt: string }[] };
 type Release = { version?: string; error?: string; checked_at?: number; page?: string };
 type Job = { id: string; kind: string; game: string; state: string; message: string; log: string };
-type Library = { games: Game[]; warnings: string[]; release: Release; license_accepted: boolean; jobs: Job[] };
+type LauncherImport = { launcher: string; found: number; added: number; candidates: number;
+  unavailable: number; game_ids: string[]; warnings: string[] };
+type Library = { games: Game[]; warnings: string[]; release: Release; license_accepted: boolean; jobs: Job[];
+  launcher_import?: LauncherImport };
 type Preview = { token: string; name: string; action: string; route: string; files: string[];
   warning: string; select_upscaler: string };
 const library = callable<[], Library>("library");
@@ -54,6 +57,7 @@ const details = callable<[string], Game>("game_details");
 const checkUpdates = callable<[boolean], Release>("check_updates");
 const forgetGame = callable<[string], Library>("forget_game");
 const importFolders = callable<[string[]], Library>("import_folders");
+const importLauncher = callable<[string], Library>("import_launcher");
 const setLicense = callable<[boolean], boolean>("set_license");
 const jobStatus = callable<[], Job[]>("job_status");
 const cancelJob = callable<[string], boolean>("cancel_job");
@@ -117,6 +121,25 @@ const notifiedJobs = new Set<string>();
 const jobListeners = new Set<(next: Job[], finished: boolean) => void>();
 const folderListeners = new Set<(next: string[]) => void>();
 let pendingFolders: string[] = [];
+const launcherOptions = [
+  { data: "heroic", label: "Heroic Games Launcher" },
+  { data: "lutris", label: "Lutris" },
+  { data: "legendary", label: "Legendary" },
+  { data: "steam-shortcuts", label: "Steam non-Steam shortcuts" },
+  { data: "all-launchers", label: "All supported launchers" },
+];
+let selectedLauncher = "heroic";
+let launcherImportMessage = "";
+const launcherListeners = new Set<() => void>();
+function chooseLauncher(id: string) {
+  if (!launcherOptions.some(option => option.data === id)) return;
+  selectedLauncher = id; launcherImportMessage = "";
+  launcherListeners.forEach(listener => listener());
+}
+function reportLauncherImport(message: string) {
+  launcherImportMessage = message;
+  launcherListeners.forEach(listener => listener());
+}
 function queueFolders(next: string[]) {
   pendingFolders = next;
   folderListeners.forEach(listener => listener(next));
@@ -163,6 +186,8 @@ function Content() {
   const [setupOptions, setSetupOptions] = useState(false);
   const [unavailableGames, setUnavailableGames] = useState(false);
   const [importOpen, setImportOpen] = useState(!!pendingFolders.length);
+  const [launcher, setLauncher] = useState(selectedLauncher);
+  const [importMessage, setImportMessage] = useState(launcherImportMessage);
   const [modalOpen, setModalOpen] = useState(interactionBusy);
   const [pluginUpdate, setPluginUpdate] = useState(latestPluginStatus);
   const selectedRef = useRef(selected);
@@ -188,6 +213,11 @@ function Content() {
   useEffect(() => {
     folderListeners.add(setFolders); setFolders(pendingFolders);
     return () => { folderListeners.delete(setFolders); };
+  }, []);
+  useEffect(() => {
+    const changed = () => { setLauncher(selectedLauncher); setImportMessage(launcherImportMessage); };
+    launcherListeners.add(changed); changed();
+    return () => { launcherListeners.delete(changed); };
   }, []);
 
   async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
@@ -220,6 +250,38 @@ function Content() {
     jobListeners.add(changed); setJobs(watchedJobs);
     return () => { jobListeners.delete(changed); };
   }, []);
+
+  async function importFromLauncher() {
+    const source = selectedLauncher;
+    const label = launcherOptions.find(option => option.data === source)!.label;
+    reportLauncherImport(`Detecting installed games from ${label}…`);
+    const result = await run(() => importLauncher(source));
+    if (!result?.launcher_import) {
+      reportLauncherImport("Import failed. Review the error message and try again.");
+      return;
+    }
+    setData(result); watchJobs(result.jobs);
+    const report = result.launcher_import;
+    const summary = report.found
+      ? `${report.found} game${report.found === 1 ? "" : "s"} found · ${report.added} new · ${report.candidates} installation candidate${report.candidates === 1 ? "" : "s"}${report.unavailable ? ` · ${report.unavailable} unavailable` : ""}`
+      : `No importable installed games found in ${label}. Check that the game is installed and its drive is mounted, or use Games Folders below for a custom location.`;
+    const message = report.warnings.length
+      ? `${summary} ${report.warnings.length} detection warning${report.warnings.length === 1 ? "" : "s"}; open Discovery notes below.`
+      : summary;
+    reportLauncherImport(message);
+    // Keep the existing selection. Auto-select a candidate only when none exists.
+    const current = result.games.find(g => g.id === selectedRef.current);
+    if (!current || !(current.compatibility === "candidate" || current.managed || current.recovery_available)) {
+      const first = result.games.find(g => report.game_ids.includes(g.id) && g.compatibility === "candidate");
+      chooseGame(first?.id || "");
+      setGame(undefined);
+    } else {
+      const id = selectedRef.current;
+      const updated = await run(() => details(id));
+      if (selectedRef.current === id) setGame(updated);
+    }
+    toaster.toast({ title: report.warnings.length ? "Game import finished with warnings" : "Game import complete", body: `${label}: ${message}`, duration: 6000 });
+  }
 
   async function installOrUpdate() {
     if (!game) return;
@@ -412,7 +474,8 @@ function Content() {
           <p>2. Choose Install HelixSR or Update HelixSR and review the change. Required downloads and the local network build happen automatically.</p>
           <p>3. Wait for completion, then launch the game with DirectX 12. Choose AMD FSR for a native replacement, or the appropriate DLSS/XeSS/FSR input for OptiScaler.</p>
           <p>For an OptiScaler Steam game, use Review Proton proxy launch option to save its required override while preserving your other options.</p>
-          <p>To import other games, choose Add Games Folder for each game, then Import selected folders. Administrator access is unnecessary for writable folders owned by you.</p>
+          <p>For launcher games, scroll to Import games, choose Import Games From, select Heroic or Lutris, then Import Now. Supported installed games appear in the Game dropdown. For other locations, open Manage Games Folders, add each game folder, then Import selected folders.</p>
+          <p>Administrator access is unnecessary for writable folders owned by you.</p>
           <p>Disable and Remove restore the original game files. Unsupported renderers and protected games cannot be made compatible by administrator access.</p></div>} />))}>
         Installation guide</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/dawoodtogoo2020-code/HelixSR-Decky/blob/main/INSTALL_GUIDE.md")}>Open full guide</ButtonItem></PanelSectionRow>
@@ -433,6 +496,13 @@ function Content() {
       </div></PanelSectionRow>)}
     </PanelSection>
     <PanelSection title="Import games">
+      <PanelSectionRow><DropdownItem layout="below" label="Import Games From" menuLabel="Import Games From"
+        selectedOption={launcher} disabled={disabled} rgOptions={launcherOptions}
+        onChange={option => chooseLauncher(String(option.data))} /></PanelSectionRow>
+      <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled}
+        onClick={() => void interact(importFromLauncher)}>Import Now</ButtonItem></PanelSectionRow></div>
+      <PanelSectionRow><div className="helix-muted">Detects installed games from the selected launcher. Compatibility is checked before HelixSR installation.</div></PanelSectionRow>
+      {!!importMessage && <PanelSectionRow><div className="helix-card helix-muted" style={infoStyle}>{importMessage}</div></PanelSectionRow>}
       <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => { if (!interactionBusy && Date.now() >= interactionAfter) setImportOpen(!importOpen); }}>{importOpen ? "Hide Games Folders" : "Manage Games Folders"}</ButtonItem></PanelSectionRow>
       {importOpen && <>
       <PanelSectionRow><div className="helix-muted">Steam, Heroic, Legendary and Lutris are detected automatically. Add other game folders below.</div></PanelSectionRow>
