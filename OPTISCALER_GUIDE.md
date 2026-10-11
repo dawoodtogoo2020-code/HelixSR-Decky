@@ -27,6 +27,16 @@ Open the selected game's **OptiScaler and frame generation** details in Decky, o
 - **Different backend/provider paths:** review **Update HelixSR** to restore its managed backend and paths. Other valid configuration settings, comments, overlay shortcut and frame-generation choices are retained. Duplicate or malformed settings require manual review.
 - **Red border, shaking or fallback:** inspect the current `helixsr.log` and report a short sanitized excerpt. Historical logs and mapped-module evidence do not prove current neural output or stable gameplay.
 
+## If game controls stop working
+
+Close the OptiScaler overlay first and test controls again. Record whether the controller, keyboard/mouse or both stop, and whether controls return after disabling HelixSR through the manager and restarting the game.
+
+For the **OptiScaler proxy route**, upstream documents a Steam Input conflict: `[Hotfix] DisableOverlays` also blocks Steam Input. Its `auto` setting normally means false, but becomes true with OptiFG. This is a possible cause, not a diagnosis for every controller problem. The native FSR replacement route does not install OptiScaler.
+
+If you use Steam Input and this setting is involved, close the game, record its original value and try `DisableOverlays=false` in the installed `OptiScaler.ini`, as described in [OptiScaler's known issues](https://github.com/optiscaler/OptiScaler/wiki/Known-Issues). Restart and test. Overlay blocking exists for compatibility reasons; restore the original value if enabling overlays causes crashes or other regressions. Change one setting at a time. The manager preserves these custom settings during updates.
+
+If the problem continues, [report it here](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml) with your device/OS, manager version, game, DX12 renderer, displayed route, frame-generation setup and a short fresh `OptiScaler.log` excerpt. Include the current `DisableOverlays`, `ManualInputPolling`, `OverlayMenu` and `ShortcutKey` values when present. Remove personal paths and information. File checks cannot establish which input hooks ran in your game.
+
 ## Using another mod manager or Decky-Framegen
 
 [Decky-Framegen](https://github.com/xXJSONDeruloXx/Decky-Framegen) also manages OptiScaler and can apply configuration through its `fgmod` launch wrapper. Its launch environment settings can override the INI on each launch. HelixSR supplies an upscaling backend and does not replace frame generation.
