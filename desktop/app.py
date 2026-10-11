@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from PySide6.QtCore import QThread, QTimer, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QThread, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
@@ -490,7 +490,16 @@ class MainWindow(QMainWindow):
         dialog.deleteLater()
         self._controls()
         if folders:
-            self._run(lambda: self.backend.import_folders(folders), self._library_received)
+            self._run(lambda: self.backend.import_folders(folders),
+                      lambda value: self._folders_received(value, len(folders)))
+
+    def _folders_received(self, value, count):
+        self._library_received(value)
+        warnings = len(value.get("warnings", []))
+        message = f"Imported {count} game folder{'s' if count != 1 else ''}."
+        if warnings:
+            message += f" {warnings} library warnings. See Diagnostics."
+        self._notify(message)
 
     def forget_game(self):
         if self.game and self.forget.isEnabled():
@@ -613,6 +622,32 @@ class SmokeBackend:
         pass
 
 
+def dispose_window(app, window):
+    """Destroy native widgets while Python callbacks and Qt are still available."""
+    if not window._closed:
+        # An external application.quit() must still use the normal guarded close.
+        loop = QEventLoop()
+        waiter = QTimer()
+        waiter.setInterval(20)
+        waiter.timeout.connect(lambda: loop.quit() if window._closed else None)
+        waiter.start()
+        window.receive_shutdown_signal()
+        window._process_shutdown()
+        if not window._closed:
+            loop.exec()
+        waiter.stop()
+        waiter.deleteLater()
+    for timer in window.findChildren(QTimer):
+        timer.stop()
+    # finished() can precede thread-local destructors; wait before native deletion.
+    for thread in window.findChildren(QThread):
+        thread.wait()
+    window.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    app.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="HelixSR native desktop app")
     parser.add_argument("--home")
@@ -624,7 +659,8 @@ def main(argv=None):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     if args.screenshot and not Path(args.screenshot).is_absolute():
         parser.error("--screenshot must be an absolute path")
-    app = QApplication.instance() or QApplication(sys.argv[:1])
+    existing_app = QApplication.instance()
+    app = existing_app or QApplication(sys.argv[:1])
     # The offscreen platform may have no font database even on a desktop host.
     if not QFontDatabase.families():
         windows_root = os.environ.get("WINDIR", "")
@@ -664,8 +700,14 @@ def main(argv=None):
     try:
         return app.exec()
     finally:
-        for sig, handler in previous_handlers.items():
-            signal.signal(sig, handler)
+        try:
+            dispose_window(app, window)
+            if existing_app is None:
+                app.deleteLater()
+                QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        finally:
+            for sig, handler in previous_handlers.items():
+                signal.signal(sig, handler)
 
 
 if __name__ == "__main__":
