@@ -366,6 +366,11 @@ class MainWindow(QMainWindow):
         if warnings and not self._library_loaded:
             self._notify(f"{len(warnings)} library warnings. See Diagnostics.")
         self._library_loaded = True
+        imported = value.get("launcher_import")
+        if imported:
+            self._notify(f"Import complete: {imported.get('found', 0)} games found, "
+                         f"{imported.get('added', 0)} new, {imported.get('candidates', 0)} installation candidates. "
+                         "See Diagnostics for discovery notes.")
         # Cached automatic-check policy belongs to the backend; no silent install.
         QTimer.singleShot(0, lambda: self.check_app(False))
 

@@ -279,6 +279,16 @@ class DesktopWidgetTests(unittest.TestCase):
         self.settle()
         self.assertIn(('import', 'heroic'), self.backend.calls)
 
+    def test_launcher_import_reports_empty_and_populated_results(self):
+        for found, added, candidates in ((0, 0, 0), (15, 3, 8)):
+            value = self.backend.library()
+            value['launcher_import'] = dict(found=found, added=added, candidates=candidates)
+            self.window._library_received(value)
+            self.settle()
+            self.assertIn(f'{found} games found', self.window.notice.text())
+            self.assertIn(f'{added} new', self.window.notice.text())
+            self.assertIn(f'{candidates} installation candidates', self.window.notice.text())
+
     def test_logs_bounded_and_polling_does_not_open_dialog(self):
         self.backend.job_list = [dict(id='job', state='running', game='A', log='x' * 100000)]
         self.window._jobs_received(self.backend.job_list)
