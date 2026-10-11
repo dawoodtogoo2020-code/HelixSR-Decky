@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.2) and download **HelixSR-Decky-0.1.2.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
+3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases) and download **HelixSR-Decky-0.1.3.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -73,14 +73,15 @@ For the **Decky plugin itself**:
 
 1. Users with v0.1.0 must install the current release ZIP through Decky Settings once. Users with v0.1.1 or newer can use the built-in updater.
 2. Open **Plugin updates**. It shows **Current plugin** and **Latest plugin**. Leave **Check plugin updates automatically** on for a check when the plugin starts and once a day, or turn it off and choose **Check plugin updates** yourself.
-3. When a newer plugin is available, finish any HelixSR preparation or game-file operation, then choose **Update Decky plugin**. The download is verified before Decky's installer opens.
+3. When a newer plugin is available, finish any HelixSR preparation or game-file operation, then choose **Download plugin update**. Older plugin versions call this button **Update Decky plugin**. The ZIP is verified before Decky's installer opens. A completed download is not an installed update.
 4. Review Decky's confirmation, choose **Update**, and wait for the plugin to reload. Check **Current plugin** afterward. The confirmation opening alone does not mean the update finished.
-5. If you cancel, dismiss Decky's prompt first, then choose **Continue without updating** in the plugin. This removes its staged ZIP and lets you resume game operations. Do not cancel staging after confirming installation. No administrator prompt is added by this plugin; Decky manages its own installation permissions.
+5. If the confirmation closes before you choose Update, choose **Open update confirmation** in the plugin. It reopens the exact verified download without downloading it again. If you want to cancel, close the native prompt first, then choose **Cancel downloaded update**. Older plugin versions use **Continue without updating**. Do not cancel staging after confirming installation. If Decky has not confirmed completion, restart Decky from its settings or restart the Deck, then check Current plugin. No administrator prompt is added by this plugin; Decky manages its own installation permissions.
 6. If an update check fails, reconnect and try again. Automatic retries wait an hour. If your Decky version cannot open the installer from the plugin, download the new release ZIP and repeat section 3.
 
 For **HelixSR inside a game**, and troubleshooting:
 
 1. In **HelixSR updates**, choose **Check for updates**, select a game, then **Update HelixSR** and review the change. Updates apply per game. Close it and wait for completion again. Updating the Decky plugin does not replace a game's HelixSR files.
+   The plugin follows the latest official stable HelixSR ZIP even if its size changes or upstream replaces the ZIP without changing the version number. New preparation checks the latest asset metadata, and changed bytes require fresh terms acceptance. A download must match GitHub's advertised size and SHA256. If the archive changes during downloading, check again and retry. If a future release changes its setup layout, preparation stops with a clear error rather than altering game files.
 2. **Disable HelixSR** restores original files while retaining what is needed to enable it again. **Remove and restore originals** removes the managed installation. If used, separately choose **Restore plugin launch-option change**. Removing the Decky plugin itself does not remove game modifications.
 3. For **game running** or incomplete Steam downloads, close it or wait, then refresh. For network failures, reconnect and retry after reviewing the message. For other injector conflicts, resolve the existing mod through its own installer before retrying; do not overwrite unknown DLLs.
 4. For changed hashes, stop and review whether Steam updated the game. **Recover interrupted file transaction** restores only a matching transaction. File or build conflicts stop recovery before restoration. Steam verification may be needed; it can also remove other mods.

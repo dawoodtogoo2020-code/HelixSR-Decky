@@ -32,7 +32,8 @@ class UpdateGuards(unittest.IsolatedAsyncioTestCase):
         self.plugin.plugin_updates.pending = Path('verified-update.zip')
         for method, args in [('prepare', ('game',)), ('install_latest', ('token',)),
                              ('apply_action', ('token',)), ('remember_launch_options', ('game', '', 'x')),
-                             ('import_launcher', ('heroic',))]:
+                             ('import_launcher', ('heroic',)), ('import_game', ('/game', 'name')),
+                             ('import_folders', (['/game'],)), ('forget_game', ('game',)), ('set_license', (True,))]:
             with self.subTest(method=method), self.assertRaisesRegex(ValueError, 'pending Decky'):
                 await getattr(self.plugin, method)(*args)
         self.plugin.manager.start_job.assert_not_called()

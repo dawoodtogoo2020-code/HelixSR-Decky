@@ -71,6 +71,10 @@ class Plugin:
         async with self.api_lock:
             return await asyncio.to_thread(self.plugin_updates.cancel)
 
+    async def resume_plugin_update(self):
+        async with self.api_lock:
+            return await asyncio.to_thread(self.plugin_updates.resume)
+
     async def library(self):
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.refresh)
@@ -81,10 +85,12 @@ class Plugin:
 
     async def import_game(self, folder, name):
         async with self.api_lock:
+            self._allow_game_change()
             return await asyncio.to_thread(self.manager.import_folder, folder, name)
 
     async def import_folders(self, folders):
         async with self.api_lock:
+            self._allow_game_change()
             return await asyncio.to_thread(self.manager.import_folders, folders)
 
     async def import_launcher(self, launcher):
@@ -94,13 +100,16 @@ class Plugin:
 
     async def forget_game(self, gid):
         async with self.api_lock:
+            self._allow_game_change()
             return await asyncio.to_thread(self.manager.forget, gid)
 
     async def check_updates(self, force=True):
         return await asyncio.to_thread(self.manager.check_update, force)
 
     async def set_license(self, accepted):
-        return await asyncio.to_thread(self.manager.accept_license, accepted)
+        async with self.api_lock:
+            self._allow_game_change()
+            return await asyncio.to_thread(self.manager.accept_license, accepted)
 
     async def remember_launch_options(self, gid, before, after):
         async with self.api_lock:

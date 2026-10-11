@@ -2,6 +2,104 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { proxyOptions } from "../src/launchOptions.ts";
+import { PluginInstaller } from "../src/pluginInstaller.ts";
+
+const artifact = {artifact: "file:///private/update-attempt.zip", name: "HelixSR Decky", version: "0.1.3", sha256: "a".repeat(64), install_type: 2};
+
+test("download requests confirmation, reopening cancels the previous exact request", async t => {
+  const calls = [];
+  const installer = new PluginInstaller(async (...args) => { calls.push(args); if (args[0] === "utilities/install_plugin") installer.prompt(artifact.name, artifact.version, "request-A", artifact.sha256); }, () => {});
+  t.after(() => installer.dispose());
+  await installer.open(artifact);
+  assert.equal(installer.phase, "awaiting");
+  assert.match(installer.message, /Press Update/);
+  installer.prompt(artifact.name, artifact.version, "request-A", artifact.sha256);
+  await installer.open(artifact);
+  assert.deepEqual(calls[1], ["utilities/cancel_plugin_install", "request-A"]);
+  assert.equal(calls[2][0], "utilities/install_plugin");
+  assert.equal(calls.filter(c => c[0] === "utilities/confirm_plugin_install").length, 0);
+});
+
+test("cancel invalidates Decky's request before deleting the artifact or releasing the guard", async t => {
+  const calls = [];
+  const installer = new PluginInstaller(async route => { calls.push(route); if (route === "utilities/install_plugin") installer.prompt(artifact.name, artifact.version, "request-A", artifact.sha256); }, () => {});
+  t.after(() => installer.dispose());
+  await installer.open(artifact);
+  installer.prompt(artifact.name, artifact.version, "request-A", artifact.sha256);
+  await installer.cancel(async () => { calls.push("delete-private-zip"); });
+  assert.deepEqual(calls.slice(1), ["utilities/cancel_plugin_install", "delete-private-zip"]);
+  assert.equal(installer.phase, "idle");
+});
+
+test("failed native cancellation preserves artifact and mutation guard", async t => {
+  let removed = false;
+  const installer = new PluginInstaller(async route => { if (route.includes("cancel")) throw new Error("disconnected"); installer.prompt(artifact.name, artifact.version, "request-A", artifact.sha256); }, () => {});
+  t.after(() => installer.dispose());
+  await installer.open(artifact);
+  installer.prompt(artifact.name, artifact.version, "request-A", artifact.sha256);
+  await assert.rejects(installer.cancel(async () => { removed = true; }), /disconnected/);
+  assert.equal(removed, false);
+  assert.equal(installer.requestId, "request-A");
+});
+
+test("native Cancel's precise missing request is recoverable; unrelated errors are not", async t => {
+  const installer = new PluginInstaller(async route => { if (route === "utilities/install_plugin") installer.prompt(artifact.name, artifact.version, "request-A", artifact.sha256); if (route.includes("cancel")) { const err = new Error(""); err.name = "Python KeyError"; throw err; } }, () => {});
+  t.after(() => installer.dispose());
+  await installer.open(artifact);
+  installer.prompt(artifact.name, artifact.version, "request-A", artifact.sha256);
+  await installer.open(artifact);
+  assert.equal(installer.phase, "awaiting");
+});
+
+test("installer request failure stays retryable and retains an explanation across panel remounts", async t => {
+  const installer = new PluginInstaller(async () => { throw new Error("installer unavailable"); }, () => {});
+  t.after(() => installer.dispose());
+  await assert.rejects(installer.open(artifact), /unavailable/);
+  assert.equal(installer.phase, "awaiting");
+  assert.match(installer.message, /downloaded update is retained/);
+  assert.equal(installer.target.version, "0.1.3");
+});
+
+test("missing finish and failed finish never claim installed or release pending game protection", async t => {
+  t.mock.timers.enable({apis: ["setTimeout"]});
+  const installer = new PluginInstaller(async () => { installer.prompt(artifact.name, artifact.version, "request-A", artifact.sha256); }, () => {});
+  t.after(() => installer.dispose());
+  await installer.open(artifact);
+  installer.started(artifact.name);
+  installer.prompt(artifact.name, artifact.version, "late-request", artifact.sha256);
+  assert.equal(installer.phase, "installing");
+  t.mock.timers.tick(120000);
+  assert.equal(installer.phase, "unknown");
+  assert.equal(installer.locked, true);
+  await assert.rejects(installer.cancel(async () => assert.fail("deleted active ZIP")), /Do not cancel/);
+  installer.finished(artifact.name);
+  assert.equal(installer.phase, "unknown");
+  assert.match(installer.message, /verify Current plugin/);
+});
+
+test("an in-flight handoff cannot create duplicate prompts or be cancelled before acknowledgement", async t => {
+  let finish;
+  let installs = 0;
+  const installer = new PluginInstaller(async () => { installs++; await new Promise(resolve => { finish = resolve; }); }, () => {});
+  t.after(() => installer.dispose());
+  const first = installer.open(artifact);
+  await Promise.resolve();
+  await assert.rejects(installer.open(artifact), /current installer request/);
+  await assert.rejects(installer.cancel(async () => assert.fail("deleted in-flight ZIP")), /current installer request/);
+  installer.prompt(artifact.name, artifact.version, "request-A", artifact.sha256);
+  finish();
+  await first;
+  assert.equal(installs, 1);
+});
+
+test("missing prompt acknowledgement preserves the guard and requires restart", async t => {
+  const installer = new PluginInstaller(async () => {}, () => {});
+  t.after(() => installer.dispose());
+  await assert.rejects(installer.open(artifact), /did not acknowledge/);
+  assert.equal(installer.phase, "unknown");
+  installer.prompt(artifact.name, artifact.version, "late-request", artifact.sha256);
+  assert.equal(installer.phase, "unknown");
+});
 
 
 test("arguments-only launch options receive Steam's command placeholder", () => {

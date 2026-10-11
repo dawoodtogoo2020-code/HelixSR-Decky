@@ -1,6 +1,7 @@
 """Offline regressions for plugin updates and optional awareness metadata."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import stat
 import sys
@@ -19,8 +20,8 @@ import awareness
 import plugin_updates
 
 
-WORK = PLUGIN.parent.parent / "work"
-WORK.mkdir(exist_ok=True)
+WORK = Path(os.environ.get('HELIXSR_TEST_TMP', PLUGIN.parent.parent / 'work'))
+WORK.mkdir(parents=True, exist_ok=True)
 
 
 class FakeResponse:
@@ -234,9 +235,11 @@ class StagingTests(PluginUpdateFixtures):
                 'plugin_updates.urllib.request.urlopen', side_effect=(self.metadata_response(item),
                     FakeResponse(payload, item['assets'][0]['browser_download_url']))):
             updater.prepare()
-        self.assertEqual(corrupt.read_bytes(), payload)
-        updater.cancel()
         self.assertFalse(corrupt.exists())
+        artifact = updater.pending
+        self.assertEqual(artifact.read_bytes(), payload)
+        updater.cancel()
+        self.assertFalse(artifact.exists())
 
     def test_completed_owned_package_is_cleaned_but_other_files_are_preserved(self):
         payload = archive_bytes(self.root, version='0.1.0')
@@ -276,19 +279,41 @@ class StagingTests(PluginUpdateFixtures):
         self.assertEqual(prepared["install_type"], 2)
         self.assertTrue(updater.status()["pending"])
 
-        # A plugin reload loses in-memory pending state. Fresh metadata may
-        # safely recover the exact cached artifact without another download.
+        # Reload invalidates orphaned native prompts; a new attempt gets a new
+        # path so an old confirmation can never install the new attempt's ZIP.
         reloaded = self.updater()
+        reloaded.cleanup_installed()
+        self.assertFalse(artifact.exists())
         with patch("plugin_updates.shutil.disk_usage", return_value=SimpleNamespace(free=1 << 30)), patch(
                 "plugin_updates.urllib.request.urlopen",
-                return_value=self.metadata_response(item)) as request:
+                side_effect=(self.metadata_response(item), FakeResponse(payload, download_url))) as request:
             cached = reloaded.prepare()
-        self.assertEqual(cached, prepared)
-        request.assert_called_once()
+        self.assertNotEqual(cached['artifact'], prepared['artifact'])
+        self.assertEqual(cached['sha256'], prepared['sha256'])
+        self.assertEqual(request.call_count, 2)
 
         reloaded.cancel()
         self.assertFalse(artifact.exists())
         self.assertFalse(reloaded.status()["pending"])
+
+    def test_resume_keeps_exact_revision_despite_new_feed_and_never_downloads(self):
+        payload = archive_bytes(self.root)
+        digest = hashlib.sha256(payload).hexdigest()
+        item = release('0.1.1', len(payload), digest)
+        updater = self.updater()
+        with patch('plugin_updates.shutil.disk_usage', return_value=SimpleNamespace(free=1 << 30)), patch(
+                'plugin_updates.urllib.request.urlopen', side_effect=(self.metadata_response(item),
+                    FakeResponse(payload, item['assets'][0]['browser_download_url']))):
+            prepared = updater.prepare()
+        updater.release = plugin_updates.release_info(release('0.1.2'))
+        with patch('plugin_updates.urllib.request.urlopen', side_effect=AssertionError('resume fetched network')):
+            self.assertEqual(updater.resume(), prepared)
+        updater.pending.write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'changed or is missing'):
+            updater.resume()
+        updater.cancel()
+        with self.assertRaisesRegex(ValueError, 'No downloaded'):
+            updater.resume()
 
     def test_declared_size_match_with_wrong_hash_is_rejected(self):
         payload = archive_bytes(self.root)

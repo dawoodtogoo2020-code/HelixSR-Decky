@@ -457,32 +457,27 @@ class ReleaseTests(Fixtures):
         response.__enter__.return_value = response
         error = manager.urllib.error.HTTPError(manager.API, 403, 'Fixture quota', {}, None)
         with patch('manager.https_context', return_value=None), \
-                patch('manager.urllib.request.urlopen', side_effect=[error, response]) as requests:
+                patch('manager.urllib.request.urlopen', side_effect=[error]) as requests:
             release = self.m.check_update(force=True)
-        self.assertEqual(requests.call_count, 2)
+        self.assertEqual(requests.call_count, 1)
         first = requests.call_args_list[0].args[0]
-        second = requests.call_args_list[1].args[0]
         self.assertEqual(first.full_url, manager.API)
-        self.assertEqual(second.full_url, f'https://github.com/{manager.REPO}/releases/latest')
-        self.assertEqual(second.get_method(), 'HEAD')
         return release
 
-    def test_api_quota_official_pinned_redirect_clears_error(self):
+    def test_api_quota_never_invents_metadata_from_a_latest_tag_redirect(self):
         page = f'https://github.com/{manager.REPO}/releases/tag/v1.7.0'
         release = self.update_with_redirect(page)
-        self.assertEqual(release['version'], '1.7.0')
-        self.assertEqual(release['sha256'], manager.PINNED_RELEASES['1.7.0'])
-        self.assertEqual(release['size'], 26037871)
-        self.assertIsNone(release['error'])
+        self.assertFalse(release.get('version'))
+        self.assertFalse(release.get('sha256'))
+        self.assertIn('HTTP 403', release['error'])
         self.assertEqual(manager.load_json(self.m.settings / 'release.json'), release)
 
-    def test_api_quota_cached_old_error_can_refresh_pinned_release(self):
+    def test_api_quota_cannot_resurrect_obsolete_cached_metadata(self):
         manager.atomic_json(self.m.settings / 'release.json',
                             dict(version='1.6.0', sha256='a' * 64, checked_at=0, error='old cached failure'))
         release = self.update_with_redirect(f'https://github.com/{manager.REPO}/releases/tag/v1.7.0')
-        self.assertEqual(release['version'], '1.7.0')
-        self.assertEqual(release['sha256'], manager.PINNED_RELEASES['1.7.0'])
-        self.assertIsNone(release['error'])
+        self.assertFalse(release.get('version'))
+        self.assertIn('HTTP 403', release['error'])
 
     def test_unknown_redirect_never_creates_unverified_release(self):
         for page in (f'https://github.com/{manager.REPO}/releases/tag/v9.0.0',
@@ -620,6 +615,56 @@ class AwarenessTests(Fixtures):
 
 
 class RecoveryAndOptiScalerRegressionTests(Fixtures):
+    def test_new_upstream_fg_dependency_updates_old_records_without_enabling_fg(self):
+        self.optiscaler_fixture()
+        self.action('install')
+        package = self.m.package(self.game)[1]
+        write(package / 'amd-fsr' / manager.AMD_FG, b'fixture AMD FG provider')
+        with (package / 'optiscaler/OptiScaler.ini').open('a') as f:
+            f.write('FfxDx12FGPath=auto\n')
+        write(self.root / 'GameUserSettings.ini', '[Graphics]\nFrameGeneration=false\n')
+        self.action('update')
+        live = self.root / 'HelixSR' / manager.AMD_FG
+        rel = str(live.relative_to(self.root))
+        self.assertEqual(live.read_bytes(), b'fixture AMD FG provider')
+        self.assertIsNone(self.m.record(self.game)['baseline'][rel])
+        self.assertIn('FfxDx12FGPath=Z:', (self.root / 'OptiScaler.ini').read_text())
+        self.assertIn('FrameGeneration=false', (self.root / 'GameUserSettings.ini').read_text())
+        self.action('disable')
+        self.assertFalse(live.exists())
+        self.action('enable')
+        self.assertTrue(live.exists())
+        self.action('remove')
+        self.assertFalse(live.exists())
+        self.assertIn('FrameGeneration=false', (self.root / 'GameUserSettings.ini').read_text())
+
+    def test_new_dependency_never_overwrites_unmanaged_fg_file(self):
+        self.optiscaler_fixture()
+        self.action('install')
+        package = self.m.package(self.game)[1]
+        write(package / 'amd-fsr' / manager.AMD_FG, b'new upstream FG')
+        live = write(self.root / 'HelixSR' / manager.AMD_FG, b'user FG file')
+        with self.assertRaisesRegex(ValueError, 'unmanaged file'):
+            self.m.preview(self.game['id'], 'update')
+        self.assertEqual(live.read_bytes(), b'user FG file')
+        self.action('disable')
+        self.assertEqual(live.read_bytes(), b'user FG file')
+        self.action('remove')
+        self.assertEqual(live.read_bytes(), b'user FG file')
+
+    def test_latest_game_fingerprint_stays_stable_when_preparation_adds_fg_payload(self):
+        self.optiscaler_fixture()
+        for managed in (False, True):
+            with self.subTest(managed=managed):
+                if managed:
+                    self.action('install')
+                before = self.m.fingerprint(self.game, self.m.assess(self.game), include_package=False)
+                package = self.m.package(self.game)[1]
+                fg = write(package / 'amd-fsr' / manager.AMD_FG, b'new provider prepared later')
+                after = self.m.fingerprint(self.game, self.m.assess(self.game), include_package=False)
+                self.assertEqual(before, after)
+                fg.unlink()
+
     def optiscaler_fixture(self):
         self.native.unlink()
         write(self.root / 'nvngx_dlss.dll', pe())

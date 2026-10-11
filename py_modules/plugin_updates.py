@@ -112,6 +112,7 @@ class PluginUpdates:
         semver(self.current)
         self.lock = threading.RLock()
         self.pending = None
+        self.pending_release = None
         try:
             saved = json.loads(self.path.read_text())
         except (OSError, ValueError):
@@ -191,27 +192,30 @@ class PluginUpdates:
             self.stage.mkdir(parents=True, exist_ok=True)
             if shutil.disk_usage(self.stage).free < release['size'] * 2 + (16 << 20):
                 raise ValueError('Not enough space to stage the plugin update')
-            destination = self.stage / f"{FOLDER}-{release['version']}-{release['sha256']}.zip"
+            cached = self.stage / f"{FOLDER}-{release['version']}-{release['sha256']}.zip"
+            destination = self.stage / f"{FOLDER}-{release['version']}-{release['sha256']}-{uuid.uuid4().hex}.zip"
             if destination.is_symlink():
                 raise ValueError('Plugin update artifact is a symlink')
             # A reload or dismissed installer can leave a verified ZIP behind.
             # Reuse it only after checking the fresh release metadata and ZIP.
-            if destination.exists():
-                if not destination.is_file():
+            if cached.exists() or cached.is_symlink():
+                if cached.is_symlink() or not cached.is_file():
                     raise ValueError('Plugin update artifact is not a regular file')
-                valid = (destination.stat().st_size == release['size']
-                         and hashlib.sha256(destination.read_bytes()).hexdigest() == release['sha256'])
+                valid = (cached.stat().st_size == release['size']
+                         and hashlib.sha256(cached.read_bytes()).hexdigest() == release['sha256'])
                 if valid:
                     try:
-                        validate_zip(destination, release['version'])
+                        validate_zip(cached, release['version'])
                     except (ValueError, zipfile.BadZipFile):
                         valid = False
                 if valid:
+                    os.replace(cached, destination)
                     self.pending = destination
+                    self.pending_release = release
                     return self.artifact(release)
                 # The exact private staging filename belongs to this updater.
                 # A failed cached artifact must not permanently block retries.
-                destination.unlink()
+                cached.unlink()
             temporary = destination.with_suffix('.download-' + uuid.uuid4().hex)
             try:
                 request = urllib.request.Request(release['url'], headers={'User-Agent': f'HelixSR-Decky/{self.current}'})
@@ -234,6 +238,7 @@ class PluginUpdates:
                 validate_zip(temporary, release['version'])
                 os.replace(temporary, destination)
                 self.pending = destination
+                self.pending_release = release
                 # Decky's local artifact protocol uses a raw absolute filesystem path.
                 return self.artifact(release)
             finally:
@@ -243,17 +248,35 @@ class PluginUpdates:
         return dict(artifact='file://' + str(self.pending), name=PLUGIN_NAME,
                     version=release['version'], sha256=release['sha256'], install_type=2)
 
+    def resume(self):
+        """Reopen the exact downloaded update, independent of later feed changes."""
+        with self.lock:
+            if not self.pending or not self.pending_release:
+                raise ValueError('No downloaded plugin update; check for updates first')
+            release = self.pending_release
+            if (self.pending.is_symlink() or not self.pending.is_file()
+                    or self.pending.stat().st_size != release['size']
+                    or hashlib.sha256(self.pending.read_bytes()).hexdigest() != release['sha256']):
+                raise ValueError('Downloaded update changed or is missing. Cancel it and download again')
+            validate_zip(self.pending, release['version'])
+            return self.artifact(release)
+
     def cleanup_installed(self):
-        """Remove only verified updater packages already installed on this device."""
+        """Invalidate orphaned prompts on backend startup, and clean owned ZIPs.
+
+        Decky reads the ZIP into memory before unloading the old backend. A new
+        backend can remove these files without interrupting that installation.
+        Unconfirmed requests must never become usable again during game work.
+        """
         if not self.stage.is_dir() or self.stage.is_symlink():
             return
         for path in self.stage.iterdir():
-            match = re.fullmatch(r'HelixSR-Decky-(\d+\.\d+\.\d+)-([0-9a-f]{64})\.zip', path.name)
+            match = re.fullmatch(r'HelixSR-Decky-(\d+\.\d+\.\d+)-([0-9a-f]{64})(?:-[0-9a-f]{32})?\.zip', path.name)
             if not match or path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_ARCHIVE:
                 continue
             version, digest = match.groups()
             try:
-                if semver(version) <= semver(self.current) and hashlib.sha256(path.read_bytes()).hexdigest() == digest:
+                if hashlib.sha256(path.read_bytes()).hexdigest() == digest:
                     validate_zip(path, version)
                     path.unlink()
             except (OSError, ValueError, zipfile.BadZipFile):
@@ -265,4 +288,5 @@ class PluginUpdates:
                 # An unconfirmed stale Decky prompt can no longer read this ZIP.
                 self.pending.unlink(missing_ok=True)
                 self.pending = None
+                self.pending_release = None
             return self.status()

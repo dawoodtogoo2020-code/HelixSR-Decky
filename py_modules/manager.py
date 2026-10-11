@@ -1,6 +1,7 @@
 """HelixSR package and per-game transactions, run as the Deck user."""
 import contextlib
 import hashlib
+import http.client
 import importlib.util
 import json
 import os
@@ -26,15 +27,38 @@ REPO = 'lonewolf0622/HelixSR'
 API = f'https://api.github.com/repos/{REPO}/releases/latest'
 DLL = 'amd_fidelityfx_dx12.dll'
 NETWORK = ('helixsr_weights.bin', 'helixsr_kernels.pak')
+AMD_FG = 'amd_fidelityfx_framegeneration_dx12.dll'
 INPUTS = {'nvngx_dlss.dll': 'DLSS', 'libxess.dll': 'XeSS',
           'ffx_fsr2_api_x64.dll': 'FSR 2', 'ffx_fsr2_api_dx12_x64.dll': 'FSR 2'}
 ANTI = ('easyanticheat', 'battleye', 'beclient', 'equ8', 'faceit', 'vanguard')
 LICENSE_REV = 'helixsr-local-nvidia-network-2026-10'
-PINNED_RELEASES = {'1.7.0': 'cf2b4d15f60c5b793b652303fb7e16bd2fcb7029d89565ab4bea96c3906f2801'}
+RELEASE_POLICY = 2
+
+
+def load_release(settings):
+    try:
+        value = load_json(Path(settings) / 'release.json')
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def validate_release(release):
+    if not isinstance(release, dict):
+        raise ValueError('Invalid upstream release metadata')
+    tag = 'v' + release.get('version', '') if isinstance(release.get('version'), str) else ''
+    version(tag)
+    digest, size = release.get('sha256'), release.get('size')
+    if (not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{64}', digest)
+            or type(size) is not int or not 0 < size <= 512 << 20
+            or release.get('url') != f'https://github.com/{REPO}/releases/download/{tag}/HelixSR-{tag[1:]}.zip'
+            or release.get('page') != f'https://github.com/{REPO}/releases/tag/{tag}'):
+        raise ValueError('Invalid official release URL, size or SHA256 digest')
+    return release
 
 
 def license_key(release):
-    if not release.get('version') or not release.get('sha256'):
+    if not isinstance(release, dict) or not release.get('version') or not release.get('sha256'):
         return None
     return {'terms': LICENSE_REV, 'version': release['version'], 'release_sha256': release['sha256']}
 
@@ -297,8 +321,9 @@ class Manager:
         games = []
         for game in entries:
             games.append(self.assess_safe(game, detailed=False))
-        return dict(games=games, warnings=warnings, release=load_json(self.settings / 'release.json'),
-                    license_accepted=bool(self.cfg.get('license')) and self.cfg.get('license') == license_key(load_json(self.settings / 'release.json')),
+        release = load_release(self.settings)
+        return dict(games=games, warnings=warnings, release=release,
+                    license_accepted=bool(self.cfg.get('license')) and self.cfg.get('license') == license_key(release),
                     jobs=list(self.jobs.values()))
 
     def import_launcher(self, launcher):
@@ -464,7 +489,10 @@ class Manager:
         return self.refresh()
 
     def accept_license(self, accepted):
-        key = license_key(self.check_update()) if accepted else None
+        release = self.check_update() if accepted else {}
+        if accepted and release.get('error'):
+            raise ValueError(release['error'])
+        key = license_key(release) if accepted else None
         if accepted and not key:
             raise ValueError('Check upstream release metadata before accepting preparation terms')
         self.cfg['license'] = key
@@ -472,56 +500,64 @@ class Manager:
         return bool(accepted)
 
     def check_update(self, force=False):
-        old = load_json(self.settings / 'release.json')
-        if not force and old and time.time() - old.get('checked_at', 0) < 6 * 3600:
+        old = load_release(self.settings)
+        valid_cache = False
+        try:
+            validate_release(old)
+            valid_cache = old.get('metadata_policy') == RELEASE_POLICY
+        except (ValueError, TypeError):
+            pass
+        if (not force and valid_cache and not old.get('error')
+                and isinstance(old.get('checked_at'), (int, float))
+                and time.time() - old['checked_at'] < 6 * 3600):
             return old
         headers = {'User-Agent': 'HelixSR-Decky/0.1', 'Accept': 'application/vnd.github+json'}
-        if old.get('etag'):
+        if valid_cache and isinstance(old.get('etag'), str):
             headers['If-None-Match'] = old['etag']
         try:
             with urllib.request.urlopen(urllib.request.Request(API, headers=headers), timeout=20, context=https_context()) as response:
-                data = json.loads(response.read(2 << 20))
+                if response.geturl() != API:
+                    raise ValueError('Unexpected upstream metadata redirect')
+                raw = response.read((2 << 20) + 1)
+                if len(raw) > 2 << 20:
+                    raise ValueError('Upstream metadata is too large')
+                data = json.loads(raw)
+                if not isinstance(data, dict) or data.get('draft') or data.get('prerelease'):
+                    raise ValueError('Expected an official stable HelixSR release')
                 tag = data['tag_name']
+                if not isinstance(tag, str):
+                    raise ValueError('Invalid release tag')
                 version(tag)
-                asset = next((x for x in data['assets'] if x['name'] == f'HelixSR-{tag.lstrip("v")}.zip'), None)
-                if not asset or not re.fullmatch(r'sha256:[a-f0-9]{64}', asset.get('digest') or ''):
+                release_version = tag.removeprefix('v')
+                if not isinstance(data.get('assets'), list):
+                    raise ValueError('Invalid upstream assets')
+                asset = next((x for x in data['assets'] if isinstance(x, dict)
+                              and x.get('name') == f'HelixSR-{release_version}.zip'), None)
+                if (not asset or not isinstance(asset.get('digest'), str)
+                        or not re.fullmatch(r'sha256:[a-fA-F0-9]{64}', asset['digest'])):
                     raise ValueError('Official release lacks a usable SHA256 asset digest')
-                url = asset['browser_download_url']
-                if not url.startswith(f'https://github.com/{REPO}/releases/download/{tag}/'):
-                    raise ValueError('Unexpected release URL')
-                current = dict(version=tag.lstrip('v'), url=url, sha256=asset['digest'].split(':')[1],
-                               size=int(asset['size']), checked_at=time.time(), etag=response.headers.get('ETag'),
-                               page=data['html_url'], error=None)
-                if current['size'] > 512 << 20:
-                    raise ValueError('Release archive is too large')
-                if current['version'] in PINNED_RELEASES and current['sha256'] != PINNED_RELEASES[current['version']]:
-                    raise ValueError('Release digest differs from the independently pinned version')
+                current = dict(version=release_version, url=asset['browser_download_url'],
+                               sha256=asset['digest'][7:].lower(), size=asset['size'],
+                               checked_at=time.time(), etag=response.headers.get('ETag'),
+                               page=data['html_url'], error=None, metadata_policy=RELEASE_POLICY,
+                               asset_id=asset.get('id'), asset_updated_at=asset.get('updated_at'))
+                validate_release(current)
                 atomic_json(self.settings / 'release.json', current)
                 return current
         except urllib.error.HTTPError as e:
-            if e.code == 304 and old:
+            if e.code == 304 and valid_cache:
                 old['checked_at'], old['error'] = time.time(), None
+                old.pop('failed_at', None)
+                atomic_json(self.settings / 'release.json', old)
+                return old
             else:
-                old['error'] = f'GitHub returned HTTP {e.code}; cached metadata retained'
-        except (OSError, ValueError, StopIteration, KeyError) as e:
+                old['error'] = f'GitHub returned HTTP {e.code}; reconnect or retry later to check the latest HelixSR'
+        except (OSError, ValueError, TypeError, KeyError, http.client.HTTPException) as e:
             old['error'] = str(e)
-        if old.get('error'):
-            # Public API quotas can be shared by many Decks. A known pinned release can
-            # still be checked through GitHub's official latest-release redirect.
-            try:
-                latest = f'https://github.com/{REPO}/releases/latest'
-                with urllib.request.urlopen(urllib.request.Request(latest, method='HEAD'),
-                                            timeout=20, context=https_context()) as response:
-                    page = response.url
-                if page == f'https://github.com/{REPO}/releases/tag/v1.7.0':
-                    current = dict(version='1.7.0', sha256=PINNED_RELEASES['1.7.0'], size=26037871,
-                                   url=f'https://github.com/{REPO}/releases/download/v1.7.0/HelixSR-1.7.0.zip',
-                                   page=page, checked_at=time.time(), error=None,
-                                   metadata_source='official redirect and independently pinned release')
-                    atomic_json(self.settings / 'release.json', current)
-                    return current
-            except (OSError, ValueError):
-                pass
+        # A latest-tag redirect cannot prove which same-version ZIP is current.
+        # Keep the error visible instead of inventing an obsolete SHA or size.
+        if not valid_cache:
+            old = {'error': old['error']}
         old['failed_at'] = time.time()
         atomic_json(self.settings / 'release.json', old)
         return old
@@ -541,7 +577,7 @@ class Manager:
             self.previews[token] = dict(game=gid, action='latest', expires=time.time()+120,
                                        fingerprint=self.fingerprint(game, data, include_package=False))
             return dict(token=token, name=game['name'], action='latest', route=data['route'],
-                        files=self.planned_paths(game, data, 'install'),
+                        files=self.planned_paths(game, data, 'latest'),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
                         warning='Download required files, prepare the local network and install or update HelixSR for this game. Existing native HelixSR is imported first. Close the game. Frame generation is preserved.')
 
@@ -561,7 +597,7 @@ class Manager:
             game = self.get_game(gid)
             if kind not in ('prepare', 'install_latest'):
                 raise ValueError('Unsupported background operation')
-            release = load_json(self.settings / 'release.json')
+            release = load_release(self.settings)
             if not self.cfg.get('license') or self.cfg.get('license') != license_key(release):
                 raise ValueError('Accept local network preparation terms first')
             self.cancel.clear()
@@ -612,8 +648,8 @@ class Manager:
     def prepare(self, game, job):
         if os.name == 'posix' and os.geteuid() == 0:
             raise ValueError('Refusing preparation as root')
-        release = self.check_update()
-        if not release.get('version'):
+        release = self.check_update(True)
+        if release.get('error') or not release.get('version'):
             raise ValueError(release.get('error', 'Check upstream updates first'))
         if self.cfg.get('license') != license_key(release):
             raise ValueError('Upstream release changed; review and accept its terms before preparation')
@@ -640,11 +676,11 @@ class Manager:
                     if not chunk:
                         break
                     size += len(chunk)
-                    if size > release['size'] + 1024:
+                    if size > release['size']:
                         raise ValueError('Release exceeds advertised size')
                     out.write(chunk)
-            if sha(archive) != release['sha256']:
-                raise ValueError('Release SHA256 mismatch')
+            if size != release['size'] or sha(archive) != release['sha256']:
+                raise ValueError('Release SHA256 or size mismatch; upstream may have replaced the archive. Check for updates and retry')
             safe_extract(archive, work / 'unpacked')
             archive.unlink()
             package = work / 'unpacked' / ('HelixSR-' + release['version'])
@@ -709,10 +745,13 @@ class Manager:
                 # A changed cache can be rebuilt without overwriting the previous owned path.
                 final = final.with_name(final.name + '-' + job['id'][:8])
             os.replace(package, final)
-            record = dict(version=release['version'], path=str(final), release_sha256=release['sha256'],
-                          files={n: sha(final / n) for n in NETWORK + (DLL, 'optiscaler/OptiScaler.dll',
+            payloads = NETWORK + (DLL, 'optiscaler/OptiScaler.dll',
                               'optiscaler/OptiScaler.ini', 'optiscaler/fakenvapi.dll', 'optiscaler/fakenvapi.ini',
-                              'amd-fsr/amd_fidelityfx_upscaler_dx12.dll')}, prepared_at=time.time())
+                              'amd-fsr/amd_fidelityfx_upscaler_dx12.dll')
+            if (final / 'amd-fsr' / AMD_FG).is_file():
+                payloads += ('amd-fsr/' + AMD_FG,)
+            record = dict(version=release['version'], path=str(final), release_sha256=release['sha256'],
+                          files={n: sha(final / n) for n in payloads}, prepared_at=time.time())
             self.cfg.setdefault('packages', {})[str(final)] = record
             self.save()
             atomic_json(companion / 'records/package.json', record)
@@ -778,7 +817,14 @@ class Manager:
                         expires_at=time.time()+120)
 
     def fingerprint(self, game, data, include_package=True):
-        paths = self.planned_paths(game, data, 'install')
+        # Observe game drift separately from an install's conflict checks.
+        # Potential new dependencies must be stable before/after preparation.
+        rec = self.record(game)
+        paths = list(rec['baseline']) if rec else self.planned_paths(game, data, 'observe')
+        if data['route'] == 'optiscaler':
+            fg = str((Path(data['target']) / 'HelixSR' / AMD_FG).relative_to(Path(game['folder'])))
+            if fg not in paths:
+                paths.append(fg)
         files = {}
         for rel in paths:
             p = checked_path(Path(game['folder']), rel)
@@ -793,7 +839,17 @@ class Manager:
     def planned_paths(self, game, data, action):
         rec, root = self.record(game), Path(game['folder'])
         if rec:
-            return list(rec['baseline'])
+            paths = list(rec['baseline'])
+            package = self.package(game)
+            if (action in ('install', 'update', 'enable', 'latest') and data['route'] == 'optiscaler'
+                    and (action == 'latest' or package and (package[1] / 'amd-fsr' / AMD_FG).is_file())):
+                path = str((Path(data['target']) / 'HelixSR' / AMD_FG).relative_to(root))
+                if path not in paths:
+                    target = checked_path(root, path)
+                    if target.exists() or target.is_symlink():
+                        raise ValueError('New upstream file conflicts with an unmanaged file: ' + path)
+                    paths.append(path)
+            return paths
         if data['route'] == 'direct':
             paths = []
             for target in map(Path, data['targets']):
@@ -807,6 +863,9 @@ class Manager:
                      'HelixSR/helixsr.dll', 'HelixSR/helixsr_upscaler.dll',
                      'HelixSR/amd_fidelityfx_upscaler_dx12.amd.dll', 'HelixSR/helixsr-install.json']
             names += ['HelixSR/' + n for n in NETWORK]
+            package = self.package(game)
+            if action == 'latest' or package and (package[1] / 'amd-fsr' / AMD_FG).is_file():
+                names.append('HelixSR/' + AMD_FG)
             return [str((target / n).relative_to(root)) for n in names]
         return []
 
@@ -892,6 +951,10 @@ class Manager:
                 if not package:
                     raise ValueError('Prepared package unavailable')
                 previous['enabled'], previous['version'] = True, package[2]['version']
+                # Extend older managed records for newly introduced dependencies.
+                # Their paths were conflict-checked, snapshotted and journaled above.
+                for rel in paths:
+                    previous['baseline'].setdefault(rel, before[rel])
                 self.install_payload(game, data, previous, package[1])
             previous['current'] = {rel: sha(root / rel) if (root / rel).is_file() else None for rel in paths}
             previous['updated_at'], previous['game_build'] = time.time(), game.get('build')
@@ -1056,9 +1119,13 @@ class Manager:
             for name in NETWORK:
                 self.copy_atomic(package / name, target / 'HelixSR' / name)
             source = text(package / 'optiscaler/OptiScaler.ini')
-            for key, value in [('Dx12Upscaler', 'fsr31'),
+            settings = [('Dx12Upscaler', 'fsr31'),
                                ('FfxDx12Path', str(target / 'HelixSR/helixsr.dll').replace('/', '\\')),
-                               ('FfxDx12SRPath', str(target / 'HelixSR/helixsr_upscaler.dll').replace('/', '\\'))]:
+                               ('FfxDx12SRPath', str(target / 'HelixSR/helixsr_upscaler.dll').replace('/', '\\'))]
+            if (package / 'amd-fsr' / AMD_FG).is_file():
+                self.copy_atomic(package / 'amd-fsr' / AMD_FG, target / 'HelixSR' / AMD_FG)
+                settings.append(('FfxDx12FGPath', str(target / 'HelixSR' / AMD_FG).replace('/', '\\')))
+            for key, value in settings:
                 if key.startswith('Ffx'):
                     value = 'Z:' + value
                 pattern = r'(?im)^\s*' + re.escape(key) + r'\s*=.*$'

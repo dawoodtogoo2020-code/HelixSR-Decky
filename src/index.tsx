@@ -4,17 +4,18 @@ import { callable, definePlugin, openFilePicker, toaster } from "@decky/api";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { FaAdjust } from "react-icons/fa";
 import { proxyOptions } from "./launchOptions";
+import { PluginInstaller, PluginArtifact } from "./pluginInstaller";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
-  addEventListener?: (event: string, listener: (name: string) => void) => unknown;
-  removeEventListener?: (event: string, listener: (name: string) => void) => void } | undefined;
+  addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
+  removeEventListener?: (event: string, listener: (...args: any[]) => void) => void } | undefined;
 type PluginUpdate = { current_version: string; latest_version: string | null; update_available: boolean;
   auto_check: boolean; checked_at: number; attempted_at: number; error: string; page: string; pending: boolean };
-type PluginArtifact = { artifact: string; name: string; version: string; sha256: string; install_type: number };
 const pluginUpdateStatus = callable<[], PluginUpdate>("plugin_update_status");
 const checkPluginUpdates = callable<[boolean], PluginUpdate>("check_plugin_updates");
 const setPluginAutoCheck = callable<[boolean], PluginUpdate>("set_plugin_auto_check");
 const preparePluginUpdate = callable<[], PluginArtifact>("prepare_plugin_update");
+const resumePluginUpdate = callable<[], PluginArtifact>("resume_plugin_update");
 const cancelPluginUpdate = callable<[], PluginUpdate>("cancel_plugin_update");
 let latestPluginStatus: PluginUpdate | undefined;
 let pluginUpdateTimer: ReturnType<typeof setInterval> | undefined;
@@ -86,19 +87,22 @@ function chooseGame(id: string) {
 }
 // Steam can unmount the quick-access panel when a dialog opens. Keep the lock across mounts.
 let interactionBusy = false;
-let nativePluginUpdateStarted = false;
 let dialogShowing = false;
 let interactionAfter = 0;
 const interactionListeners = new Set<() => void>();
+const pluginInstaller = new PluginInstaller(async (route, ...args) => {
+  if (typeof DeckyBackend === "undefined" || typeof DeckyBackend.callable !== "function")
+    throw new Error("Decky's installer is unavailable. Install the release ZIP through Decky Settings → Developer.");
+  return DeckyBackend.callable<unknown[], unknown>(route)(...args);
+}, () => interactionListeners.forEach(listener => listener()));
+function nativeUpdatePrompt(name: string, version: string, requestId: string, hash: string) {
+  pluginInstaller.prompt(name, version, requestId, hash);
+}
 function nativeUpdateStarted(name: string) {
-  if (name !== "HelixSR Decky") return;
-  nativePluginUpdateStarted = true;
-  interactionListeners.forEach(listener => listener());
+  pluginInstaller.started(name);
 }
 function nativeUpdateFinished(name: string) {
-  if (name !== "HelixSR Decky") return;
-  nativePluginUpdateStarted = false;
-  interactionListeners.forEach(listener => listener());
+  pluginInstaller.finished(name);
 }
 function finishInteraction() {
   interactionBusy = false; dialogShowing = false;
@@ -190,6 +194,7 @@ function Content() {
   const [importMessage, setImportMessage] = useState(launcherImportMessage);
   const [modalOpen, setModalOpen] = useState(interactionBusy);
   const [pluginUpdate, setPluginUpdate] = useState(latestPluginStatus);
+  const [pluginInstallMessage, setPluginInstallMessage] = useState(pluginInstaller.message);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
 
@@ -201,7 +206,7 @@ function Content() {
   }, []);
 
   useEffect(() => {
-    const changed = () => setModalOpen(interactionBusy || nativePluginUpdateStarted);
+    const changed = () => { setModalOpen(interactionBusy || pluginInstaller.locked); setPluginInstallMessage(pluginInstaller.message); };
     interactionListeners.add(changed); changed();
     return () => { interactionListeners.delete(changed); };
   }, []);
@@ -286,7 +291,7 @@ function Content() {
   async function installOrUpdate() {
     if (!game) return;
     const currentRelease = await run(() => checkUpdates(true));
-    if (!currentRelease?.version) return;
+    if (!currentRelease?.version || currentRelease.error) { setError(currentRelease?.error || "Could not check the latest HelixSR release. Retry Check for updates."); return; }
     setData(d => d ? { ...d, release: currentRelease } : d);
     const p = await run(() => previewLatest(game.id, dx12));
     if (!p) return;
@@ -348,22 +353,22 @@ function Content() {
         await refresh();
       })} />);
   }
-  async function updatePlugin() {
-    if (typeof DeckyBackend === "undefined" || typeof DeckyBackend.callable !== "function") {
+  async function updatePlugin(resume = false) {
+    if (typeof DeckyBackend === "undefined" || typeof DeckyBackend.callable !== "function" || !DeckyBackend.addEventListener || !DeckyBackend.removeEventListener) {
       setError("This Decky version cannot open the plugin installer. Use Decky Settings → Developer → Install plugin from URL with the release ZIP.");
       return;
     }
     await run(async () => {
-      const prepared = await preparePluginUpdate();
-      publishPluginStatus(await pluginUpdateStatus());
-      try {
-        await DeckyBackend.callable<[string, string, string, string, number], void>("utilities/install_plugin")(
-          prepared.artifact, prepared.name, prepared.version, prepared.sha256, prepared.install_type);
-        toaster.toast({ title: "Review plugin update in Decky", body: "Confirm Decky's installer to finish. If you cancel it, choose Continue without updating below.", duration: 7000 });
-      } catch (e) {
-        publishPluginStatus(await cancelPluginUpdate());
-        throw e;
-      }
+      const prepared = await (resume ? resumePluginUpdate() : preparePluginUpdate());
+      // Informational status failures must never prevent the native handoff.
+      pollPluginStatus();
+      await pluginInstaller.open(prepared);
+      toaster.toast({ title: "Plugin downloaded, confirmation required", body: "Press Update in Decky's confirmation. Downloading alone does not install the plugin.", duration: 10000 });
+    });
+  }
+  async function cancelDownloadedPlugin() {
+    await run(async () => {
+      await pluginInstaller.cancel(async () => publishPluginStatus(await cancelPluginUpdate()));
     });
   }
   const running = jobs.some(x => x.state === "running");
@@ -449,7 +454,7 @@ function Content() {
       <PanelSectionRow><div className="helix-card" style={{ ...infoStyle, borderLeftColor: pluginUpdate?.update_available ? "#ad8aff" : "#55cd92" }}>
         Current plugin: {pluginUpdate?.current_version || "loading…"}{"\n"}
         Latest plugin: {pluginUpdate?.latest_version || "checking required"}{"\n"}
-        {pluginUpdate?.error ? "Could not check for updates" : pluginUpdate?.pending ? "Waiting for Decky's update confirmation" : pluginUpdate?.update_available ? "Plugin update available" : pluginUpdate?.checked_at ? "Plugin is up to date" : pluginUpdate?.auto_check === false ? "Automatic checks are off" : "Automatic check will run shortly"}
+        {pluginUpdate?.error ? "Could not check for updates" : pluginUpdate?.pending ? "Downloaded. Confirm Update in Decky to install." : pluginUpdate?.update_available ? "Plugin update available" : pluginUpdate?.checked_at ? "Plugin is up to date" : pluginUpdate?.auto_check === false ? "Automatic checks are off" : "Automatic check will run shortly"}
       </div></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen || !!pluginUpdate?.pending}
         onClick={() => void run(() => checkPluginUpdates(true)).then(r => { if (r) publishPluginStatus(r); })}>Check plugin updates</ButtonItem></PanelSectionRow>
@@ -457,10 +462,12 @@ function Content() {
         checked={pluginUpdate?.auto_check ?? true} disabled={busy || modalOpen || !!pluginUpdate?.pending}
         onChange={enabled => void run(() => setPluginAutoCheck(enabled)).then(r => { if (r) publishPluginStatus(r); })} /></PanelSectionRow>
       {pluginUpdate?.update_available && !pluginUpdate.pending && <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below"
-        disabled={disabled} onClick={() => void interact(updatePlugin)}>Update Decky plugin</ButtonItem></PanelSectionRow></div>}
+        disabled={disabled} onClick={() => void interact(() => updatePlugin())}>Download plugin update</ButtonItem></PanelSectionRow></div>}
+      {pluginUpdate?.pending && <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen}
+        onClick={() => void interact(() => updatePlugin(true))}>Open update confirmation</ButtonItem></PanelSectionRow></div>}
       {pluginUpdate?.pending && <PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen}
-        onClick={() => void run(cancelPluginUpdate).then(r => { if (r) publishPluginStatus(r); })}>Continue without updating</ButtonItem></PanelSectionRow>}
-      {pluginUpdate?.pending && <PanelSectionRow><div className="helix-muted">If you cancelled, dismiss Decky's installation prompt first, then continue here. Keep game installations paused while Decky replaces this plugin.</div></PanelSectionRow>}
+        onClick={() => void interact(cancelDownloadedPlugin)}>Cancel downloaded update</ButtonItem></PanelSectionRow>}
+      {pluginUpdate?.pending && <PanelSectionRow><div className="helix-muted">{pluginInstallMessage || "Press Update in Decky's confirmation to finish. Close that screen before reopening it here. Restart Decky if installation status is unresolved."}</div></PanelSectionRow>}
       {pluginUpdate?.error && <PanelSectionRow><div className="helix-muted">{pluginUpdate.error}</div></PanelSectionRow>}
     </PanelSection>
     <PanelSection title="HelixSR updates">
@@ -534,6 +541,7 @@ export default definePlugin(() => {
   pollPluginStatus();
   pluginUpdateTimer = setInterval(pollPluginStatus, 60000);
   if (typeof DeckyBackend !== "undefined" && DeckyBackend.addEventListener && DeckyBackend.removeEventListener) {
+    DeckyBackend.addEventListener("loader/add_plugin_install_prompt", nativeUpdatePrompt);
     DeckyBackend.addEventListener("loader/plugin_download_start", nativeUpdateStarted);
     DeckyBackend.addEventListener("loader/plugin_download_finish", nativeUpdateFinished);
   }
@@ -541,9 +549,11 @@ export default definePlugin(() => {
   name: "HelixSR Decky", titleView: <div className={staticClasses.Title}>HelixSR Decky</div>,
   content: <Content />, icon: <FaAdjust />, onDismount() {
     pluginDisposed = true;
+    pluginInstaller.dispose();
     if (pluginUpdateTimer) clearInterval(pluginUpdateTimer);
     pluginUpdateTimer = undefined;
     if (typeof DeckyBackend !== "undefined" && DeckyBackend.removeEventListener) {
+      DeckyBackend.removeEventListener("loader/add_plugin_install_prompt", nativeUpdatePrompt);
       DeckyBackend.removeEventListener("loader/plugin_download_start", nativeUpdateStarted);
       DeckyBackend.removeEventListener("loader/plugin_download_finish", nativeUpdateFinished);
     }
