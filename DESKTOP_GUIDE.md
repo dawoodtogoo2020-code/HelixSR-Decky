@@ -34,7 +34,7 @@ The app distinguishes detected OptiScaler files, configuration and available run
 
 **HelixSR updates** checks the current official upstream release. It downloads fresh release metadata, validates the official archive size and SHA-256, and prepares network files on your device. A changed upstream format or failed integrity check stops installation with an explanation.
 
-**App updates** checks desktop releases separately from Decky releases. Automatic checks can be switched on or off. Downloading a newer AppImage verifies its official release metadata and saves a separate executable in your desktop configuration folder's `downloads` directory. Close the old app, open the new downloaded AppImage, and replace your shortcut when ready. Downloads do not automatically execute code or overwrite the running app.
+**App updates** checks desktop releases separately from Decky releases. Automatic checks can be switched on or off. Downloading a newer AppImage verifies its official release metadata and saves a separate executable in your desktop configuration folder's `app-updates` directory. Close the old app, open the new downloaded AppImage, and replace your shortcut when ready. Downloads do not automatically execute code or overwrite the running app.
 
 Use **Disable**, **Enable**, or **Remove and restore originals** from the selected game. These local actions do not need a new upstream download. If an interrupted transaction is reported, close the game and use the reviewed recovery action. Do not delete its recovery journal manually.
 

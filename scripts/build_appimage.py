@@ -88,6 +88,26 @@ def build():
     if not python_license.startswith(b'A. HISTORY'):
         raise SystemExit('Unexpected Python license response')
     (licenses / 'Python-LICENSE.txt').write_bytes(python_license)
+    # Include Debian/Ubuntu copyright notices for copied host dependency libraries.
+    # These are collected from the actual build image, rather than guessed licenses.
+    system_packages = {'libxcb-cursor0'}
+    for library in internal.rglob('lib*.so*'):
+        for base in (Path('/usr/lib/x86_64-linux-gnu'), Path('/lib/x86_64-linux-gnu')):
+            candidate = base / library.name
+            if candidate.exists():
+                result = subprocess.run(['dpkg-query', '-S', str(candidate)],
+                                        capture_output=True, text=True, check=False)
+                for line in result.stdout.splitlines():
+                    package, _, _ = line.partition(': ')
+                    if package:
+                        system_packages.add(package.split(':')[0])
+    system_notices = licenses / 'system-libraries'
+    system_notices.mkdir()
+    for package in sorted(system_packages):
+        copyright_file = Path('/usr/share/doc') / package / 'copyright'
+        if not copyright_file.is_file():
+            raise SystemExit('Missing system library copyright notice: ' + package)
+        shutil.copy2(copyright_file, system_notices / (package + '-copyright.txt'))
     for source, target in [('helixsr-desktop.desktop', 'helixsr-desktop.desktop'),
                            ('helixsr-desktop.svg', 'helixsr-desktop.svg')]:
         shutil.copy2(ROOT / 'desktop' / source, appdir / target)
