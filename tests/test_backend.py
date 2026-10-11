@@ -726,6 +726,135 @@ class SharedPackageTests(Fixtures):
 
 
 class ReleaseMetadataTests(Fixtures):
+    def separate_manager(self):
+        return manager.Manager(self.home, self.m.settings)
+
+    def official(self, digest='a', size=56650779):
+        return dict(version='1.8.1', sha256=digest * 64, size=size,
+                    url=f'https://github.com/{manager.REPO}/releases/download/v1.8.1/HelixSR-1.8.1.zip',
+                    page=f'https://github.com/{manager.REPO}/releases/tag/v1.8.1')
+
+    def quota(self, headers=None, code=403):
+        return manager.urllib.error.HTTPError(manager.API, code, 'Fixture quota',
+            headers if headers is not None else {'X-RateLimit-Remaining': '0',
+                                               'X-RateLimit-Reset': str(time.time() + 3600)}, None)
+
+    def test_primary_quota_uses_verified_web_metadata_and_survives_restart(self):
+        with patch('manager.urllib.request.urlopen', side_effect=self.quota()) as api, \
+                patch('manager.web_latest_release', return_value=self.official()) as web:
+            release = self.m.check_update(force=True)
+            again = self.separate_manager().check_update(force=True)
+        self.assertIsNone(release['error'])
+        self.assertEqual(release['metadata_source'], 'github-web')
+        self.assertIsNone(release['etag'])
+        self.assertEqual(release, again)
+        self.assertEqual(api.call_count, 1)
+        self.assertEqual(web.call_count, 1)
+
+    def test_primary_quota_rechecks_same_version_digest_and_size_after_click_cooldown(self):
+        old = self.official()
+        old.update(metadata_policy=manager.RELEASE_POLICY, checked_at=time.time() - 31,
+                   api_limit_kind='primary', api_retry_at=time.time() + 3600, error=None)
+        manager.atomic_json(self.m.settings / 'release.json', old)
+        with patch('manager.urllib.request.urlopen') as api, \
+                patch('manager.web_latest_release', return_value=self.official('b', 56650780)):
+            release = self.m.check_update(force=True)
+        api.assert_not_called()
+        self.assertEqual(release['sha256'], 'b' * 64)
+        self.assertEqual(release['size'], 56650780)
+
+    def test_failed_web_verification_preserves_error_and_does_not_promote_cache(self):
+        old = self.official()
+        old.update(metadata_policy=manager.RELEASE_POLICY, error=None)
+        manager.atomic_json(self.m.settings / 'release.json', old)
+        with patch('manager.urllib.request.urlopen', side_effect=self.quota()), \
+                patch('manager.web_latest_release', side_effect=ValueError('Missing digest')):
+            release = self.m.check_update(force=True)
+        self.assertIn('verification failed', release['error'])
+        self.assertEqual(release['sha256'], old['sha256'])
+        self.assertNotIn('checked_at', release)
+
+    def test_secondary_quota_honors_retry_after_without_web_fallback(self):
+        with patch('manager.urllib.request.urlopen', side_effect=self.quota({'Retry-After': '120'}, 429)) as api, \
+                patch('manager.web_latest_release') as web:
+            release = self.m.check_update(force=True)
+            self.separate_manager().check_update(force=True)
+        self.assertEqual(release['api_limit_kind'], 'secondary')
+        self.assertIn('request limit', release['error'])
+        self.assertEqual(api.call_count, 1)
+        web.assert_not_called()
+
+    def test_web_failure_has_persistent_click_cooldown(self):
+        with patch('manager.urllib.request.urlopen', side_effect=self.quota()) as api, \
+                patch('manager.web_latest_release', side_effect=ValueError('Missing digest')) as web:
+            release = self.m.check_update(force=True)
+            again = self.separate_manager().check_update(force=True)
+        self.assertEqual(release, again)
+        self.assertGreater(release['web_retry_at'], time.time())
+        self.assertEqual(api.call_count, 1)
+        self.assertEqual(web.call_count, 1)
+
+    def test_web_secondary_limit_keeps_original_primary_reset(self):
+        reset = time.time() + 3600
+        with patch('manager.urllib.request.urlopen', side_effect=self.quota({
+                'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(reset)})) as api, \
+                patch('manager.web_latest_release', side_effect=self.quota({'Retry-After': '120'}, 429)) as web:
+            release = self.m.check_update(force=True)
+            again = self.separate_manager().check_update(force=True)
+        self.assertEqual(release, again)
+        self.assertEqual(release['api_retry_at'], reset)
+        self.assertGreater(release['web_retry_at'], time.time() + 110)
+        self.assertLess(release['web_retry_at'], reset)
+        self.assertEqual(api.call_count, 1)
+        self.assertEqual(web.call_count, 1)
+
+    def test_new_api_quota_cannot_bypass_longer_web_retry_deadline(self):
+        old = dict(error='Web limit', api_limit_kind='primary', api_retry_at=time.time() - 1,
+                   web_retry_at=time.time() + 120)
+        manager.atomic_json(self.m.settings / 'release.json', old)
+        with patch('manager.urllib.request.urlopen', side_effect=self.quota()) as api, \
+                patch('manager.web_latest_release') as web:
+            release = self.m.check_update(force=True)
+        self.assertEqual(release['web_retry_at'], old['web_retry_at'])
+        self.assertGreater(release['api_retry_at'], old['api_retry_at'])
+        self.assertEqual(api.call_count, 1)
+        web.assert_not_called()
+
+    def test_generic_or_malformed_403_never_uses_web_fallback(self):
+        for headers in ({}, {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': 'nan'},
+                        {'X-RateLimit-Remaining': '1', 'X-RateLimit-Reset': str(time.time() + 3600)}):
+            with self.subTest(headers=headers):
+                (self.m.settings / 'release.json').unlink(missing_ok=True)
+                with patch('manager.urllib.request.urlopen', side_effect=self.quota(headers)), \
+                        patch('manager.web_latest_release') as web:
+                    release = self.m.check_update(force=True)
+                self.assertIn('HTTP 403', release['error'])
+                self.assertNotIn('version', release)
+                web.assert_not_called()
+
+    def test_429_missing_retry_after_uses_minimum_backoff(self):
+        kind, retry = manager.github_pause(self.quota({}, 429), 1000)
+        self.assertEqual((kind, retry), ('secondary', 1060))
+
+    def test_expired_api_quota_returns_to_api_and_clears_backoff(self):
+        old = self.official()
+        old.update(metadata_policy=manager.RELEASE_POLICY, checked_at=0,
+                   api_limit_kind='primary', api_retry_at=time.time() - 1, error=None)
+        manager.atomic_json(self.m.settings / 'release.json', old)
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.headers = {}
+        response.geturl.return_value = manager.API
+        response.read.return_value = json.dumps(dict(tag_name='v1.8.1', html_url=old['page'],
+            assets=[dict(name='HelixSR-1.8.1.zip', browser_download_url=old['url'],
+                         digest='sha256:' + old['sha256'], size=old['size'])])).encode()
+        with patch('manager.urllib.request.urlopen', return_value=response), \
+                patch('manager.web_latest_release') as web:
+            release = self.m.check_update(force=True)
+        self.assertEqual(release['metadata_source'], 'github-api')
+        self.assertNotIn('api_retry_at', release)
+        web.assert_not_called()
+
     def update_with_redirect(self, page):
         response = MagicMock()
         response.url = page

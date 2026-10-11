@@ -20,6 +20,7 @@ import uuid
 import zipfile
 import platform
 import ssl
+from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from library import discover, discover_launcher, safe_root, scan_tree, text
 from awareness import awareness, active_processes, text_tail, optiscaler_proxy
@@ -27,6 +28,7 @@ from operation_lock import operation_lock, game_locked
 from host_environment import host_environment
 from installation_status import installation_status
 from build_runtime import wine_candidates
+from github_release import web_latest_release
 from model_variants import (DEFAULT_VARIANT, catalog, package_selection, same_release,
                             select_variant, valid_variant, variant_label, verify_recipe, verify_outputs)
 
@@ -46,6 +48,28 @@ LICENSE_REV = 'helixsr-local-nvidia-network-2026-10'
 RELEASE_POLICY = 2
 AUTO_PACKAGE = object()
 CONFIG_LIMIT = 1 << 20
+
+
+def github_pause(error, now):
+    """Honor server backoff; only a proven primary quota permits web fallback."""
+    headers = error.headers or {}
+    retry = headers.get('Retry-After')
+    if retry is not None or error.code == 429:
+        try:
+            delay = float(retry) if str(retry).isdigit() else parsedate_to_datetime(retry).timestamp() - now
+        except (TypeError, ValueError, OverflowError):
+            delay = 60
+        if not math.isfinite(delay):
+            delay = 60
+        return 'secondary', now + min(86400, max(60, delay))
+    if error.code == 403 and headers.get('X-RateLimit-Remaining') == '0':
+        try:
+            reset = float(headers.get('X-RateLimit-Reset'))
+            if math.isfinite(reset) and now < reset <= now + 86400:
+                return 'primary', reset
+        except (TypeError, ValueError):
+            pass
+    return 'blocked', now + 60
 
 
 def load_release(settings):
@@ -913,6 +937,7 @@ class Manager:
 
     def check_update(self, force=False):
         old = load_release(self.settings)
+        now = time.time()
         valid_cache = False
         try:
             validate_release(old)
@@ -921,7 +946,25 @@ class Manager:
             pass
         if (not force and valid_cache and not old.get('error')
                 and isinstance(old.get('checked_at'), (int, float))
-                and time.time() - old['checked_at'] < 6 * 3600):
+                and 0 <= now - old['checked_at'] < 6 * 3600):
+            return old
+        pause = old.get('api_retry_at')
+        paused = (type(pause) in (int, float) and math.isfinite(pause)
+                  and now < pause <= now + 86400
+                  and old.get('api_limit_kind') in ('primary', 'secondary', 'blocked'))
+        if paused:
+            if old['api_limit_kind'] == 'primary':
+                web_retry = old.get('web_retry_at')
+                if (type(web_retry) in (int, float) and math.isfinite(web_retry)
+                        and now < web_retry <= now + 86400):
+                    return old
+                # Avoid repeated page requests from rapid clicks while retaining a
+                # freshly verified result across application restarts.
+                if (valid_cache and not old.get('error')
+                        and type(old.get('checked_at')) in (int, float)
+                        and 0 <= now - old['checked_at'] < 30):
+                    return old
+                return self._web_update(old, valid_cache, pause)
             return old
         headers = {'User-Agent': 'HelixSR-Decky/0.1', 'Accept': 'application/vnd.github+json'}
         if valid_cache and isinstance(old.get('etag'), str):
@@ -952,6 +995,7 @@ class Manager:
                                sha256=asset['digest'][7:].lower(), size=asset['size'],
                                checked_at=time.time(), etag=response.headers.get('ETag'),
                                page=data['html_url'], error=None, metadata_policy=RELEASE_POLICY,
+                               metadata_source='github-api',
                                asset_id=asset.get('id'), asset_updated_at=asset.get('updated_at'))
                 validate_release(current)
                 atomic_json(self.settings / 'release.json', current)
@@ -962,17 +1006,52 @@ class Manager:
                 old.pop('failed_at', None)
                 atomic_json(self.settings / 'release.json', old)
                 return old
+            if e.code in (403, 429):
+                kind, retry_at = github_pause(e, now)
+                old.update(api_limit_kind=kind, api_retry_at=retry_at)
+                if kind == 'primary':
+                    return self._web_update(old, valid_cache, retry_at)
+                old['error'] = (f'GitHub returned HTTP {e.code}; '
+                                + ('its request limit is active. ' if kind == 'secondary'
+                                   else 'access to its update API was denied. ')
+                                + 'Retry later; reconnecting may not help.')
             else:
-                old['error'] = f'GitHub returned HTTP {e.code}; reconnect or retry later to check the latest HelixSR'
+                old['error'] = f'GitHub returned HTTP {e.code}; retry later to check the latest HelixSR'
         except (OSError, ValueError, TypeError, KeyError, http.client.HTTPException) as e:
             old['error'] = str(e)
-        # A latest-tag redirect cannot prove which same-version ZIP is current.
-        # Keep the error visible instead of inventing an obsolete SHA or size.
         if not valid_cache:
-            old = {'error': old['error']}
+            old = {key: old[key] for key in ('error', 'api_retry_at', 'api_limit_kind') if key in old}
         old['failed_at'] = time.time()
         atomic_json(self.settings / 'release.json', old)
         return old
+
+    def _web_update(self, old, valid_cache, retry_at):
+        now = time.time()
+        web_retry = old.get('web_retry_at')
+        if (type(web_retry) in (int, float) and math.isfinite(web_retry)
+                and now < web_retry <= now + 86400):
+            old.update(api_limit_kind='primary', api_retry_at=retry_at)
+            atomic_json(self.settings / 'release.json', old)
+            return old
+        try:
+            current = web_latest_release(context=https_context())
+            validate_release(current)
+            current.update(checked_at=time.time(), etag=None, error=None,
+                           metadata_policy=RELEASE_POLICY, metadata_source='github-web',
+                           api_limit_kind='primary', api_retry_at=retry_at)
+            atomic_json(self.settings / 'release.json', current)
+            return current
+        except (OSError, ValueError, TypeError, KeyError, http.client.HTTPException) as error:
+            failed = dict(old) if valid_cache else {}
+            now = time.time()
+            web_retry = now + 30
+            if isinstance(error, urllib.error.HTTPError) and error.code in (403, 429):
+                _, web_retry = github_pause(error, now)
+            failed.update(error=f'GitHub API request limit reached; official release verification failed: {error}',
+                          failed_at=now, api_limit_kind='primary', api_retry_at=retry_at,
+                          web_retry_at=web_retry)
+            atomic_json(self.settings / 'release.json', failed)
+            return failed
 
     def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None):
         with self.lock:
