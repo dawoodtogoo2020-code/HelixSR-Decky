@@ -846,9 +846,18 @@ class Manager:
                 blocked.append('Existing unmanaged injector/configuration: ' + ', '.join(occupied))
         if legacy:
             reasons.append('Existing direct HelixSR installation: explicit import is required before management')
+        steam_build_review = None
         if rec:
             if game.get('build') and rec.get('game_build') and game['build'] != rec['game_build']:
                 blocked.append('Steam build changed; installation needs review')
+                def build_id(value):
+                    return value if isinstance(value, str) and re.fullmatch(r'[0-9]{1,24}', value) else 'unavailable'
+                steam_build_review = dict(recorded_build=build_id(rec['game_build']),
+                                          current_build=build_id(game['build']), files=[],
+                                          omitted_files=max(0, len(rec['current']) - 20))
+            def file_review(rel, state):
+                if steam_build_review is not None and len(steam_build_review['files']) < 20:
+                    steam_build_review['files'].append(dict(path=rel, state=state))
             mutable = self.mutable_config_paths(game, rec)
             for rel, expected in rec['current'].items():
                 p = checked_path(root, rel)
@@ -859,8 +868,12 @@ class Manager:
                             self.read_owned_config(game, rel)
                         except (OSError, ValueError) as exc:
                             blocked.append(str(exc))
+                        file_review(rel, 'retained configuration')
                         continue
                 actual = sha(p) if p.is_file() else None
+                file_review(rel, 'missing' if actual is None else
+                            'saved-original bytes match' if actual == rec['baseline'].get(rel) else
+                            'installed bytes match' if actual == expected else 'externally changed')
                 if actual != expected:
                     blocked.append('Managed files changed; ownership needs review before further changes: ' + rel)
         # Symlink candidates may hide API files and must never be mutated.
@@ -881,7 +894,7 @@ class Manager:
                     legacy=legacy, package_version=package[2]['version'] if package else None,
                     installed_model=variant_label(rec.get('variant')) if rec or legacy else None,
                     installed_variant=rec.get('variant', {}).get('id') if valid_variant(rec.get('variant')) else None,
-                    recovery_available=self.recovery_available(game),
+                    recovery_available=self.recovery_available(game), steam_build_review=steam_build_review,
                     dx12_confirmation_needed=route == 'optiscaler' and not (main and pe_info(main)['dx12']),
                     **aware)
         if not detailed:

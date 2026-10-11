@@ -74,6 +74,58 @@ class InstallationStatusTests(unittest.TestCase):
         self.assertFalse(any('delete' in step.lower() or 'chmod' in step.lower()
                              for step in status['issues'][0]['steps']))
 
+    def test_steam_build_review_shows_ids_and_relative_file_states_without_unblocking(self):
+        reason = 'Steam build changed; installation needs review'
+        report = dict(recorded_build='123456', current_build='789012', files=[
+            dict(path='amd_fidelityfx_dx12.dll', state='installed bytes match'),
+            dict(path='HelixSR/helixsr.log', state='saved-original bytes match'),
+            dict(path='HelixSR/config.ini', state='retained configuration'),
+            dict(path='other.dll', state='externally changed'),
+            dict(path='missing.dll', state='missing'),
+        ], omitted_files=2)
+        reasons = [reason, 'Steam download staging exists for this game', RUNNING_REASON]
+        game = self.game(compatibility='blocked', managed=True, enabled=True,
+                         reasons=reasons, steam_build_review=report)
+        status = installation_status(game)
+        self.assertEqual(status['state'], 'review')
+        self.assertFalse(status['can_modify'])
+        self.assertTrue(status['selectable'])
+        self.assertEqual(game['reasons'], reasons)
+        self.assertEqual([issue['code'] for issue in status['issues']],
+                         ['steam_build_changed', 'steam_update', 'game_running'])
+        self.assertTrue(all(issue['blocking'] for issue in status['issues']))
+        self.assertEqual(status['issues'][0]['reason'], reason)
+        steps = '\n'.join(status['issues'][0]['steps'])
+        self.assertIn('Recorded Steam build: 123456; current Steam build: 789012', steps)
+        for entry in report['files']:
+            self.assertIn(entry['path'], steps)
+            self.assertIn(entry['state'], steps)
+        self.assertIn('2 more recorded files omitted', steps)
+        for phrase in ('Remove would restore saved originals', 'Steam file verification',
+                       'does not reconcile', 'game_build', 'installation receipts',
+                       'close the game normally', 'refresh'):
+            self.assertIn(phrase, steps)
+
+    def test_steam_build_review_missing_or_untrusted_details_never_claims_clear(self):
+        reason = 'Steam build changed; installation needs review'
+        for report in (None, {}, dict(recorded_build='123', current_build='456', files=[
+                dict(path='/home/deck/private.dll', state='missing'),
+                dict(path='..\\private.dll', state='missing'),
+                dict(path='C:\\private.dll', state='missing')])):
+            with self.subTest(report=report):
+                game = self.game(compatibility='blocked', managed=True, reasons=[reason])
+                if report is not None:
+                    game['steam_build_review'] = report
+                status = installation_status(game)
+                self.assertEqual(status['state'], 'review')
+                self.assertFalse(status['can_modify'])
+                steps = '\n'.join(status['issues'][0]['steps'])
+                self.assertIn('file changes stay blocked', steps)
+                self.assertIn('does not reconcile', steps)
+                self.assertNotIn('private.dll', steps)
+                if report in (None, {}):
+                    self.assertNotIn('Recorded Steam build:', steps)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -725,6 +725,49 @@ class SharedPackageTests(Fixtures):
             self.m.package(self.game, 'unexpected')
 
 
+class SteamBuildReviewTests(Fixtures):
+    def changed_build(self):
+        self.game['build'] = '100'
+        self.package()
+        self.action('install')
+        self.game['build'] = '200'
+
+    def test_build_review_is_read_only_and_all_file_actions_stay_blocked(self):
+        self.changed_build()
+        before = self.native.read_bytes()
+        record = self.m.record_path(self.game).read_bytes()
+        data = self.m.assess(self.game)
+        report = data['steam_build_review']
+        self.assertEqual((report['recorded_build'], report['current_build']), ('100', '200'))
+        self.assertTrue(any(row['state'] == 'installed bytes match' for row in report['files']))
+        for action in ('update', 'remove', 'disable', 'enable'):
+            with self.subTest(action=action), self.assertRaisesRegex(ValueError, 'Steam build changed'):
+                self.m.preview(self.game['id'], action)
+        self.assertFalse(data['installation_status']['can_modify'])
+        self.assertEqual(self.native.read_bytes(), before)
+        self.assertEqual(self.m.record_path(self.game).read_bytes(), record)
+        self.assertNotIn(str(self.root), json.dumps(report))
+
+    def test_restored_original_is_reported_without_clearing_build_guard(self):
+        self.changed_build()
+        self.native.write_bytes(self.original)
+        data = self.m.assess(self.game)
+        row = next(row for row in data['steam_build_review']['files'] if row['path'] == self.native.name)
+        self.assertEqual(row['state'], 'saved-original bytes match')
+        self.assertFalse(data['installation_status']['can_modify'])
+        self.assertEqual(self.native.read_bytes(), self.original)
+
+    def test_unexplained_replacement_is_reported_and_preserved(self):
+        self.changed_build()
+        replacement = self.original + b'new unexplained bytes'
+        self.native.write_bytes(replacement)
+        data = self.m.assess(self.game)
+        row = next(row for row in data['steam_build_review']['files'] if row['path'] == self.native.name)
+        self.assertEqual(row['state'], 'externally changed')
+        self.assertFalse(data['installation_status']['can_modify'])
+        self.assertEqual(self.native.read_bytes(), replacement)
+
+
 class ReleaseMetadataTests(Fixtures):
     def separate_manager(self):
         return manager.Manager(self.home, self.m.settings)

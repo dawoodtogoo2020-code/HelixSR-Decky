@@ -3,12 +3,48 @@
 This module does not decide whether a transaction may run. Existing manager
 guards remain the authority for every file change.
 """
+import json
+import re
 
 RUNNING_REASON = 'Game is running; close it before any file changes'
 ADVISORY_CODES = frozenset({'dx12_unconfirmed', 'legacy_installation'})
 
 
-def _issue(reason):
+def _steam_build_steps(game):
+    steps = [
+        'HelixSR file changes stay blocked after this game build change. Install, Update, Disable, and Remove cannot safely change old files; Remove would restore saved originals from the recorded build, which may replace files from the current build.',
+        'Let Steam finish updating, close the game normally, then refresh the game status.',
+        'Steam file verification may restore current game files, but does not reconcile HelixSR\'s installation receipt.',
+    ]
+    report = game.get('steam_build_review')
+    if isinstance(report, dict):
+        recorded, current = report.get('recorded_build'), report.get('current_build')
+        if (isinstance(recorded, str) and isinstance(current, str)
+                and re.fullmatch(r'(?:[0-9]+|unavailable)', recorded)
+                and re.fullmatch(r'(?:[0-9]+|unavailable)', current)):
+            steps.insert(0, f'Recorded Steam build: {recorded}; current Steam build: {current}.')
+        states = {'installed bytes match', 'saved-original bytes match', 'missing',
+                  'externally changed', 'retained configuration'}
+        files = report.get('files')
+        if isinstance(files, list):
+            for item in files[:20]:
+                if not isinstance(item, dict):
+                    continue
+                path, state = item.get('path'), item.get('state')
+                if (not isinstance(path, str) or not path or not isinstance(state, str)
+                        or state not in states or path.startswith(('/', '\\'))
+                        or any(part in ('', '.', '..') for part in path.replace('\\', '/').split('/'))
+                        or ':' in path or any(ord(char) < 32 for char in path)):
+                    continue
+                steps.append(f'Recorded file {json.dumps(path, ensure_ascii=True)}: {state}.')
+        omitted = report.get('omitted_files')
+        if type(omitted) is int and omitted > 0:
+            steps.append(f'{omitted} more recorded files omitted from this check.')
+    steps.append('Report the recorded and current Steam build IDs and relative file states for review; say if any are unavailable. Do not edit game_build, delete installation receipts, or bypass this guard.')
+    return steps
+
+
+def _issue(reason, game=None):
     """Classify a manager diagnostic without altering its original wording."""
     lower = reason.lower()
     if reason == RUNNING_REASON:
@@ -27,7 +63,7 @@ def _issue(reason):
                  'Update and Remove stay blocked until the recorded files match; do not delete DLLs or the installation record.'])
     if 'steam build changed' in lower:
         return ('steam_build_changed', 'Steam build changed',
-                ['Review the installed files against the new game build before making changes.'])
+                _steam_build_steps(game or {}))
     if 'existing unmanaged injector/configuration' in lower:
         return ('unmanaged_injector', 'Existing injector or configuration',
                 ['Review the named files with the tool that installed them before using HelixSR.'])
@@ -72,7 +108,7 @@ def installation_status(game):
     material = compatibility == 'blocked' or recovery
     issues = []
     for reason in reasons:
-        code, title, steps = _issue(reason)
+        code, title, steps = _issue(reason, game)
         issues.append(dict(code=code, title=title, reason=reason, steps=steps,
                            blocking=(material or running) and code not in ADVISORY_CODES))
     if recovery:
