@@ -89,7 +89,8 @@ function publishOverlayStatus(status: OverlayStatus) {
   overlayListeners.forEach(listener => listener(status));
   if (!status.enabled) { overlayNotificationKey = ""; return; }
   const key = `${status.game_id}:${status.runtime.state}:${status.overlay.state}`;
-  if (key !== overlayNotificationKey && ["output", "failure", "unavailable"].includes(status.runtime.state)) {
+  if (key !== overlayNotificationKey && (["output", "failure", "unavailable"].includes(status.runtime.state)
+      || ["conflict", "unavailable", "stale"].includes(status.overlay.state))) {
     toaster.toast({ title: "HelixSR status", body: `${status.runtime.label}. ${status.overlay.label}.`, duration: 6000 });
   }
   overlayNotificationKey = key;

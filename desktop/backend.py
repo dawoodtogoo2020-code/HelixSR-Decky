@@ -95,7 +95,7 @@ class DesktopBackend:
 
     def set_status_overlay(self, gid, enabled, executable=None):
         self._open()
-        return self.status_monitor.configure(gid, bool(enabled), executable)
+        return self.status_monitor.configure(gid, enabled, executable)
 
     def _open(self):
         if self.closed:

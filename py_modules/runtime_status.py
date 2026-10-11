@@ -22,7 +22,21 @@ def regular_beneath(path, root):
             raise ValueError('A runtime log path is a symbolic link')
         if part == root:
             break
-    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
+    if os.open in os.supports_dir_fd:
+        # Hold each directory by FD, so a parent swapped to a symlink between
+        # validation and open cannot redirect the log read outside this root.
+        parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            for component in path.relative_to(root).parts[:-1]:
+                next_parent = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                os.close(parent)
+                parent = next_parent
+            fd = os.open(path.name, flags, dir_fd=parent)
+        finally:
+            os.close(parent)
+    else:
+        fd = os.open(path, flags)
     stream = os.fdopen(fd, 'rb')
     info = os.fstat(fd)
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
