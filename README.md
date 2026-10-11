@@ -4,6 +4,8 @@ An independent Decky Loader plugin for managing HelixSR on SteamOS. It does not 
 
 Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https://github.com/lonewolf0622/HelixSR); this plugin is an independent integration.
 
+[Support Blackheart909 on Ko-fi](https://ko-fi.com/blackheart909). Optional support helps with my work on this independent plugin and my other projects. HelixSR is developed separately by Lone Wolf.
+
 [Download the plugin ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Desktop AppImage and guide](DESKTOP_GUIDE.md) · [OptiScaler setup](OPTISCALER_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
 
 ## Features
