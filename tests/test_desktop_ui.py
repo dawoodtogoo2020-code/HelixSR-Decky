@@ -130,6 +130,23 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertIn('OptiScaler runtime: unknown', self.window.evidence.toPlainText())
         self.assertIn('Frame generation:', self.window.evidence.toPlainText())
 
+    def test_many_library_warnings_keep_notice_short_and_diagnostics_intact(self):
+        warnings = [f'Steam shortcut {i}: launcher/wrapper unresolved; import game folder /fixture/game-{i}' for i in range(83)]
+        value = self.backend.library()
+        value['warnings'] = warnings
+        self.window._library_received(value)
+        self.settle()
+        self.assertEqual(self.window.notice.text(), '83 library warnings. See Diagnostics.')
+        self.assertLess(len(self.window.notice.text()), 100)
+        self.assertNotIn('\n', self.window.notice.text())
+        self.assertEqual(self.window.library_warning_view.toPlainText(), '\n\n'.join(warnings))
+        self.assertTrue(self.window.library_warning_view.isReadOnly())
+        self.assertLessEqual(self.window.library_warning_view.maximumHeight(), 180)
+        self.window.diagnostic_button.click()
+        self.settle()
+        self.assertIn('fixture', self.window.diagnostics.toPlainText())
+        self.assertEqual(self.window.library_warning_view.toPlainText(), '\n\n'.join(warnings))
+
     def test_dx12_confirmation_required_only_when_needed(self):
         self.backend.game['dx12_confirmation_needed'] = True
         self.window._details_received('a', self.backend.game)

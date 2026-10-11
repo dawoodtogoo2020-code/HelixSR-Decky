@@ -2,7 +2,7 @@
 
 HelixSR Desktop application source and its original icon are MIT-licensed. See LICENSE. This AppImage contains no HelixSR game DLLs, DLSS DLLs or generated HelixSR network assets. Those are obtained or generated separately on the user's device under their own terms.
 
-The AppImage includes dynamically linked Qt for Python (PySide6-Essentials and shiboken6 6.12.0), Qt libraries and platform plugins. PySide6 is available under LGPLv3, GPLv2/GPLv3 or a commercial license. This distribution uses the open-source LGPL option for the modules it imports (QtCore, QtGui and QtWidgets). Qt and third-party notices and license texts distributed with the wheels are included under `usr/share/helixsr-desktop/licenses` in the extracted AppImage.
+The AppImage includes dynamically linked Qt for Python (PySide6-Essentials and shiboken6 6.12.0), Qt libraries and platform plugins. PySide6 is available under LGPLv3, GPLv2/GPLv3 or a commercial license. This distribution uses the open-source LGPL option for the modules it imports (QtCore, QtGui and QtWidgets). Qt and third-party notices from the matching official Qt/PySide 6.12.0 source tags, together with available wheel notices, are included under `usr/share/helixsr-desktop/licenses` in the extracted AppImage. The source URLs and verified file hashes are recorded in `licenses/qt-6.12.0/sources.json` in this repository.
 
 Corresponding upstream sources:
 

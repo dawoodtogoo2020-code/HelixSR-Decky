@@ -24,7 +24,7 @@ def main(argv):
             entry = {k: game.get(k) for k in ('name', 'source', 'compatibility', 'route', 'managed', 'enabled')}
             if game.get('managed') or game.get('compatibility') == 'candidate':
                 detail = service.details(game['id'])
-                entry.update({k: detail.get(k) for k in ('version', 'prepared_version', 'helix_runtime', 'framegen_summary')})
+                entry.update({k: detail.get(k) for k in ('installed_version', 'package_version', 'helix_runtime', 'framegen_summary')})
             games.append(entry)
         system = service.system_status()
         system['vulkan'].pop('evidence', None)
@@ -35,6 +35,8 @@ def main(argv):
             report['helix_update'] = service.check_helix_updates(True)
             report['app_update'] = service.check_app_updates(True)
         payload = json.dumps(report, indent=2)
+        for prefix in {str(service.home), service.home.as_posix()}:
+            payload = payload.replace(json.dumps(prefix)[1:-1], '<user-home>')
         if args.output:
             Path(args.output).write_text(payload + '\n', encoding='utf-8')
         else:

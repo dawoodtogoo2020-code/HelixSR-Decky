@@ -272,6 +272,12 @@ class MainWindow(QMainWindow):
         self.diagnostics = QTextEdit()
         self.diagnostics.setReadOnly(True)
         content.addWidget(self.diagnostics)
+        content.addWidget(QLabel("Library discovery warnings"))
+        self.library_warning_view = QTextEdit()
+        self.library_warning_view.setReadOnly(True)
+        self.library_warning_view.setMaximumHeight(180)
+        self.library_warning_view.setPlainText("No library warnings")
+        content.addWidget(self.library_warning_view)
         self.diagnostic_button = self._button("Refresh system diagnostics", lambda: self._run(self.backend.system_status, lambda v: self.diagnostics.setPlainText(json.dumps(v, indent=2, default=str)[:LIMIT])), content)
         links = link_label(f'<a href="{GUIDE}">Installation guide</a> · <a href="{BUGS}">Report a bug</a>', self._notify)
         content.addWidget(links)
@@ -351,8 +357,13 @@ class MainWindow(QMainWindow):
         self.release = value.get("release", {})
         self._jobs_received(value.get("jobs", []))
         self.select_game()
-        if value.get("warnings"):
-            self._notify("; ".join(value["warnings"]))
+        warnings = [str(warning) for warning in value.get("warnings", [])]
+        warning_text = "\n\n".join(warnings)
+        if len(warning_text) > LIMIT:
+            warning_text = warning_text[:LIMIT] + "\n\nAdditional warning text omitted to keep diagnostics bounded."
+        self.library_warning_view.setPlainText(warning_text or "No library warnings")
+        if warnings:
+            self._notify(f"{len(warnings)} library warnings. See Diagnostics.")
         # Cached automatic-check policy belongs to the backend; no silent install.
         QTimer.singleShot(0, lambda: self.check_app(False))
 
