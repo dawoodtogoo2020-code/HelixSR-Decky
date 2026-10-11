@@ -8,6 +8,8 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 
 ## Features
 
+* Clear installation reasons and next steps in both interfaces, plus an optional experimental status HUD. Running games remain inspectable while file changes are paused. Runtime output and overlay helper health are separate. See the [status and overlay guide](STATUS_GUIDE.md) for evidence levels and display limitations.
+
 * The Decky plugin and desktop app share a **HelixSR model** selector and display the installed model separately from the release and input route. Currently the reviewed choice is **Model E, sourced from NVIDIA DLSS 310.7.0**. DLSS 4 or FSR-derived networks are not selectable yet. Unknown conversion recipes stop before building or changing a game; updating the app can add reviewed model support. See [model support and future variants](MODEL_VARIANTS.md).
 
 * Checks this Decky plugin's own GitHub releases on startup and once a day, with a saved opt-out and manual check. Shows current/latest plugin versions separately from HelixSR. Downloads and verifies the update's SHA256, size, manifests, required modules and complete ZIP before opening Decky's confirmation. Plugin updates wait for game operations to finish; they do not update per-game HelixSR installations.

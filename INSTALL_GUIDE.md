@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.12.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
+3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.13.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -98,6 +98,8 @@ If an older app reports **Network output missing or incomplete** while preparing
 For **Network build failed**, use plugin **0.1.8 or newer**. Preparation now checks installed Proton in external Steam libraries, custom tools and known Flatpak Steam locations, and probes whether each runtime starts on the host before selecting it. A Flatpak runtime may still need dependencies from its sandbox; detection alone does not guarantee shader compilation. The original upstream search remains the fallback. If no Proton is available, install a Proton version through Steam and retry. Permission or space errors require fixing the game drive first. Open **Show diagnostics and logs** for the selected game and copy only the final error lines from the build log, with private paths removed. These are local preparation errors, not proof of a game compatibility problem.
 
 ## 9. Report a problem
+
+For exact blocked-game reasons, next steps, and the optional runtime overlay, read the [status and overlay guide](STATUS_GUIDE.md). **Game running** pauses file changes; it does not mean HelixSR is incompatible or has stopped. The overlay toggle checks helper health and reads new session log evidence, with visibility and image quality kept unverified.
 
 Use [GitHub Issues](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new/choose). Include the game, plugin/HelixSR versions, SteamOS, Proton, route, OptiScaler and FG setup, steps, expected result and actual result. Paste only a short sanitized diagnostic excerpt. Reports are public: remove usernames, account details and private paths; never attach credentials, full home-folder data or generated network files. No email address is required.
 

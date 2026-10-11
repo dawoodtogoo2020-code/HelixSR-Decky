@@ -26,6 +26,9 @@ class FakeBackend:
                          framegen_summary='Configured, runtime unknown', helix_runtime='unknown')
         self.job_list = []
         self.closed = False
+        self.overlay = dict(enabled=False, game_id=None,
+                            overlay=dict(state='off', label='Off', detail='', responding=False, visible_verified=False),
+                            runtime=dict(state='unknown', label='No current observation', detail=''))
 
     def library(self):
         return dict(games=[self.game.copy(), dict(id='b', name='Blocked', compatibility='blocked', reasons=['Protected game'])],
@@ -74,6 +77,18 @@ class FakeBackend:
     def jobs(self):
         return self.job_list
 
+    def overlay_status(self):
+        return self.overlay.copy()
+
+    def set_status_overlay(self, gid, enabled, executable=None):
+        self.calls.append(('overlay', gid, enabled, executable))
+        self.overlay = dict(enabled=enabled, game_id=gid,
+                            overlay=dict(state='responding' if enabled else 'off', label='Responding' if enabled else 'Off',
+                                         detail='Helper acknowledged a draw request' if enabled else '',
+                                         responding=enabled, visible_verified=False),
+                            runtime=dict(state='unverified', label='Running, no current HelixSR evidence', detail=''))
+        return self.overlay.copy()
+
     def cancel_job(self, jid):
         self.calls.append(('cancel', jid))
         return True
@@ -93,6 +108,14 @@ class FakeBackend:
 
 @unittest.skipUnless(QT, 'PySide6 Essentials unavailable; native widget tests require Qt')
 class DesktopWidgetTests(unittest.TestCase):
+    def test_managed_optiscaler_overlay_keeps_recorded_executable_authority(self):
+        self.backend.game.update(managed=True, enabled=True, selected_executable='GameDX12.exe')
+        self.window.refresh()
+        self.settle()
+        self.window.overlay_toggle.setChecked(True)
+        self.settle()
+        self.assertIn(('overlay', 'a', True, None), self.backend.calls)
+
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
@@ -140,6 +163,38 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertIn('OptiScaler installed: yes', self.window.evidence.toPlainText())
         self.assertIn('OptiScaler runtime: unknown', self.window.evidence.toPlainText())
         self.assertIn('Frame generation:', self.window.evidence.toPlainText())
+
+    def test_running_game_remains_selectable_with_clear_write_blocker_and_overlay_control(self):
+        self.backend.game.update(managed=True, enabled=True, compatibility='blocked',
+            installation_status=dict(state='enabled', label='Installed and enabled · Game running',
+                summary='File changes paused until the game closes.', running=True, selectable=True,
+                can_modify=False, issues=[dict(code='game_running', title='Game running',
+                    reason='Files are in use.', steps=['Close the game normally', 'Refresh games'], blocking=True)]))
+        self.window._library_received(self.backend.library())
+        self.settle()
+        self.assertEqual(self.window.games.count(), 1)
+        self.assertIn('Installed and enabled', self.window.status.text())
+        self.assertIn('Close the game normally', self.window.blockers.text())
+        self.assertFalse(self.window.install.isEnabled())
+        self.assertIn('Close the game normally', self.window.install.toolTip())
+        self.assertTrue(self.window.overlay_toggle.isEnabled())
+        self.window.overlay_toggle.setChecked(True)
+        self.settle()
+        self.assertIn(('overlay', 'a', True, None), self.backend.calls)
+        self.assertIn('Helper responding', self.window.overlay_health.text())
+        self.assertIn('Visibility unverified', self.window.overlay_health.text())
+        self.assertIn('Running, no current HelixSR evidence', self.window.runtime_status.text())
+
+    def test_overlay_switch_and_close_stop_helper(self):
+        self.window.overlay_toggle.setChecked(True)
+        self.settle()
+        self.window.games.setCurrentIndex(-1)
+        self.settle()
+        self.assertIn(('overlay', None, False, None), self.backend.calls)
+        self.assertFalse(self.backend.overlay['enabled'])
+        self.window.close()
+        self.settle()
+        self.assertTrue(self.backend.closed)
 
     def test_conflict_from_fresh_details_overrides_enabled_status_and_actions(self):
         self.backend.game.update(managed=True, enabled=True, installed_version='1.8.1')

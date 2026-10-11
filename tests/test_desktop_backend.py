@@ -5,7 +5,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from desktop.backend import DesktopBackend
@@ -14,6 +14,19 @@ from manager import PACKAGE_FILES, sha
 
 
 class DesktopBackendTests(unittest.TestCase):
+    def test_monitor_close_failure_does_not_skip_game_worker_cleanup(self):
+        backend = self.service()
+        backend.status_monitor.close = Mock(side_effect=[ValueError('sampler stopping'), None])
+        backend.manager.jobs['fixture'] = dict(id='fixture', state='running')
+        backend.manager.cancel_job = Mock(return_value=True)
+        backend.manager.worker = Mock()
+        backend.manager.worker.is_alive.return_value = False
+        self.assertFalse(backend.close())
+        backend.manager.cancel_job.assert_called_with('fixture')
+        backend.manager.worker.join.assert_called_with(15)
+        self.assertTrue(backend.close())
+        backend.status_monitor.close.side_effect = None
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

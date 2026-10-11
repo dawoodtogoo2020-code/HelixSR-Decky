@@ -880,13 +880,13 @@ class AwarenessTests(Fixtures):
         self.assertFalse(data['enabled'])
         self.assertNotIn('reports neural output', data['helix_runtime'])
 
-    def test_enabled_managed_fresh_log_retains_evidence_limits(self):
+    def test_enabled_managed_fresh_log_is_not_current_output_proof(self):
         self.package()
         self.action('install')
         write(self.root / 'helixsr.log', 'network running\n')
         data = self.inspect([dict(pid=123, env={}, started_at=time.time() - 10)])
-        self.assertIn('reports neural output', data['helix_runtime'])
-        self.assertIn('visual/stability check required', data['helix_runtime'])
+        self.assertNotIn('reports neural output', data['helix_runtime'])
+        self.assertIn('current runtime unverified', data['helix_runtime'])
 
 
 class RecoveryAndOptiScalerRegressionTests(Fixtures):

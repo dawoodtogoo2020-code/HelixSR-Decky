@@ -25,6 +25,7 @@ from library import discover, discover_launcher, safe_root, scan_tree, text
 from awareness import awareness, active_processes, text_tail, optiscaler_proxy
 from operation_lock import operation_lock, game_locked
 from host_environment import host_environment
+from installation_status import installation_status
 from build_runtime import wine_candidates
 from model_variants import (DEFAULT_VARIANT, catalog, package_selection, same_release,
                             select_variant, valid_variant, variant_label, verify_recipe, verify_outputs)
@@ -696,7 +697,7 @@ class Manager:
         try:
             return self.assess(game, detailed=detailed, executable=executable)
         except (OSError, ValueError) as e:
-            return dict(**game, compatibility='blocked', reasons=[str(e)], route=None,
+            data = dict(**game, compatibility='blocked', reasons=[str(e)], route=None,
                         managed=False, enabled=False, inputs=[],
                         executable_choices=[], selected_executable=None, executable_selection_needed=False,
                         recovery_available=self.recovery_available(game),
@@ -704,6 +705,8 @@ class Manager:
                                     'runtime': 'unknown', 'dlls': []},
                         framegen=[], framegen_summary='No supported per-game evidence',
                         helix_runtime='unknown', launch_options=game.get('launch_options', ''))
+            data['installation_status'] = installation_status(data)
+            return data
 
     def get_game(self, gid):
         if gid not in self.entries:
@@ -859,6 +862,7 @@ class Manager:
                     **aware)
         if not detailed:
             data.pop('logs', None)
+        data['installation_status'] = installation_status(data)
         return data
 
     def import_folder(self, folder, name=''):

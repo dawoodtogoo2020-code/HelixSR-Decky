@@ -2,7 +2,10 @@
 import sys
 
 if __name__ == '__main__':
-    if '--probe' in sys.argv:
+    if '--status-overlay-child' in sys.argv:
+        from overlay_helper import main
+        raise SystemExit(main(sys.argv[2:]))
+    elif '--probe' in sys.argv:
         from desktop.probe import main
         raise SystemExit(main(sys.argv[1:]))
     else:

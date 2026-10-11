@@ -5,15 +5,15 @@ HelixSR Desktop is a standalone Linux app. Decky Loader is optional. It manages 
 ## Download and open
 
 1. Switch your SteamOS device to Desktop Mode.
-2. Download **HelixSR-Desktop-0.1.8-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.8). Save it in a folder such as `Applications` under your own home folder.
+2. Download **HelixSR-Desktop-0.1.9-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.9). Save it in a folder such as `Applications` under your own home folder.
 3. In your file manager, right-click the AppImage, open **Properties → Permissions**, and enable **Is executable** (wording varies).
 4. Double-click the AppImage. Do not run it with sudo or as administrator.
 
 If your system cannot mount AppImages, open a terminal in its folder and run:
 
 ```sh
-chmod +x HelixSR-Desktop-0.1.8-x86_64.AppImage
-./HelixSR-Desktop-0.1.8-x86_64.AppImage --appimage-extract-and-run
+chmod +x HelixSR-Desktop-0.1.9-x86_64.AppImage
+./HelixSR-Desktop-0.1.9-x86_64.AppImage --appimage-extract-and-run
 ```
 
 This fallback extracts the app temporarily and does not require FUSE or administrator access. [AppImage documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html) explains the options.
@@ -68,6 +68,8 @@ If an older app reports **Network output missing or incomplete** with HelixSR 1.
 For **Network build failed**, update to desktop **0.1.4 or newer**. Preparation checks installed Proton in external Steam libraries, custom tools and known Flatpak Steam locations, and uses a discovered runtime only if it starts on the host. Flatpak sandbox dependencies can still prevent shader compilation; the original upstream search remains the fallback. Install Proton through Steam if none is available, and resolve any drive permission or free-space error before retrying. The **Jobs** tab shows preparation output; selected-game diagnostics also include retained build logs. Include only the final error lines with private paths removed in a bug report. A local build failure does not establish that the game itself is incompatible.
 
 ## Report a problem
+
+The Games tab now shows exact blockers and next steps beside the controls. Its optional status-overlay toggle checks HUD helper health and monitors new runtime events. See the [status and overlay guide](STATUS_GUIDE.md) for **Game running**, changed-file ownership, runtime evidence and experimental display support.
 
 Open [a bug report](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml). Include the app or plugin version, device model, SteamOS/Linux version, launcher, game, selected renderer, and the exact error. Copy the relevant diagnostics or build log after removing personal paths or other private information. Do not upload generated weights, kernels, entire game folders or credentials.
 

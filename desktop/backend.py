@@ -11,6 +11,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'py_modules'))
 from manager import Manager, atomic_json
+from status_monitor import StatusMonitor
 from .app_updates import AppUpdates
 from .system import system_status
 
@@ -84,7 +85,17 @@ class DesktopBackend:
                 os.replace(path, backup)
                 self.warnings.append(f'Unreadable desktop settings preserved at {backup}; per-game records remain available.')
         self.manager = Manager(self.home, self.settings)
+        self.status_monitor = StatusMonitor(self.manager)
         self.app_updates = AppUpdates(self.settings)
+
+    def overlay_status(self):
+        """Return the monitor's cached snapshot without waiting for Manager work."""
+        self._open()
+        return self.status_monitor.status()
+
+    def set_status_overlay(self, gid, enabled, executable=None):
+        self._open()
+        return self.status_monitor.configure(gid, bool(enabled), executable)
 
     def _open(self):
         if self.closed:
@@ -178,10 +189,15 @@ class DesktopBackend:
 
     def close(self):
         self.closed = True
+        monitor_stopped = True
+        try:
+            self.status_monitor.close()
+        except Exception:
+            monitor_stopped = False
         for job in self.jobs():
             if job['state'] == 'running':
                 self.manager.cancel_job(job['id'])
         worker = self.manager.worker
         if worker and worker is not threading.current_thread():
             worker.join(15)
-        return not (worker and worker.is_alive())
+        return monitor_stopped and not (worker and worker.is_alive())

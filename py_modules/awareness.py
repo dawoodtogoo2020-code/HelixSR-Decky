@@ -4,6 +4,7 @@ import configparser
 import json
 import os
 import re
+import stat
 import time
 from library import text, read_json, vdf, steam_roots
 from optiscaler_setup import setup_report
@@ -134,7 +135,7 @@ def awareness(game, tree, home, route, target=None):
                     source = 'OptiScaler' if lower == 'optiscaler.ini' else 'Native game'
                     fg.append(evidence(source, k.strip(), value.strip(), p))
             for lp in (d / 'helixsr.log', d / 'HelixSR/helixsr.log', d / 'OptiScaler.log'):
-                if lp.is_file() and str(lp) not in [x['path'] for x in logs]:
+                if safe_log(lp, game['folder']) and str(lp) not in [x['path'] for x in logs]:
                     logs.append(dict(path=str(lp), modified=lp.stat().st_mtime,
                                      excerpt=text_tail(lp)))
     options = game.get('launch_options') or launch_options(home, game.get('appid'))
@@ -203,18 +204,12 @@ def awareness(game, tree, home, route, target=None):
         if any(p in maps for p in opti_files):
             opti_runtime = 'module mapped (rendering involvement unverified)'
     evidence_state = 'unknown'
-    starts = [p.get('started_at', 0) for p in processes]
-    started = min(starts, default=0)
-    managed_disabled = game.get('managed') and game.get('enabled') is False
-    fresh = [x for x in logs if processes and started > 0 and not managed_disabled and
-             x['modified'] >= started and time.time() - x['modified'] < 120]
-    helix_fresh = [x for x in fresh if x['path'].lower().endswith('helixsr.log')]
-    if any(re.search(r'fallback|network (?:not|failed)|cannot|red border', x['excerpt'], re.I) for x in helix_fresh):
-        evidence_state = 'current log reports failure/fallback; inspect log'
-    elif any(re.search(r'network running|launches per frame|output directly', x['excerpt'], re.I) for x in helix_fresh):
-        evidence_state = 'recent running-process log reports neural output; visual/stability check required'
-    elif any(x['path'].lower().endswith('helixsr.log') for x in logs):
+    # A one-shot assessment has no cursor/session boundary. File timestamps
+    # cannot authenticate historical text; the optional monitor reads new events.
+    if any(x['path'].lower().endswith('helixsr.log') for x in logs):
         evidence_state = 'historical log available; current runtime unverified'
+    elif processes:
+        evidence_state = 'game running; current HelixSR output unverified'
     setup = setup_report(target, route, options, opti_files)
     configured_helix = setup['configured']
     return dict(optiscaler=dict(present=bool(opti_files or configs), dlls=opti_files,
@@ -227,9 +222,25 @@ def awareness(game, tree, home, route, target=None):
 
 def text_tail(path, limit=16384):
     try:
-        with Path(path).open('rb') as f:
+        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+        with os.fdopen(fd, 'rb') as f:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return ''
             f.seek(0, 2)
             f.seek(max(0, f.tell() - limit))
             return f.read(limit).decode(errors='replace')
     except OSError:
         return ''
+
+
+def safe_log(path, root):
+    try:
+        path.relative_to(root)
+        for parent in (path, *path.parents):
+            if parent.is_symlink():
+                return False
+            if parent == Path(root):
+                break
+        return path.is_file()
+    except (OSError, ValueError):
+        return False

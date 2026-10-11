@@ -48,6 +48,7 @@ def build():
          '--hidden-import', 'desktop.probe',
          '--hidden-import', 'desktop.system', '--hidden-import', 'manager', '--hidden-import', 'model_variants',
          '--hidden-import', 'library', '--hidden-import', 'awareness',
+         '--hidden-import', 'status_monitor', '--hidden-import', 'runtime_status', '--hidden-import', 'overlay_helper',
          '--hidden-import', 'operation_lock', '--hidden-import', 'host_environment', str(ROOT / 'scripts/desktop_entry.py')])
     destination = appdir / 'usr/bin/helixsr-desktop'
     destination.parent.mkdir(parents=True)
@@ -68,7 +69,7 @@ def build():
     shutil.copy2(cursor.resolve(), internal / cursor.name)
     share = appdir / 'usr/share/helixsr-desktop'
     share.mkdir(parents=True)
-    for name in ('LICENSE', 'DESKTOP_GUIDE.md', 'OPTISCALER_GUIDE.md', 'MODEL_VARIANTS.md', 'DESKTOP_NOTICES.md', 'THIRD_PARTY_NOTICES.md'):
+    for name in ('LICENSE', 'DESKTOP_GUIDE.md', 'OPTISCALER_GUIDE.md', 'MODEL_VARIANTS.md', 'STATUS_GUIDE.md', 'DESKTOP_NOTICES.md', 'THIRD_PARTY_NOTICES.md'):
         shutil.copy2(ROOT / name, share / name)
     licenses = share / 'licenses'
     licenses.mkdir()

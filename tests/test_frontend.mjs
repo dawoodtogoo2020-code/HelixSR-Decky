@@ -21,6 +21,30 @@ test("changed managed files cannot appear as a healthy enabled install", () => {
   assert.equal(gameStatus({...enabled, compatibility: "blocked", executable_selection_needed: true}).label, "Choose executable");
 });
 
+test("structured running status keeps managed installation visible and writes paused", () => {
+  const game = {compatibility: "blocked", managed: true, enabled: true, legacy: false,
+    installed_version: "1.8.1", installation_status: {state: "running", label: "Game running",
+      summary: "File changes paused until the game closes.", running: true, selectable: true,
+      can_modify: false, issues: [{code: "game_running", title: "Game running",
+        reason: "Game is running; close it before any file changes", steps: ["Close the game."], blocking: true}]}};
+  const status = gameStatus(game);
+  assert.equal(status.label, "Game running");
+  assert.equal(status.review, false);
+  assert.equal(status.installed, true);
+  assert.match(status.summary, /HelixSR enabled.*Game running.*File changes paused/);
+});
+
+test("structured review reports the precise blocker and recorded state", () => {
+  const reason = "Managed files changed; ownership needs review before further changes: amd.dll";
+  const game = {compatibility: "blocked", managed: true, enabled: false, legacy: false,
+    installation_status: {state: "review", label: "Needs review", summary: reason,
+      running: true, selectable: true, can_modify: false, issues: []}};
+  const status = gameStatus(game);
+  assert.equal(status.review, true);
+  assert.equal(status.installed, false);
+  assert.match(status.summary, /Managed files changed.*Recorded as disabled/);
+});
+
 const artifact = {artifact: "file:///private/update-attempt.zip", name: "HelixSR Decky", version: "0.1.3", sha256: "a".repeat(64), install_type: 2};
 
 test("download requests confirmation, reopening cancels the previous exact request", async t => {

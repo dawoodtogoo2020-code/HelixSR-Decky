@@ -40,6 +40,8 @@ function pollPluginStatus() {
 
 type FG = { source: string; key: string; value: string; enabled: boolean | null; meaning: string; path: string };
 type Game = { id: string; name: string; folder: string; source: string; compatibility: string;
+  installation_status?: { state: "ready" | "running" | "review" | "unsupported" | "recovery"; label: string; summary: string;
+    running: boolean; selectable: boolean; can_modify: boolean; issues: {code: string; title: string; reason: string; steps: string[]; blocking: boolean}[] };
   appid?: string;
   reasons: string[]; route: string | null; inputs: string[]; managed: boolean; enabled: boolean;
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
@@ -71,6 +73,36 @@ const previewAction = callable<[string, string, boolean, string?], Preview>("pre
 const applyAction = callable<[string], { message: string }>("apply_action");
 const previewLatest = callable<[string, boolean, string?, string?], Preview>("preview_latest");
 const installLatest = callable<[string], Job>("install_latest");
+type OverlayStatus = { enabled: boolean; game_id: string | null;
+  overlay: {state: string; label: string; detail: string; responding: boolean; visible_verified: boolean};
+  runtime: {state: string; label: string; detail: string; observed_at?: number; version?: string; model?: string} };
+const overlayStatus = callable<[], OverlayStatus>("overlay_status");
+const setStatusOverlay = callable<[string | null, boolean, string?], OverlayStatus>("set_status_overlay");
+let latestOverlayStatus: OverlayStatus | undefined;
+let overlayTimer: ReturnType<typeof setInterval> | undefined;
+let overlayPolling = false;
+let overlayNotificationKey = "";
+const overlayListeners = new Set<(status: OverlayStatus) => void>();
+function publishOverlayStatus(status: OverlayStatus) {
+  if (pluginDisposed) return;
+  latestOverlayStatus = status;
+  overlayListeners.forEach(listener => listener(status));
+  if (!status.enabled) { overlayNotificationKey = ""; return; }
+  const key = `${status.game_id}:${status.runtime.state}:${status.overlay.state}`;
+  if (key !== overlayNotificationKey && ["output", "failure", "unavailable"].includes(status.runtime.state)) {
+    toaster.toast({ title: "HelixSR status", body: `${status.runtime.label}. ${status.overlay.label}.`, duration: 6000 });
+  }
+  overlayNotificationKey = key;
+}
+function pollOverlayStatus() {
+  if (overlayPolling || pluginDisposed) return;
+  overlayPolling = true;
+  void overlayStatus().then(publishOverlayStatus).catch(() => {
+    if (latestOverlayStatus?.enabled) publishOverlayStatus({ ...latestOverlayStatus,
+      runtime: {state: "unavailable", label: "Runtime status unavailable", detail: "Backend connection lost. Toggle off and on after it reconnects."},
+      overlay: {state: "stale", label: "Overlay health unverified", detail: "No current backend response.", responding: false, visible_verified: false} });
+  }).finally(() => { overlayPolling = false; });
+}
 type LaunchIntent = { nonce: string; before: string; after: string; restore: boolean };
 const prepareLaunch = callable<[string, string, string, boolean], LaunchIntent>("prepare_launch_options");
 const finalizeLaunch = callable<[string, string, string], unknown>("finalize_launch_options");
@@ -89,6 +121,8 @@ async function liveLaunchOptions(appid: number): Promise<string> {
 let lastSelected = "";
 const selectionListeners = new Set<(id: string) => void>();
 function chooseGame(id: string) {
+  if (lastSelected !== id && latestOverlayStatus?.enabled)
+    void setStatusOverlay(null, false).then(publishOverlayStatus).catch(() => {});
   lastSelected = id;
   selectionListeners.forEach(listener => listener(id));
 }
@@ -191,6 +225,7 @@ function watchJobs(next: Job[]) {
   }
 }
 function Content() {
+  const [overlay, setOverlay] = useState(latestOverlayStatus);
   const [data, setData] = useState<Library>();
   const [selected, select] = useState(lastSelected);
   const [game, setGame] = useState<Game>();
@@ -215,6 +250,12 @@ function Content() {
   const executableRef = useRef<string | undefined>(undefined);
   selectedRef.current = selected;
 
+  useEffect(() => {
+    overlayListeners.add(setOverlay);
+    setOverlay(latestOverlayStatus);
+    pollOverlayStatus();
+    return () => { overlayListeners.delete(setOverlay); };
+  }, []);
   useEffect(() => {
     pluginUpdateListeners.add(setPluginUpdate);
     setPluginUpdate(latestPluginStatus);
@@ -284,6 +325,11 @@ function Content() {
   async function chooseExecutable(path: string) {
     if (!game || game.managed || game.route !== "optiscaler") return;
     const id = game.id;
+    if (latestOverlayStatus?.enabled) {
+      const stopped = await run(() => setStatusOverlay(null, false));
+      if (!stopped) return;
+      publishOverlayStatus(stopped);
+    }
     executableRef.current = path;
     setDx12(false);
     const updated = await run(() => details(id, path));
@@ -421,7 +467,7 @@ function Content() {
   const running = jobs.some(x => x.state === "running");
   const disabled = busy || running || modalOpen || !!pluginUpdate?.pending;
   const libraryGames = (data?.games || []).map(g => game?.id === g.id ? game : g);
-  const games = libraryGames.filter(g => g.compatibility === "candidate" || g.recovery_available || g.managed || g.executable_selection_needed);
+  const games = libraryGames.filter(g => g.installation_status?.selectable ?? (g.compatibility === "candidate" || !!g.recovery_available || g.managed || !!g.executable_selection_needed));
   const unavailable = libraryGames.filter(g => !games.includes(g));
   const selectedStatus = game ? gameStatus(game) : undefined;
   const infoStyle = { fontSize: "13px", lineHeight: "1.45", overflowWrap: "anywhere" as const, whiteSpace: "pre-wrap" as const };
@@ -447,6 +493,9 @@ function Content() {
       </PanelSectionRow></div>
       {game && <>
         <PanelSectionRow><div className="helix-muted" style={{ color: selectedStatus?.color }}>{selectedStatus?.summary}</div></PanelSectionRow>
+        {game.installation_status?.issues.map((issue, index) => <PanelSectionRow key={`${issue.code}-${index}`}><div className="helix-card" style={{ ...infoStyle, borderLeftColor: issue.blocking ? "#f1ca7e" : "#53c5d0" }}>
+          <strong>{issue.title}</strong>{"\n"}{issue.reason}{"\n"}Next: {issue.steps.join(" ")}
+        </div></PanelSectionRow>)}
         {!game.managed && game.route === "optiscaler" && !!game.executable_choices?.length && (game.executable_choices.length > 1 || !game.executable_choices.some(choice => choice.path === game.selected_executable)) && <>
           <PanelSectionRow><DropdownItem layout="below" label="Game executable" menuLabel="Choose the executable you launch"
             selectedOption={game.selected_executable} strDefaultLabel="Choose a game executable" disabled={disabled}
@@ -456,14 +505,25 @@ function Content() {
         </>}
         {game.dx12_confirmation_needed && <PanelSectionRow><ToggleField label="Game is set to DirectX 12"
           description="Confirm the renderer selected in the game." checked={dx12} onChange={setDx12} disabled={disabled} /></PanelSectionRow>}
-        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate"}
+        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
           onClick={() => void interact(installOrUpdate)}>{game.managed || game.legacy ? "Update HelixSR" : "Install HelixSR"}</ButtonItem></PanelSectionRow></div>
       </>}
       <PanelSectionRow><ButtonItem layout="below" onClick={() => void refresh()} disabled={busy || modalOpen}>Refresh library and status</ButtonItem></PanelSectionRow>
       {!!unavailable.length && <PanelSectionRow><ButtonItem layout="below" onClick={() => setUnavailableGames(!unavailableGames)}>{unavailableGames ? "Hide unavailable games" : `Unavailable games (${unavailable.length})`}</ButtonItem></PanelSectionRow>}
-      {unavailableGames && unavailable.map(g => <PanelSectionRow key={g.id}><div className="helix-card helix-muted">{g.name}{"\n"}{g.reasons.join("\n") || "No supported upscaler detected"}</div></PanelSectionRow>)}
+      {unavailableGames && unavailable.map(g => <PanelSectionRow key={g.id}><div className="helix-card helix-muted">{g.name}{"\n"}{g.installation_status?.issues.map(i => `${i.title}: ${i.reason}\nNext: ${i.steps.join(" ")}`).join("\n\n") || g.reasons.join("\n") || "No supported upscaler detected"}</div></PanelSectionRow>)}
       {error && <PanelSectionRow><div role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>{error}</div></PanelSectionRow>}
     </PanelSection>
+    {game && <PanelSection title="Status overlay">
+      <PanelSectionRow><ToggleField label="Show HelixSR status overlay (experimental)"
+        description="Checks the HUD helper and monitors new session log events. Enable before launching the game."
+        checked={!!overlay?.enabled && overlay.game_id === game.id} disabled={busy || modalOpen}
+        onChange={enabled => void run(() => setStatusOverlay(game.id, enabled, executableRef.current)).then(value => { if (value) publishOverlayStatus(value); })} /></PanelSectionRow>
+      {!!overlay?.enabled && overlay.game_id === game.id && <PanelSectionRow><div className="helix-card" style={infoStyle}>
+        {overlay.overlay.label}{"\n"}{overlay.overlay.detail}{"\n\n"}
+        {overlay.runtime.label}{"\n"}{overlay.runtime.detail}
+      </div></PanelSectionRow>}
+      <PanelSectionRow><div className="helix-muted">A mapped HUD confirms the helper responds; it does not prove the HUD is visible. New dispatch events report neural output, not image quality or active frame generation. Other overlays and game settings are left unchanged.</div></PanelSectionRow>
+    </PanelSection>}
     {game && <PanelSection title={game.name}>
       <PanelSectionRow><div className="helix-card" style={infoStyle}>
         {game.source} · {game.compatibility}{"\n"}
@@ -481,11 +541,11 @@ function Content() {
       </>}
       <PanelSectionRow><div className="helix-muted">Downloads, required dependencies and the local network build are handled automatically. Administrator access is not needed for your own game folders.</div></PanelSectionRow>
       {game.managed && <>
-        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate"}
+        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
           onClick={() => void interact(() => action(game.enabled ? "disable" : "enable"))}>{game.enabled ? "Disable HelixSR" : "Enable HelixSR"}</ButtonItem></PanelSectionRow>
-        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate"} onClick={() => void interact(() => action("remove"))}>Remove and restore originals</ButtonItem></PanelSectionRow>
+        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false} onClick={() => void interact(() => action("remove"))}>Remove and restore originals</ButtonItem></PanelSectionRow>
       </>}
-      {game.recovery_available && <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void interact(() => action("recover"))}>Recover interrupted file transaction</ButtonItem></PanelSectionRow>}
+      {game.recovery_available && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running} onClick={() => void interact(() => action("recover"))}>Recover interrupted file transaction</ButtonItem></PanelSectionRow>}
       {game.source === "Imported" && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.managed}
         onClick={() => void run(() => forgetGame(game.id)).then(result => { if (result) { setData(result); chooseGame(""); } })}>Forget imported folder</ButtonItem></PanelSectionRow>}
     </PanelSection>}
@@ -604,6 +664,9 @@ export default definePlugin(() => {
   if (pluginUpdateTimer) clearInterval(pluginUpdateTimer);
   pollPluginStatus();
   pluginUpdateTimer = setInterval(pollPluginStatus, 60000);
+  if (overlayTimer) clearInterval(overlayTimer);
+  pollOverlayStatus();
+  overlayTimer = setInterval(pollOverlayStatus, 2000);
   if (typeof DeckyBackend !== "undefined" && DeckyBackend.addEventListener && DeckyBackend.removeEventListener) {
     DeckyBackend.addEventListener("loader/add_plugin_install_prompt", nativeUpdatePrompt);
     DeckyBackend.addEventListener("loader/plugin_download_start", nativeUpdateStarted);
@@ -613,6 +676,10 @@ export default definePlugin(() => {
   name: "HelixSR Decky", titleView: <div className={staticClasses.Title}>HelixSR Decky</div>,
   content: <Content />, icon: <FaAdjust />, onDismount() {
     pluginDisposed = true;
+    if (overlayTimer) clearInterval(overlayTimer);
+    overlayTimer = undefined;
+    void setStatusOverlay(null, false).catch(() => {});
+    latestOverlayStatus = undefined;
     pluginInstaller.dispose();
     if (pluginUpdateTimer) clearInterval(pluginUpdateTimer);
     pluginUpdateTimer = undefined;

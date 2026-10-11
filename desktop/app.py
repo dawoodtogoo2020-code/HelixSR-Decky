@@ -39,6 +39,12 @@ TERMS = (
 
 
 def game_status(game):
+    report = game.get('installation_status') or {}
+    if report:
+        state = report.get('label') or report.get('state') or 'Status unavailable'
+        recorded = f"Recorded as {'enabled' if game.get('enabled') else 'disabled'}" if (not report.get('can_modify', True) and game.get('managed') and report.get('state') not in ('enabled', 'disabled')) else ''
+        color = '#f1ca7e' if report.get('issues') else '#82dfaf' if game.get('managed') or game.get('legacy') else '#a2a3af'
+        return state, recorded, color
     review = bool(game) and (game.get('compatibility') != 'candidate' or bool(game.get('recovery_available')))
     state = ('Choose executable' if game.get('executable_selection_needed') else
              'Recovery needed' if game.get('recovery_available') else
@@ -149,6 +155,7 @@ class MainWindow(QMainWindow):
         self._seen_jobs = {}
         self._shutdown_requested = False
         self._active_dialog = None
+        self._overlay_snapshot = {}
         self.setWindowTitle(f"HelixSR Desktop {VERSION}")
         self.resize(1000, 700)
         self.setMinimumSize(680, 480)
@@ -168,6 +175,10 @@ class MainWindow(QMainWindow):
         self.timer.setInterval(1500)
         self.timer.timeout.connect(self.poll_jobs)
         self.timer.start()
+        self.overlay_timer = QTimer(self)
+        self.overlay_timer.setInterval(1200)
+        self.overlay_timer.timeout.connect(self.poll_overlay)
+        self.overlay_timer.start()
         self.shutdown_timer = QTimer(self)
         self.shutdown_timer.setInterval(100)
         self.shutdown_timer.timeout.connect(self._process_shutdown)
@@ -241,6 +252,21 @@ class MainWindow(QMainWindow):
             self.actions[action] = self._button(action.title(), lambda checked=False, a=action: self.preview_action(a), row)
         self.forget = self._button("Forget import", self.forget_game, row)
         content.addLayout(row)
+        self.blockers = QLabel()
+        self.blockers.setWordWrap(True)
+        self.blockers.setTextFormat(Qt.PlainText)
+        content.addWidget(self.blockers)
+        self.overlay_toggle = QCheckBox('Show experimental in-game status overlay')
+        self.overlay_toggle.toggled.connect(self.set_overlay)
+        content.addWidget(self.overlay_toggle)
+        self.overlay_health = QLabel('Overlay: off · Visibility unverified')
+        self.overlay_health.setWordWrap(True)
+        self.overlay_health.setTextFormat(Qt.PlainText)
+        content.addWidget(self.overlay_health)
+        self.runtime_status = QLabel('Runtime: no current observation')
+        self.runtime_status.setWordWrap(True)
+        self.runtime_status.setTextFormat(Qt.PlainText)
+        content.addWidget(self.runtime_status)
         self.evidence = QTextEdit()
         self.evidence.setReadOnly(True)
         content.addWidget(self.evidence, 1)
@@ -387,16 +413,24 @@ class MainWindow(QMainWindow):
         self.dx12.setEnabled(free)
         confirmed = not game.get("dx12_confirmation_needed") or self.dx12.isChecked()
         candidate = game.get("compatibility") == "candidate" and not game.get("recovery_available")
+        report = game.get('installation_status') or {}
+        if report:
+            candidate = bool(report.get('can_modify')) and not game.get('recovery_available')
         self.install.setText("Update HelixSR" if game.get("managed") else "Install HelixSR")
         self.install.setEnabled(free and candidate and confirmed and not game.get("legacy"))
         for action, button in self.actions.items():
             visible = (action == "recover" and game.get("recovery_available")) or (action == "adopt" and game.get("legacy")) or (action in ("enable", "disable", "remove") and game.get("managed"))
             button.setVisible(bool(visible))
-            button.setEnabled(free and bool(visible) and (action == "recover" or candidate))
+            recovery_safe = not report.get('running') and not any(i.get('code') == 'steam_update' for i in report.get('issues', []))
+            button.setEnabled(free and bool(visible) and (recovery_safe if action == "recover" else candidate))
         self.forget.setEnabled(free and game.get("source") == "Imported" and not game.get("managed"))
         self.launch.setEnabled(free and bool(game))
         self.app_download.setEnabled(free and bool(self.app_update.get("update_available")) and not self.app_update.get("error"))
         self.cancel_button.setEnabled(active and not self._task and not self._modal and not self._closing)
+        self.overlay_toggle.setEnabled(bool(game) and not self._task and not self._modal and not self._closing)
+        reason = self.blockers.text() or 'Review this game before changing files.'
+        for button in (self.install, *self.actions.values()):
+            button.setToolTip('' if button.isEnabled() else reason)
 
     def refresh(self):
         self._run(self.backend.library, self._library_received)
@@ -408,12 +442,15 @@ class MainWindow(QMainWindow):
         self.games.clear()
         self.unavailable.clear()
         for game in self._games.values():
-            if game.get("compatibility") == "candidate" or game.get("managed") or game.get("recovery_available") or game.get("executable_selection_needed"):
+            report = game.get('installation_status') or {}
+            if report.get('selectable', game.get("compatibility") == "candidate" or game.get("managed") or game.get("recovery_available") or game.get("executable_selection_needed")):
                 state, _, color = game_status(game)
                 self.games.addItem(f"{game.get('name', game['id'])} · {state}", game["id"])
                 self.games.setItemData(self.games.count() - 1, QColor(color), Qt.ForegroundRole)
             else:
                 self.unavailable.addItem(f"{game.get('name', '')}: {'; '.join(game.get('reasons', [])) or game.get('compatibility', 'unknown')}")
+                self.unavailable.item(self.unavailable.count() - 1).setToolTip('\n\n'.join(
+                    i.get('reason', '') + '\nNext: ' + ' '.join(i.get('steps', [])) for i in report.get('issues', [])))
         index = self.games.findData(previous)
         self.games.setCurrentIndex(index if index >= 0 else 0)
         self.games.blockSignals(False)
@@ -442,9 +479,15 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self.check_app(False))
 
     def select_game(self, *_):
+        prior = (self._overlay_snapshot or {}).get('game_id')
         self.game = self._games.get(self.games.currentData())
         self.dx12.setChecked(False)
         self._render_game()
+        if prior and prior != self.games.currentData() and (self._overlay_snapshot or {}).get('enabled'):
+            gid = self.games.currentData()
+            self._run(lambda: self.backend.set_status_overlay(None, False),
+                      lambda value: self._overlay_switched(value, gid))
+            return
         if self.game:
             gid = self.game["id"]
             self._run(lambda: self.backend.details(gid), lambda value: self._details_received(gid, value))
@@ -456,7 +499,11 @@ class MainWindow(QMainWindow):
         if not executable or executable == self.game.get("selected_executable"):
             return
         self.dx12.setChecked(False)
-        self._run(lambda: self.backend.details(gid, executable), lambda value: self._details_received(gid, value, reset_model=False))
+        def change():
+            if (self._overlay_snapshot or {}).get('enabled'):
+                self.backend.set_status_overlay(None, False)
+            return self.backend.details(gid, executable)
+        self._run(change, lambda value: self._details_received(gid, value, reset_model=False))
 
     def _details_received(self, gid, value, reset_model=True):
         if self.games.currentData() == gid:
@@ -485,6 +532,19 @@ class MainWindow(QMainWindow):
         if reset_model:
             self.models.setCurrentIndex(max(0, self.models.findData(game.get('installed_variant'))))
         self.status.setStyleSheet(f"color: {color}")
+        report = game.get('installation_status') or {}
+        issues = report.get('issues') or []
+        instructions = []
+        for issue in issues:
+            title = issue.get('title') or issue.get('code') or 'Review needed'
+            reason = issue.get('reason') or ''
+            steps = issue.get('steps') or []
+            if isinstance(steps, str):
+                steps = [steps]
+            instructions.append(f"{title}: {reason}" + ("\nNext: " + '; '.join(map(str, steps)) if steps else ''))
+        self.blockers.setText('\n\n'.join(instructions) if instructions else (report.get('summary') or ''))
+        self.blockers.setVisible(bool(instructions or report.get('summary')))
+        self.poll_overlay()
         opti = game.get("optiscaler") or {}
         route_label = 'Recorded route' if game.get('managed') else 'Detected route'
         text = (f"{route_label}: {game.get('route') or 'none detected'}\n"
@@ -545,6 +605,55 @@ class MainWindow(QMainWindow):
             self.tabs.setCurrentIndex(3)
         else:
             QTimer.singleShot(0, self.refresh)
+
+    def _overlay_switched(self, value, gid):
+        self._overlay_received(value)
+        if gid and self.games.currentData() == gid:
+            self._run(lambda: self.backend.details(gid), lambda detail: self._details_received(gid, detail))
+
+    def set_overlay(self, enabled):
+        if self._closing or not self.game:
+            return
+        gid = self.game['id'] if enabled else None
+        executable = self.game.get('selected_executable') if enabled and not self.game.get('managed') and self.game.get('route') == 'optiscaler' else None
+        if not self._run(lambda: self.backend.set_status_overlay(gid, enabled, executable), self._overlay_received):
+            self.poll_overlay()
+
+    def _overlay_received(self, value):
+        if isinstance(value, dict):
+            self._overlay_snapshot = value
+        self._show_overlay()
+
+    def poll_overlay(self):
+        if self._closing or self._task or not hasattr(self.backend, 'overlay_status'):
+            return
+        try:
+            self._overlay_snapshot = self.backend.overlay_status()
+        except Exception as exc:
+            self._overlay_snapshot = dict(enabled=False, overlay=dict(state='error', label='Unavailable', detail=str(exc)),
+                                          runtime=dict(label='Monitoring unavailable', detail=''))
+        self._show_overlay()
+
+    def _show_overlay(self):
+        snapshot = self._overlay_snapshot or {}
+        overlay = snapshot.get('overlay') or {}
+        runtime = snapshot.get('runtime') or {}
+        selected = (self.game or {}).get('id')
+        checked = bool(snapshot.get('enabled') and snapshot.get('game_id') == selected)
+        self.overlay_toggle.blockSignals(True)
+        self.overlay_toggle.setChecked(checked)
+        self.overlay_toggle.blockSignals(False)
+        overlay_label = overlay.get('label') or overlay.get('state') or 'Off'
+        overlay_detail = overlay.get('detail') or ''
+        if snapshot.get('enabled') and snapshot.get('game_id') != selected:
+            overlay_detail = f"Monitoring another game ({snapshot.get('game_id')}). " + overlay_detail
+        health = ('Helper responding' if overlay.get('responding') else
+                  'Helper response unavailable' if snapshot.get('enabled') else 'Off')
+        self.overlay_health.setText(f"Overlay: {overlay_label} · {health} · Visibility unverified"
+                                    + (f"\n{overlay_detail}" if overlay_detail else ''))
+        runtime_label = runtime.get('label') or runtime.get('state') or 'No current observation'
+        runtime_detail = runtime.get('detail') or ''
+        self.runtime_status.setText(f"Runtime: {runtime_label}" + (f"\n{runtime_detail}" if runtime_detail else ''))
 
     def poll_jobs(self):
         if not self._modal and not self._closing and not self._task and any(j.get("state") in ACTIVE for j in self._jobs):
@@ -664,6 +773,7 @@ class MainWindow(QMainWindow):
             return
         self._closing = True
         self.timer.stop()
+        self.overlay_timer.stop()
         self._notify("Stopping active work safely before closing…")
         self._controls()
         if not self._task:
@@ -701,6 +811,7 @@ class MainWindow(QMainWindow):
             self._closing = False
             self._notify(error, True)
             self.timer.start()
+            self.overlay_timer.start()
             self._controls()
         elif value is False:
             self._notify("Installation is still stopping. Keeping the app open until its worker exits.")

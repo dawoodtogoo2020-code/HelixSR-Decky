@@ -7,11 +7,13 @@ sys.path.insert(0, str(Path(__file__).parent / 'py_modules'))
 from manager import Manager
 from plugin_updates import PluginUpdates
 from launch_receipts import LaunchReceipts
+from status_monitor import StatusMonitor
 
 
 class Plugin:
     async def _main(self):
         self.manager = Manager(decky.DECKY_USER_HOME, decky.DECKY_PLUGIN_SETTINGS_DIR)
+        self.status_monitor = StatusMonitor(self.manager)
         self.api_lock = asyncio.Lock()
         self.plugin_updates = PluginUpdates(decky.DECKY_PLUGIN_SETTINGS_DIR, Path(__file__).parent / 'package.json')
         await asyncio.to_thread(self.plugin_updates.cleanup_installed)
@@ -20,6 +22,10 @@ class Plugin:
         decky.logger.info('HelixSR Decky loaded without root permissions')
 
     async def _unload(self):
+        try:
+            await asyncio.to_thread(self.status_monitor.close)
+        except Exception as exc:
+            decky.logger.warning('Status monitor shutdown: %s', exc)
         self.update_task.cancel()
         try:
             await self.update_task
@@ -83,6 +89,13 @@ class Plugin:
     async def game_details(self, gid, executable=None):
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.assess_safe, self.manager.get_game(gid), executable=executable)
+
+    async def overlay_status(self):
+        return self.status_monitor.status()
+
+    async def set_status_overlay(self, gid, enabled, executable=None):
+        async with self.api_lock:
+            return await asyncio.to_thread(self.status_monitor.configure, gid, enabled, executable)
 
     async def import_game(self, folder, name):
         async with self.api_lock:
