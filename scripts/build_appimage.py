@@ -39,6 +39,7 @@ def build():
          '--workpath', str(build_root / 'work'), '--specpath', str(build_root),
          '--paths', str(ROOT), '--paths', str(ROOT / 'py_modules'),
          '--hidden-import', 'desktop.backend', '--hidden-import', 'desktop.app_updates',
+         '--hidden-import', 'desktop.probe',
          '--hidden-import', 'desktop.system', '--hidden-import', 'manager',
          '--hidden-import', 'library', '--hidden-import', 'awareness',
          '--hidden-import', 'operation_lock', '--hidden-import', 'host_environment', str(ROOT / 'scripts/desktop_entry.py')])
@@ -65,6 +66,10 @@ def build():
         shutil.copy2(ROOT / name, share / name)
     licenses = share / 'licenses'
     licenses.mkdir()
+    qt_notices = ROOT / 'licenses/qt-6.12.0'
+    if not (qt_notices / 'qtbase/LICENSES/LGPL-3.0-only.txt').is_file():
+        raise SystemExit('Missing reviewed Qt upstream license texts')
+    shutil.copytree(qt_notices, licenses / 'Qt-6.12.0')
     for name in ('PySide6-Essentials', 'shiboken6', 'pyinstaller',
                  'pyinstaller-hooks-contrib', 'altgraph', 'packaging', 'setuptools'):
         dist = importlib.metadata.distribution(name)
@@ -80,7 +85,9 @@ def build():
                     out.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, out)
                     copied += 1
-        if not copied:
+        # Some Linux Qt wheels omit texts. Reviewed matching upstream texts above
+        # are included unconditionally; do not rely on wheel metadata alone.
+        if not copied and name not in ('PySide6-Essentials', 'shiboken6'):
             raise SystemExit('Missing bundled license text: ' + name)
     license_url = f'https://raw.githubusercontent.com/python/cpython/v{platform.python_version()}/LICENSE'
     with urllib.request.urlopen(license_url, timeout=30) as response:
