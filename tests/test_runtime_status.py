@@ -213,6 +213,81 @@ class RuntimeEvidenceTests(unittest.TestCase):
             self.log.write_text(SUCCESS)
             self.assertEqual(self.evidence.sample()['state'], 'output')
 
+    def test_delayed_game_writer_can_rewrite_unchanged_armed_log(self):
+        clock = [100.0]
+        self.processes = []
+        self.log.write_text('historical line\n')
+        with patch.object(runtime_status.time, 'monotonic', side_effect=lambda: clock[0]), \
+                patch.object(runtime_status, 'writing_log', side_effect=lambda *_: clock[0] >= 103):
+            self.assertEqual(self.evidence.sample()['state'], 'not_running')
+            self.processes = [self.proc]
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            clock[0] = 103.1
+            self.log.write_text(SUCCESS)
+            self.assertEqual(self.evidence.sample()['state'], 'output')
+
+    def test_startup_session_recheck_failure_cannot_parse_append(self):
+        self.processes = []
+        self.log.write_text('historical line\n')
+        self.assertEqual(self.evidence.sample()['state'], 'not_running')
+        self.processes = [self.proc]
+        with patch.object(runtime_status, 'writing_log', return_value=False):
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            self.append(SUCCESS)
+            with patch.object(runtime_status, 'executable_session',
+                              side_effect=[self.session, (123, '1001')]):
+                self.assertEqual(self.evidence.sample()['state'], 'unavailable')
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+
+    def test_startup_grace_expires_without_replaying_late_rewrite(self):
+        clock = [100.0]
+        self.processes = []
+        self.log.write_text('historical line\n')
+        with patch.object(runtime_status.time, 'monotonic', side_effect=lambda: clock[0]), \
+                patch.object(runtime_status, 'writing_log', side_effect=lambda *_: clock[0] >= 116):
+            self.assertEqual(self.evidence.sample()['state'], 'not_running')
+            self.processes = [self.proc]
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            clock[0] = 114.9
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            clock[0] = 116.0
+            self.log.write_text(SUCCESS)
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+
+    def test_module_remap_does_not_extend_first_mapping_deadline(self):
+        clock = [100.0]
+        self.processes = []
+        self.log.write_text('historical line\n')
+        with patch.object(runtime_status.time, 'monotonic', side_effect=lambda: clock[0]), \
+                patch.object(runtime_status, 'writing_log', side_effect=lambda *_: clock[0] >= 116):
+            self.assertEqual(self.evidence.sample()['state'], 'not_running')
+            self.processes = [self.proc]
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            self.mapped = False
+            clock[0] = 110.0
+            self.assertEqual(self.evidence.sample()['state'], 'unverified')
+            self.mapped = True
+            clock[0] = 114.0
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            clock[0] = 116.0
+            self.log.write_text(SUCCESS)
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+
+    def test_changed_bytes_without_game_writer_consumes_startup_token(self):
+        clock = [100.0]
+        self.processes = []
+        self.log.write_text('historical line\n')
+        with patch.object(runtime_status.time, 'monotonic', side_effect=lambda: clock[0]), \
+                patch.object(runtime_status, 'writing_log', side_effect=lambda *_: clock[0] >= 103):
+            self.assertEqual(self.evidence.sample()['state'], 'not_running')
+            self.processes = [self.proc]
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            clock[0] = 102.0
+            self.log.write_text(SUCCESS)
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            clock[0] = 103.0
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+
 
 class ExecutableSessionTests(unittest.TestCase):
     """Proton wrapper arguments must not impersonate the running game."""
@@ -248,6 +323,7 @@ class ExecutableSessionTests(unittest.TestCase):
             (r'S:\games\PRAGMATA.exe', r'S:\games\PRAGMATA.exe'),
             (r'Z:\steamapps\common\PRAGMATA.exe', r'Z:\steamapps\common\PRAGMATA.exe'),
             (r'Z:\steamapps\common\PRAGMATA.exe', r'S:\games\PRAGMATA.exe'),
+            ('/games/Pragmata.EXE', '/games/PRAGMATA.exe'),
         ):
             with self.subTest(expected=expected, command=command):
                 self.assertEqual(self.session([command, '-dx12'], expected), (123, '9001'))
@@ -264,6 +340,15 @@ class ExecutableSessionTests(unittest.TestCase):
         self.assertIsNone(self.session([r'S:\games\PRAGMATA.exe'], stat_present=False))
         self.assertIsNone(self.session([r'S:\games\PRAGMATA.exe'], changed_start=True))
         self.assertIsNone(self.session([], expected=r'S:\games\PRAGMATA.exe'))
+
+    def test_other_user_proc_cannot_be_attributed(self):
+        with patch.object(runtime_status.os, 'getuid', create=True, return_value=1000), \
+                patch.object(Path, 'stat', autospec=True,
+                             return_value=SimpleNamespace(st_uid=1001)), \
+                patch.object(Path, 'read_bytes', autospec=True,
+                             side_effect=AssertionError('foreign cmdline must not be read')):
+            self.assertIsNone(runtime_status.executable_session(
+                dict(pid=123, started_at=100), r'S:\games\PRAGMATA.exe'))
 
 
 from test_backend import Fixtures

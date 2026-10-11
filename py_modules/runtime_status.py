@@ -124,6 +124,7 @@ class RuntimeEvidence:
         self.prelaunch = False
         self.absent = set()
         self.startup_reads = set()
+        self.startup_deadline = None
 
     @staticmethod
     def _cursor(stream, info):
@@ -148,9 +149,10 @@ class RuntimeEvidence:
                 self.absent.discard(str(path))
 
     def _read(self, path, proc):
-        startup = str(path) in self.startup_reads
-        # One inspection per primed path in this new session. Later rotation,
-        # missing files and failed writer authentication cannot earn a retry.
+        startup = (str(path) in self.startup_reads and self.startup_deadline is not None
+                   and time.monotonic() < self.startup_deadline)
+        # Only an unchanged prelaunch baseline may wait briefly for the game to
+        # open its log. A reset, first writer, failure or expiry consumes the token.
         self.startup_reads.discard(str(path))
         with_regular, info = regular_beneath(path, self.root)
         with with_regular as stream:
@@ -169,13 +171,24 @@ class RuntimeEvidence:
                 continuous = stream.read(len(cursor['prefix'])) == cursor['prefix']
                 stream.seek(max(0, cursor['offset'] - len(cursor['anchor'])))
                 continuous = continuous and stream.read(len(cursor['anchor'])) == cursor['anchor']
+            writer = startup and writing_log(proc['pid'], info)
+            same_session = startup and executable_session(proc, self.expected) == self.session
+            if startup and not same_session:
+                self.cursors[str(path)] = self._cursor(stream, info)
+                raise ValueError('Game process changed during startup; evidence reset')
+            if (startup and cursor and cursor['identity'] == identity
+                    and info.st_size == cursor['offset'] and continuous
+                    and not writer and same_session):
+                # The DLL can map before its logger opens. Retain this exact
+                # idle baseline only within the fixed first-mapping deadline.
+                self.startup_reads.add(str(path))
+                return []
             # First attach, replacement and truncation establish a baseline.
             # Skip existing text even if somebody touches its timestamp.
             if not cursor or cursor['identity'] != identity or info.st_size < cursor['offset'] or not continuous:
                 self.event = None
                 self.ready.discard(str(path))
-                if (startup and cursor and writing_log(proc['pid'], info)
-                        and executable_session(proc, self.expected) == self.session):
+                if startup and cursor and writer and same_session:
                     # A log primed while idle was demonstrably rewritten for
                     # this new game, which holds this inode's writable FD.
                     # Capture its one-time initialization, not historical text.
@@ -216,6 +229,7 @@ class RuntimeEvidence:
             self.ready.clear()
             self.failed = False
             self.startup_reads.clear()
+            self.startup_deadline = None
             if processes:
                 # Steam/Proton helpers appear before the real executable. Keep
                 # an already armed idle baseline, without reading new log text.
@@ -233,6 +247,7 @@ class RuntimeEvidence:
         session, proc = sessions[0]
         if session != self.session:
             self.session = session
+            self.startup_deadline = None
             if not self.prelaunch:
                 self.cursors.clear()
                 self.absent.clear()
@@ -254,6 +269,8 @@ class RuntimeEvidence:
             self.failed = False
             return dict(base, state='unverified', label='Game running; HelixSR unverified',
                         detail='No managed HelixSR module mapping verified. File installation alone is not output evidence.')
+        if self.startup_reads and self.startup_deadline is None:
+            self.startup_deadline = time.monotonic() + 15
         errors = []
         for path in self.paths:
             try:
