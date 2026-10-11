@@ -5,15 +5,15 @@ HelixSR Desktop is a standalone Linux app. Decky Loader is optional. It manages 
 ## Download and open
 
 1. Switch your SteamOS device to Desktop Mode.
-2. Download **HelixSR-Desktop-0.1.2-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.2). Save it in a folder such as `Applications` under your own home folder.
+2. Download **HelixSR-Desktop-0.1.3-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.3). Save it in a folder such as `Applications` under your own home folder.
 3. In your file manager, right-click the AppImage, open **Properties → Permissions**, and enable **Is executable** (wording varies).
 4. Double-click the AppImage. Do not run it with sudo or as administrator.
 
 If your system cannot mount AppImages, open a terminal in its folder and run:
 
 ```sh
-chmod +x HelixSR-Desktop-0.1.2-x86_64.AppImage
-./HelixSR-Desktop-0.1.2-x86_64.AppImage --appimage-extract-and-run
+chmod +x HelixSR-Desktop-0.1.3-x86_64.AppImage
+./HelixSR-Desktop-0.1.3-x86_64.AppImage --appimage-extract-and-run
 ```
 
 This fallback extracts the app temporarily and does not require FUSE or administrator access. [AppImage documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html) explains the options.
@@ -51,6 +51,8 @@ The AppImage targets **Linux x86_64 with glibc 2.35 or newer**, including Steam 
 Hardware portability and game compatibility are separate. HelixSR has its own [upstream requirements and limitations](https://github.com/lonewolf0622/HelixSR). A game's name, SteamOS support, or an AMD vendor ID alone does not establish HelixSR compatibility. Native Linux, DirectX 11 and Vulkan game rendering are not supported installation routes. Anti-cheat and unsupported installations are blocked.
 
 Steam Deck is the device used for release runtime checks. Other SteamOS devices and Steam Machine are supported targets; physical validation on those models is still needed. UI startup and file verification do not establish gameplay stability or performance in every game.
+
+If an older app reports **Network output missing or incomplete** with HelixSR 1.8.0, use **App updates** to download desktop **0.1.3 or newer**, open the new AppImage, then retry Install/Update HelixSR. This concerns generated model files, not your internet connection. If it persists, include a short sanitized build-log excerpt in your report.
 
 ## Report a problem
 

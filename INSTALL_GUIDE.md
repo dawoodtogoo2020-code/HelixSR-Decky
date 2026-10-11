@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.6.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
+3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.7.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -85,6 +85,8 @@ For **HelixSR inside a game**, and troubleshooting:
 2. **Disable HelixSR** restores original files while retaining what is needed to enable it again. **Remove and restore originals** removes the managed installation. If used, separately choose **Restore plugin launch-option change**. Removing the Decky plugin itself does not remove game modifications.
 3. For **game running** or incomplete Steam downloads, close it or wait, then refresh. For network failures, reconnect and retry after reviewing the message. For other injector conflicts, resolve the existing mod through its own installer before retrying; do not overwrite unknown DLLs.
 4. For changed hashes, stop and review whether Steam updated the game. **Recover interrupted file transaction** restores only a matching transaction. File or build conflicts stop recovery before restoration. Steam verification may be needed; it can also remove other mods.
+
+If an older app reports **Network output missing or incomplete** while preparing HelixSR 1.8.0, update the **Decky plugin to 0.1.7 or newer**, then retry Install/Update HelixSR. This concerns generated model files, not your internet connection. The fix requests the separate output files supported by upstream. If preparation still fails, copy a short sanitized build-log excerpt; keep generated weights and kernels private.
 
 ## 9. Report a problem
 

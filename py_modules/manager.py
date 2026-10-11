@@ -162,6 +162,20 @@ def check_build_exit(returncode, cancelled):
         raise ValueError('Network build failed. See build log.')
 
 
+def build_only_script(setup, converter):
+    """Keep local network files separate and stop before upstream game writes."""
+    marker = '# --- games ---'
+    invocation = '"$PY" "$PKG/helixsr_setup.py" "$TARGET" --dxc "$DXC" "${PASS[@]}"'
+    if setup.count(marker) != 1:
+        raise ValueError('Upstream setup changed; build-only adapter needs review')
+    script = setup.split(marker)[0]
+    if script.count(invocation) != 1 or '--separate-files' not in converter:
+        raise ValueError('Upstream network output changed; build-only adapter needs review')
+    # 1.8 embeds the network into its DLL and removes the separate files by default.
+    # Request its supported separate output at the converter, not the shell CLI.
+    return script.replace(invocation, invocation + ' --separate-files') + '\n'
+
+
 def pe_info(path):
     p = Path(path)
     s = p.stat()
@@ -886,11 +900,9 @@ class Manager:
             # Apache-licensed setup adaptation: stop before its interactive game installer.
             # Complete official release is kept; compiled parts are never patched here.
             setup = (package / 'helixsr-setup.sh').read_text()
-            marker = '# --- games ---'
-            if setup.count(marker) != 1:
-                raise ValueError('Upstream setup changed; build-only adapter needs review')
             build = package / 'decky-build-only.sh'
-            build.write_text(setup.split(marker)[0] + '\n', newline='\n')
+            converter = (package / 'setup/helixsr_setup.py').read_text()
+            build.write_text(build_only_script(setup, converter), newline='\n')
             env = dict(os.environ, XDG_DATA_HOME=str(companion / 'dependencies'),
                        TMPDIR=str(work / 'tmp'), PIP_CACHE_DIR=str(companion / 'dependencies/pip'),
                        HELIXSR_FORCE_PORTABLE='1', PYTHONUNBUFFERED='1')
@@ -924,7 +936,8 @@ class Manager:
                 raise ValueError('Cancelled')
             for name in NETWORK:
                 if not (package / name).is_file() or (package / name).stat().st_size < 1024:
-                    raise ValueError('Network output missing or incomplete')
+                    raise ValueError('Generated HelixSR model files are missing or incomplete. '
+                                     'See the build log; this is not an internet connection error.')
             build.unlink()
             final = companion / 'packages' / ('v' + release['version'])
             final.parent.mkdir(parents=True, exist_ok=True)
