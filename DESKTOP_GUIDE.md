@@ -5,25 +5,25 @@ HelixSR Desktop is a standalone Linux app. Decky Loader is optional. It manages 
 ## Download and open
 
 1. Switch your SteamOS device to Desktop Mode.
-2. Download **HelixSR-Desktop-0.1.0-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.0). Save it in a folder such as `Applications` under your own home folder.
+2. Download **HelixSR-Desktop-0.1.1-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.1). Save it in a folder such as `Applications` under your own home folder.
 3. In your file manager, right-click the AppImage, open **Properties → Permissions**, and enable **Is executable** (wording varies).
 4. Double-click the AppImage. Do not run it with sudo or as administrator.
 
 If your system cannot mount AppImages, open a terminal in its folder and run:
 
 ```sh
-chmod +x HelixSR-Desktop-0.1.0-x86_64.AppImage
-./HelixSR-Desktop-0.1.0-x86_64.AppImage --appimage-extract-and-run
+chmod +x HelixSR-Desktop-0.1.1-x86_64.AppImage
+./HelixSR-Desktop-0.1.1-x86_64.AppImage --appimage-extract-and-run
 ```
 
 This fallback extracts the app temporarily and does not require FUSE or administrator access. [AppImage documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html) explains the options.
 
 ## Find and install a game
 
-1. Steam libraries and installed games from known launcher locations are detected automatically. Click **Refresh library** if a download just finished.
+1. Steam libraries and installed games from known launcher locations are detected automatically. Click **Refresh games** if a download just finished.
 2. Choose a game from the dropdown. Unavailable entries show a reason and cannot be installed.
 3. For another launcher, choose **Import games from → Heroic, Lutris, Legendary, or Steam shortcuts**, then **Import now**. The app reads installed records; it does not start the launcher or alter its database.
-4. For an unlisted game, use **Games folders**. You can add several folders. Select each game's install folder, not an entire drive or Wine prefix.
+4. For an unlisted game, use **Import game folders**. You can add several folders. Select each game's install folder, not an entire drive or Wine prefix.
 5. Close the game. Click **Install HelixSR** or **Update HelixSR**, review the files and terms, and confirm. Only confirm DirectX 12 when your game's selected renderer uses it.
 6. Wait for **HelixSR enabled**. Downloads, dependencies and local network preparation happen automatically. Keep at least 3 GiB free on the game's drive while preparing.
 7. Follow the displayed launch-option guidance. For native FSR replacement, select AMD FSR in the game's settings. For an OptiScaler route, follow the displayed input and Proton override instructions. The desktop app displays these instructions and does not change Steam launch options for you.
@@ -36,7 +36,7 @@ The app distinguishes detected OptiScaler files, configuration and available run
 
 **App updates** checks desktop releases separately from Decky releases. Automatic checks can be switched on or off. Downloading a newer AppImage verifies its official release metadata and saves a separate executable in your desktop configuration folder's `app-updates` directory. Close the old app, open the new downloaded AppImage, and replace your shortcut when ready. Downloads do not automatically execute code or overwrite the running app.
 
-Use **Disable**, **Enable**, or **Remove and restore originals** from the selected game. These local actions do not need a new upstream download. If an interrupted transaction is reported, close the game and use the reviewed recovery action. Do not delete its recovery journal manually.
+Use **Disable**, **Enable**, or **Remove** from the selected game. Removal restores the original files. These local actions reuse verified prepared packages from either app and do not need a new upstream download. If an interrupted transaction is reported, close the game and use the reviewed recovery action. Do not delete its recovery journal manually.
 
 Both apps share installation records beside each game in `<Game> Mod Files/HelixSR-Decky`. Desktop preferences are separate under `$XDG_CONFIG_HOME/helixsr-desktop`, or `~/.config/helixsr-desktop` by default. Locally generated NVIDIA-derived network files must remain on the device where they were generated.
 

@@ -110,10 +110,38 @@ class Fixtures(unittest.TestCase):
         write(folder / manager.DLL, pe(ffx=True, helix=True))
         for name in manager.NETWORK:
             write(folder / name, b'fixture network bytes ' * 128)
+        write(folder / 'optiscaler/OptiScaler.dll', b'fixture OptiScaler proxy')
+        write(folder / 'optiscaler/fakenvapi.dll', b'fixture fakenvapi')
+        write(folder / 'optiscaler/fakenvapi.ini', '[fixture]\nvalue=1\n')
+        write(folder / 'optiscaler/OptiScaler.ini',
+              '[Upscalers]\nDx12Upscaler=auto\nFfxDx12Path=auto\nFfxDx12SRPath=auto\n')
+        write(folder / 'amd-fsr/amd_fidelityfx_upscaler_dx12.dll', pe(ffx=True))
         record = dict(path=str(folder), version='1.2.3', files={
-            n: manager.sha(folder / n) for n in manager.NETWORK + (manager.DLL,)})
+            n: manager.sha(folder / n) for n in manager.PACKAGE_FILES})
         self.m.cfg['packages'][str(folder)] = record
         return folder
+
+    def sync_package_record(self, folder):
+        record = self.m.cfg['packages'][str(folder)]
+        names = list(manager.PACKAGE_FILES)
+        framegen = 'amd-fsr/' + manager.AMD_FG
+        if (folder / framegen).is_file():
+            names.append(framegen)
+        record['files'] = {name: manager.sha(folder / name) for name in names}
+        return record
+
+    def companion_package(self, game=None, release_digest='a' * 64, prepared_at=100):
+        game = game or self.game
+        source = self.package()
+        destination = self.m.companion(game) / 'packages/v1.2.3'
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(destination)
+        record = self.m.cfg['packages'].pop(str(source))
+        record.update(path=str(destination), release_sha256=release_digest,
+                      prepared_at=prepared_at)
+        self.m.cfg['packages'][str(destination)] = record
+        manager.atomic_json(self.m.companion(game) / 'records/package.json', record)
+        return destination, record
 
     def action(self, name):
         token = self.m.preview(self.game['id'], name)['token']
@@ -408,6 +436,12 @@ class AssessmentTests(Fixtures):
 
 
 class ReleaseTests(Fixtures):
+    def test_cancelled_build_exit_reports_cancellation_before_generic_failure(self):
+        with self.assertRaisesRegex(ValueError, '^Cancelled$'):
+            manager.check_build_exit(-15, True)
+        with self.assertRaisesRegex(ValueError, 'Network build failed'):
+            manager.check_build_exit(1, False)
+
     def cached_preparation(self):
         folder = self.package()
         release = dict(version='1.2.3', sha256='a' * 64, size=1234,
@@ -444,13 +478,108 @@ class ReleaseTests(Fixtures):
     def test_identical_semver_package_selection_uses_latest_prepared_at(self):
         first, _ = self.cached_preparation()
         second = self.base / 'other-cache' / 'v1.2.3'
-        second.mkdir(parents=True)
+        for name in manager.PACKAGE_FILES:
+            write(second / name, (first / name).read_bytes())
         record = dict(self.m.cfg['packages'][str(first)], path=str(second), prepared_at=200)
         self.m.cfg['packages'][str(second)] = record
         self.assertEqual(self.m.package(self.game)[1], second)
         self.m.cfg['packages'][str(first)]['prepared_at'] = 300
         self.assertEqual(self.m.package(self.game)[1], first)
 
+
+class SharedPackageTests(Fixtures):
+    def separate_manager(self):
+        shared = manager.Manager(self.home, self.base / 'separate-settings')
+        shared.entries[self.game['id']] = self.game
+        return shared
+
+    def test_separate_frontend_can_enable_disabled_managed_game_from_companion_record(self):
+        package, _ = self.companion_package()
+        self.action('install')
+        self.action('disable')
+        shared = self.separate_manager()
+        token = shared.preview(self.game['id'], 'enable')['token']
+        result = shared.execute(token)
+        self.assertIn('Enable completed', result['message'])
+        self.assertEqual(manager.sha(self.native), manager.sha(package / manager.DLL))
+
+    def test_prepare_reuses_verified_companion_cache_from_known_game_on_same_drive(self):
+        source = self.base / 'games/Prepared Elsewhere'
+        write(source / 'Other.exe', pe(dx12=True))
+        source_game = dict(id='fixture:other', name='Other', folder=str(source), source='Imported')
+        _, record = self.companion_package(source_game)
+        shared = self.separate_manager()
+        shared.entries[source_game['id']] = source_game
+        release = dict(version='1.2.3', sha256=record['release_sha256'])
+        shared.cfg['license'] = manager.license_key(release)
+        job = {'id': 'shared-cache'}
+        with patch.object(shared, 'check_update', return_value=release), \
+                patch('manager.urllib.request.urlopen') as download:
+            shared.prepare(self.game, job)
+        download.assert_not_called()
+        self.assertIn('Reusing', job['message'])
+
+    def test_incomplete_companion_manifest_is_not_selected(self):
+        _, record = self.companion_package()
+        record['files'] = {manager.DLL: record['files'][manager.DLL]}
+        manager.atomic_json(self.m.companion(self.game) / 'records/package.json', record)
+        shared = self.separate_manager()
+        self.assertIsNone(shared.package(self.game))
+
+    def test_changed_shared_payload_is_rejected_before_game_mutation(self):
+        package, _ = self.companion_package()
+        shared = self.separate_manager()
+        write(package / manager.DLL, pe(ffx=True, helix=True) + b'tampered')
+        before = self.native.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'incomplete or changed'):
+            shared.preview(self.game['id'], 'install')
+        self.assertEqual(self.native.read_bytes(), before)
+
+    def test_companion_record_cannot_escape_owned_packages(self):
+        _, record = self.companion_package()
+        outside = self.base / 'outside-package'
+        outside.mkdir()
+        escaped = dict(record, path=str(outside))
+        manager.atomic_json(self.m.companion(self.game) / 'records/package.json', escaped)
+        self.assertIsNone(self.separate_manager().package(self.game))
+
+    def test_companion_record_cannot_follow_package_symlink(self):
+        _, record = self.companion_package()
+        outside = self.base / 'outside-package'
+        outside.mkdir()
+        link = self.m.companion(self.game) / 'packages/v9.9.9'
+        self.link(link, outside, directory=True)
+        linked = dict(record, path=str(link), version='9.9.9')
+        manager.atomic_json(self.m.companion(self.game) / 'records/package.json', linked)
+        self.assertIsNone(self.separate_manager().package(self.game))
+
+    def test_companion_record_rejects_intermediate_payload_and_records_symlinks(self):
+        package, _ = self.companion_package()
+        optiscaler = package / 'optiscaler'
+        outside_payloads = self.base / 'outside-optiscaler'
+        optiscaler.rename(outside_payloads)
+        self.link(optiscaler, outside_payloads, directory=True)
+        self.assertIsNone(self.separate_manager().package(self.game))
+
+        optiscaler.unlink()
+        outside_payloads.rename(optiscaler)
+        records = self.m.companion(self.game) / 'records'
+        outside_records = self.base / 'outside-records'
+        records.rename(outside_records)
+        self.link(records, outside_records, directory=True)
+        self.assertIsNone(self.separate_manager().package(self.game))
+
+    def test_incomplete_config_manifest_is_rejected_before_game_mutation(self):
+        package = self.package()
+        self.m.cfg['packages'][str(package)]['files'] = {
+            manager.DLL: manager.sha(package / manager.DLL)}
+        before = self.native.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'incomplete or changed'):
+            self.m.preview(self.game['id'], 'install')
+        self.assertEqual(self.native.read_bytes(), before)
+
+
+class ReleaseMetadataTests(Fixtures):
     def update_with_redirect(self, page):
         response = MagicMock()
         response.url = page
@@ -622,6 +751,7 @@ class RecoveryAndOptiScalerRegressionTests(Fixtures):
         write(package / 'amd-fsr' / manager.AMD_FG, b'fixture AMD FG provider')
         with (package / 'optiscaler/OptiScaler.ini').open('a') as f:
             f.write('FfxDx12FGPath=auto\n')
+        self.sync_package_record(package)
         write(self.root / 'GameUserSettings.ini', '[Graphics]\nFrameGeneration=false\n')
         self.action('update')
         live = self.root / 'HelixSR' / manager.AMD_FG
@@ -643,6 +773,7 @@ class RecoveryAndOptiScalerRegressionTests(Fixtures):
         self.action('install')
         package = self.m.package(self.game)[1]
         write(package / 'amd-fsr' / manager.AMD_FG, b'new upstream FG')
+        self.sync_package_record(package)
         live = write(self.root / 'HelixSR' / manager.AMD_FG, b'user FG file')
         with self.assertRaisesRegex(ValueError, 'unmanaged file'):
             self.m.preview(self.game['id'], 'update')

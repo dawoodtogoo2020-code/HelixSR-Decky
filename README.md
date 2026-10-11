@@ -20,7 +20,7 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 ## Install
 
 1. Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader).
-2. Open Decky Settings, Developer, and install `HelixSR-Decky-0.1.3.zip` from a file. The ZIP is built from this source tree and contains the plugin's code only. Users of v0.1.0 need this one manual upgrade to get the plugin updater. Users of v0.1.1 can use **Plugin updates**.
+2. Open Decky Settings, Developer, and install the current `HelixSR-Decky` release ZIP from a file. The ZIP is built from this source tree and contains the plugin's code only. Users of v0.1.0 need this one manual upgrade to get the plugin updater. Users of v0.1.1 can use **Plugin updates**.
 3. Open HelixSR Decky and choose a game from the **Game** dropdown. Choose **Install HelixSR** or **Update HelixSR** directly below it, review the change and accept local preparation terms. The plugin handles required downloads, local preparation and per-game installation in one background operation and notifies you when it completes.
 4. Select AMD FSR for a direct native replacement; for the OptiScaler route select the appropriate DLSS/XeSS/FSR input. See the included [installation guide](INSTALL_GUIDE.md) for multiple folder imports, permissions and removal.
 5. An OptiScaler proxy may need `WINEDLLOVERRIDES="dxgi=n,b"` before the existing Steam launch command. Preserve other options. The plugin reports the route and logs, but does not rewrite Steam's live VDF files. See [OptiScaler installation](https://github.com/OptiScaler/OptiScaler/wiki/Installation).

@@ -51,6 +51,7 @@ class DesktopBackendTests(unittest.TestCase):
         (game / 'amd_fidelityfx_upscaler_dx12.dll').write_bytes(pe(ffx=True))
         prepared = self.home / 'prepared'
         prepared.mkdir()
+        (prepared / 'amd_fidelityfx_dx12.dll').write_bytes(pe(ffx=True, helix=True))
         good = dict(path=str(prepared), version='1.2.3', prepared_at=1,
                     files={'amd_fidelityfx_dx12.dll': 'a' * 64}, release_sha256='b' * 64)
         bad_values = [dict(prepared_at='broken'), dict(prepared_at=True),

@@ -130,7 +130,28 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertIn('OptiScaler runtime: unknown', self.window.evidence.toPlainText())
         self.assertIn('Frame generation:', self.window.evidence.toPlainText())
 
+    def test_launch_guidance_matches_detected_route_and_preserves_options(self):
+        self.window.game['launch_options'] = 'CUSTOM=1 %command%'
+        for route in ('direct', 'optiscaler', None):
+            self.window.game['route'] = route
+            self.window.copy_launch()
+            copied = self.app.clipboard().text()
+            self.assertIn('CUSTOM=1 %command%', copied)
+            if route == 'direct':
+                self.assertIn('Select AMD FSR', copied)
+                self.assertNotIn('dxgi=n,b', copied)
+            elif route == 'optiscaler':
+                self.assertIn('dxgi=n,b', copied)
+            else:
+                self.assertIn('No supported installation route', copied)
+                self.assertNotIn('dxgi=n,b', copied)
+
+    def test_desktop_help_uses_desktop_guide(self):
+        from desktop.app import GUIDE
+        self.assertTrue(GUIDE.endswith('/DESKTOP_GUIDE.md'))
+
     def test_many_library_warnings_keep_notice_short_and_diagnostics_intact(self):
+        self.window._library_loaded = False
         warnings = [f'Steam shortcut {i}: launcher/wrapper unresolved; import game folder /fixture/game-{i}' for i in range(83)]
         value = self.backend.library()
         value['warnings'] = warnings
@@ -146,6 +167,32 @@ class DesktopWidgetTests(unittest.TestCase):
         self.settle()
         self.assertIn('fixture', self.window.diagnostics.toPlainText())
         self.assertEqual(self.window.library_warning_view.toPlainText(), '\n\n'.join(warnings))
+
+    def test_library_refresh_preserves_operation_result_notification(self):
+        self.window._notify('HelixSR enabled')
+        value = self.backend.library()
+        value['warnings'] = ['Unresolved unrelated shortcut']
+        self.window._library_received(value)
+        self.settle()
+        self.assertEqual(self.window.notice.text(), 'HelixSR enabled')
+        self.assertIn('Unresolved unrelated shortcut', self.window.library_warning_view.toPlainText())
+
+    def test_cached_network_errors_do_not_hide_successful_local_actions(self):
+        self.window._notify('Disable completed and file hashes verified')
+        value = self.backend.library()
+        value['release']['error'] = 'Cached Helix metadata network error'
+        self.backend.check_app_updates = lambda force=True: dict(current='0.1.1', latest=None,
+            auto_check=True, error='Cached desktop network error')
+        self.window._library_received(value)
+        self.settle()
+        self.window.check_app(False)
+        self.settle()
+        self.assertEqual(self.window.notice.text(), 'Disable completed and file hashes verified')
+        self.assertIn('Cached Helix', self.window.helix_status.text())
+        self.assertIn('Cached desktop', self.window.app_status.text())
+        self.window.check_app(True)
+        self.settle()
+        self.assertIn('Cached desktop network error', self.window.notice.text())
 
     def test_dx12_confirmation_required_only_when_needed(self):
         self.backend.game['dx12_confirmation_needed'] = True
@@ -240,6 +287,15 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertLessEqual(len(self.window.job_view.toPlainText()), LIMIT)
         self.assertFalse(self.window._modal)
         self.assertFalse(any(isinstance(w, PreviewDialog) for w in QApplication.topLevelWidgets()))
+
+    def test_newest_job_and_completion_are_visible_before_previous_logs(self):
+        jobs = [dict(id='old', state='cancelled', game='Old', message='Cancelled', log='x' * 100000),
+                dict(id='new', state='done', game='New', message='HelixSR enabled', log='Latest verified files')]
+        self.window._jobs_received(jobs)
+        self.assertTrue(self.window.job_view.toPlainText().startswith('New: done\nHelixSR enabled'))
+        self.assertIn('Latest verified files', self.window.job_view.toPlainText())
+        self.assertLessEqual(len(self.window.job_view.toPlainText()), LIMIT)
+        self.assertIn('New: done', self.window.notice.text())
 
     def test_launch_guidance_preserves_existing_options(self):
         self.window.game['launch_options'] = 'MANGOHUD=1 %command% -flag'

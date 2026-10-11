@@ -4,6 +4,7 @@ import hashlib
 import http.client
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -30,6 +31,10 @@ API = f'https://api.github.com/repos/{REPO}/releases/latest'
 DLL = 'amd_fidelityfx_dx12.dll'
 NETWORK = ('helixsr_weights.bin', 'helixsr_kernels.pak')
 AMD_FG = 'amd_fidelityfx_framegeneration_dx12.dll'
+PACKAGE_FILES = NETWORK + (DLL, 'optiscaler/OptiScaler.dll',
+                           'optiscaler/OptiScaler.ini', 'optiscaler/fakenvapi.dll',
+                           'optiscaler/fakenvapi.ini',
+                           'amd-fsr/amd_fidelityfx_upscaler_dx12.dll')
 INPUTS = {'nvngx_dlss.dll': 'DLSS', 'libxess.dll': 'XeSS',
           'ffx_fsr2_api_x64.dll': 'FSR 2', 'ffx_fsr2_api_dx12_x64.dll': 'FSR 2'}
 ANTI = ('easyanticheat', 'battleye', 'beclient', 'equ8', 'faceit', 'vanguard')
@@ -146,6 +151,13 @@ def version(value):
     if not m:
         raise ValueError('Only stable semantic-version releases are supported')
     return tuple(map(int, m.groups()))
+
+
+def check_build_exit(returncode, cancelled):
+    if cancelled:
+        raise ValueError('Cancelled')
+    if returncode != 0:
+        raise ValueError('Network build failed. See build log.')
 
 
 def pe_info(path):
@@ -303,19 +315,115 @@ class Manager:
     def record(self, game):
         return load_json(self.record_path(game))
 
+    @staticmethod
+    def _symlink_in_path(path):
+        path = Path(path)
+        current = Path(path.anchor)
+        for part in path.parts[1:]:
+            current /= part
+            if current.is_symlink():
+                return True
+        return False
+
+    def _package_record(self, record, game, owner=None):
+        """Validate untrusted package metadata without changing either game."""
+        if not isinstance(record, dict):
+            return None
+        path, release_digest = record.get('path'), record.get('release_sha256')
+        prepared = record.get('prepared_at', 0)
+        files = record.get('files')
+        if (not isinstance(path, str) or not path or '\x00' in path
+                or not Path(path).is_absolute()
+                or not isinstance(record.get('version'), str)
+                or type(prepared) not in (int, float)
+                or (type(prepared) is float and not math.isfinite(prepared)) or prepared < 0
+                or ('release_sha256' in record and (not isinstance(release_digest, str)
+                    or not re.fullmatch(r'[a-fA-F0-9]{64}', release_digest)))
+                or (owner is not None and not isinstance(release_digest, str))
+                or not isinstance(files, dict) or not files):
+            return None
+        try:
+            parsed_version = version(record['version'])
+        except ValueError:
+            return None
+        path = Path(path)
+        try:
+            if (not path.is_dir() or self._symlink_in_path(path)
+                    or path.stat().st_dev != Path(game['folder']).stat().st_dev):
+                return None
+            if owner is not None:
+                package_root = Path(owner) / 'packages'
+                if self._symlink_in_path(package_root):
+                    return None
+                resolved, resolved_root = path.resolve(), package_root.resolve()
+                if resolved.parent != resolved_root or not set(PACKAGE_FILES).issubset(files):
+                    return None
+            for name, digest in files.items():
+                if (not isinstance(name, str) or not name or '\x00' in name or '\\' in name or ':' in name
+                        or not isinstance(digest, str) or not re.fullmatch(r'[a-fA-F0-9]{64}', digest)):
+                    return None
+                relative = PurePosixPath(name)
+                if (relative.is_absolute() or '..' in relative.parts or '.' in relative.parts
+                        or relative.as_posix() != name or name == '.'):
+                    return None
+                payload = path.joinpath(*relative.parts)
+                if (self._symlink_in_path(payload)
+                        or (owner is not None and not payload.is_file())
+                        or (payload.exists() and not payload.is_file())):
+                    return None
+            framegen = path / 'amd-fsr' / AMD_FG
+            if framegen.is_symlink() or (framegen.is_file() and 'amd-fsr/' + AMD_FG not in files):
+                return None
+        except OSError:
+            return None
+        return parsed_version, path, record
+
+    def _verify_package_payloads(self, package, route=None):
+        """Prove every payload an operation may consume is in the recorded manifest."""
+        path, record = package[1], package[2]
+        required = set(PACKAGE_FILES if route in (None, 'optiscaler') else NETWORK + (DLL,))
+        if not required.issubset(record['files']):
+            return False
+        framegen_name = 'amd-fsr/' + AMD_FG
+        framegen = path / 'amd-fsr' / AMD_FG
+        if framegen.is_file():
+            required.add(framegen_name)
+        try:
+            return all(name in record['files'] and not self._symlink_in_path(path / name)
+                       and (path / name).is_file() and sha(path / name) == record['files'][name]
+                       for name in required)
+        except OSError:
+            return False
+
     def package(self, game):
         # Packages remain on the same filesystem as the selected game.
         choices = []
-        for key, record in self.cfg.get('packages', {}).items():
-            p = Path(record['path'])
+        for record in self.cfg.get('packages', {}).values():
+            candidate = self._package_record(record, game)
+            if candidate:
+                choices.append((*candidate, 0))
+        # A separate frontend has separate settings, but package records are kept
+        # beside games. Read records only from games already discovered/imported.
+        seen = set()
+        for known in self.entries.values():
             try:
-                if p.is_dir() and p.stat().st_dev == Path(game['folder']).stat().st_dev:
-                    choices.append((version(record['version']), p, record))
+                companion = self.companion(known)
+                record_path = companion / 'records/package.json'
+                key = str(record_path)
+                if (key in seen or self._symlink_in_path(record_path)
+                        or not record_path.is_file() or record_path.stat().st_size > 1 << 20):
+                    continue
+                seen.add(key)
+                record = load_json(record_path)
+                candidate = self._package_record(record, game, companion)
+                if candidate:
+                    choices.append((*candidate, 1))
             except (ValueError, OSError):
                 continue
         if not choices:
             return None
-        return max(choices, key=lambda x: (x[0], x[2].get('prepared_at', 0)))
+        selected = max(choices, key=lambda x: (x[0], x[2].get('prepared_at', 0), x[3]))
+        return selected[:3]
 
     def refresh(self):
         entries, warnings = discover(self.home, self.cfg.get('imports', []))
@@ -664,8 +772,7 @@ class Manager:
             raise ValueError('Upstream release changed; review and accept its terms before preparation')
         cached = self.package(game)
         if cached and cached[2]['version'] == release['version'] and cached[2].get('release_sha256') == release['sha256']:
-            if all((cached[1] / name).is_file() and sha(cached[1] / name) == digest
-                   for name, digest in cached[2]['files'].items()):
+            if self._verify_package_payloads(cached):
                 job['message'] = 'Reusing the verified prepared package on this drive'
                 return
         companion = self.companion(game)
@@ -734,8 +841,7 @@ class Manager:
                         raise ValueError('Cancelled' if self.cancel.is_set() else 'Build timed out')
                     time.sleep(0.5)
                 job['log'] = text_tail(logfile, 8000)
-                if self.process.returncode != 0:
-                    raise ValueError('Network build failed. See build log.')
+                check_build_exit(self.process.returncode, self.cancel.is_set())
             if self.cancel.is_set():
                 raise ValueError('Cancelled')
             for name in NETWORK:
@@ -748,9 +854,7 @@ class Manager:
                 # A changed cache can be rebuilt without overwriting the previous owned path.
                 final = final.with_name(final.name + '-' + job['id'][:8])
             os.replace(package, final)
-            payloads = NETWORK + (DLL, 'optiscaler/OptiScaler.dll',
-                              'optiscaler/OptiScaler.ini', 'optiscaler/fakenvapi.dll', 'optiscaler/fakenvapi.ini',
-                              'amd-fsr/amd_fidelityfx_upscaler_dx12.dll')
+            payloads = PACKAGE_FILES
             if (final / 'amd-fsr' / AMD_FG).is_file():
                 payloads += ('amd-fsr/' + AMD_FG,)
             record = dict(version=release['version'], path=str(final), release_sha256=release['sha256'],
@@ -796,6 +900,8 @@ class Manager:
                 package = self.package(game)
                 if not package:
                     raise ValueError('Prepare HelixSR on this drive first')
+                if not self._verify_package_payloads(package, data['route']):
+                    raise ValueError('Prepared package manifest is incomplete or changed. Rebuild required.')
                 for n, expected in package[2]['files'].items():
                     if sha(package[1] / n) != expected:
                         raise ValueError('Prepared package changed. Rebuild required.')

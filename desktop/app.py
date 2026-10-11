@@ -24,7 +24,7 @@ from .version import VERSION
 from .system import system_environment
 
 PROJECT = "https://github.com/dawoodtogoo2020-code/HelixSR-Decky"
-GUIDE = PROJECT + "/blob/main/INSTALL_GUIDE.md"
+GUIDE = PROJECT + "/blob/main/DESKTOP_GUIDE.md"
 BUGS = PROJECT + "/issues"
 ACTIVE = {"running", "queued", "cancelling"}
 LIMIT = 24000
@@ -125,6 +125,7 @@ class MainWindow(QMainWindow):
         self._closed = False
         self._jobs = []
         self._games = {}
+        self._library_loaded = False
         self.game = None
         self.release = {}
         self.app_update = {}
@@ -362,8 +363,9 @@ class MainWindow(QMainWindow):
         if len(warning_text) > LIMIT:
             warning_text = warning_text[:LIMIT] + "\n\nAdditional warning text omitted to keep diagnostics bounded."
         self.library_warning_view.setPlainText(warning_text or "No library warnings")
-        if warnings:
+        if warnings and not self._library_loaded:
             self._notify(f"{len(warnings)} library warnings. See Diagnostics.")
+        self._library_loaded = True
         # Cached automatic-check policy belongs to the backend; no silent install.
         QTimer.singleShot(0, lambda: self.check_app(False))
 
@@ -401,7 +403,7 @@ class MainWindow(QMainWindow):
         for log in game.get("logs", []):
             text += f"\n\n{log.get('path', '')}\n{str(log.get('excerpt', ''))[:5000]}"
         self.evidence.setPlainText(text[:LIMIT])
-        self._release_received(self.release)
+        self._release_received(self.release, notify=False)
         self._controls()
 
     def preview_latest(self):
@@ -454,7 +456,7 @@ class MainWindow(QMainWindow):
             if job.get("state") not in ACTIVE and self._seen_jobs.get(job.get("id")) != job.get("state"):
                 self._notify(f"{job.get('game', 'Operation')}: {job.get('state')} · {job.get('message', '')}", job.get("state") == "failed")
             self._seen_jobs[job.get("id")] = job.get("state")
-        self.job_view.setPlainText("\n\n".join(pieces)[-LIMIT:] or "No active jobs")
+        self.job_view.setPlainText("\n\n".join(reversed(pieces))[:LIMIT] or "No active jobs")
         self._controls()
         if was_active and not any(j.get("state") in ACTIVE for j in self._jobs):
             QTimer.singleShot(0, self.refresh)
@@ -494,27 +496,27 @@ class MainWindow(QMainWindow):
             gid = self.game["id"]
             self._run(lambda: self.backend.forget_game(gid), self._library_received)
 
-    def _release_received(self, value):
+    def _release_received(self, value, notify=True):
         self.release = value or {}
-        self.helix_status.setText(f"Current game: {(self.game or {}).get('installed_version') or 'not installed'} · Latest: {self.release.get('version') or 'unknown'}\n{self.release.get('error', '')}")
-        if self.release.get("error"):
+        self.helix_status.setText(f"Current game: {(self.game or {}).get('installed_version') or 'not installed'} · Latest: {self.release.get('version') or 'unknown'}\n{self.release.get('error') or ''}")
+        if notify and self.release.get("error"):
             self._notify(self.release["error"], True)
 
     def check_app(self, force=True):
-        self._run(lambda: self.backend.check_app_updates(force), self._app_received)
+        self._run(lambda: self.backend.check_app_updates(force), lambda value: self._app_received(value, notify=force))
 
     def _automatic_app_check(self):
         if self.auto_check.isChecked() and not any(j.get("state") in ACTIVE for j in self._jobs):
             # Backend owns the daily cache policy. Timers never force a download.
             self.check_app(False)
 
-    def _app_received(self, value):
+    def _app_received(self, value, notify=True):
         self.app_update = value or {}
         self.app_status.setText(f"Current: {self.app_update.get('current', VERSION)} · Latest: {self.app_update.get('latest') or 'unknown'}\n{self.app_update.get('error', '')}")
         self.auto_check.blockSignals(True)
         self.auto_check.setChecked(bool(self.app_update.get("auto_check")))
         self.auto_check.blockSignals(False)
-        if self.app_update.get("error"):
+        if notify and self.app_update.get("error"):
             self._notify(self.app_update["error"], True)
         self._controls()
 
@@ -527,9 +529,16 @@ class MainWindow(QMainWindow):
     def copy_launch(self):
         game = self.game or {}
         before = game.get("launch_options", "")
-        guidance = ("Preserve your existing Steam or launcher launch options. For the OptiScaler proxy, merge dxgi=n,b into WINEDLLOVERRIDES manually. "
-                    "For empty Steam options use: WINEDLLOVERRIDES=\"dxgi=n,b\" %command%\n"
-                    "Do not overwrite an existing dxgi rule without reviewing it.\nExisting options:\n" + before)
+        if game.get("route") == "direct":
+            guidance = ("Select AMD FSR in the game's upscaling settings. This native replacement does not require an additional proxy launch override. "
+                        "Preserve your existing Steam or launcher launch options.\nExisting options:\n" + before)
+        elif game.get("route") == "optiscaler":
+            guidance = ("Preserve your existing Steam or launcher launch options. For the OptiScaler proxy, merge dxgi=n,b into WINEDLLOVERRIDES manually. "
+                        "For empty Steam options use: WINEDLLOVERRIDES=\"dxgi=n,b\" %command%\n"
+                        "Do not overwrite an existing dxgi rule without reviewing it.\nExisting options:\n" + before)
+        else:
+            guidance = ("No supported installation route has been detected. Review the game details and installation guide before changing launch options.\n"
+                        "Existing options:\n" + before)
         QApplication.clipboard().setText(guidance)
         self._notify("Manual launch guidance copied. Review and merge with existing options in the launcher.")
 
