@@ -27,6 +27,14 @@ Open the selected game's **OptiScaler and frame generation** details in Decky, o
 - **Different backend/provider paths:** review **Update HelixSR** to restore its managed backend and paths. Other valid configuration settings, comments, overlay shortcut and frame-generation choices are retained. Duplicate or malformed settings require manual review.
 - **Red border, shaking or fallback:** inspect the current `helixsr.log` and report a short sanitized excerpt. Historical logs and mapped-module evidence do not prove current neural output or stable gameplay.
 
+## Using another mod manager or Decky-Framegen
+
+[Decky-Framegen](https://github.com/xXJSONDeruloXx/Decky-Framegen) also manages OptiScaler and can apply configuration through its `fgmod` launch wrapper. Its launch environment settings can override the INI on each launch. HelixSR supplies an upscaling backend and does not replace frame generation.
+
+Use one installer to own the same game's proxy files. Do not run both managers' patch/update/remove actions over each other's files. To switch managers, close the game, use the original manager's unpatch/removal instructions and review its Steam launch options, then refresh HelixSR's scan and preview. HelixSR refuses unknown injector conflicts instead of adopting another manager's files. Preserving an existing wrapper as text does not establish that the two setups can run together: a wrapper may copy files or change the backend at launch. No particular Decky-Framegen/HelixSR combination is guaranteed by these checks.
+
+If the image still looks like another upscaler, first confirm the game's DX12 renderer, the displayed installation route, the selected FSR HelixSR backend and a fresh `helixsr.log`. Record the plugin version and exact input selection. Visual preference alone does not establish which backend ran, and neither an installed file nor an old log proves the current output.
+
 Disable/Enable retains your owned configurations. Remove restores originals and keeps configuration copies in `<Game> Mod Files/HelixSR-Decky/records/config-*.json` as installation records. DLL/network changes still block unsafe operations. Removing game files does not undo launch options; use Decky's separate **Restore plugin launch-option change** or merge desktop launch guidance manually.
 
 [Report a reproducible issue](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml). Include the manager version, game, renderer, exact review reason and relevant fresh logs. Remove personal details; never upload generated weights or kernels.
