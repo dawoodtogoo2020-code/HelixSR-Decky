@@ -5,15 +5,15 @@ HelixSR Desktop is a standalone Linux app. Decky Loader is optional. It manages 
 ## Download and open
 
 1. Switch your SteamOS device to Desktop Mode.
-2. Download **HelixSR-Desktop-0.1.7-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.7). Save it in a folder such as `Applications` under your own home folder.
+2. Download **HelixSR-Desktop-0.1.8-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.8). Save it in a folder such as `Applications` under your own home folder.
 3. In your file manager, right-click the AppImage, open **Properties → Permissions**, and enable **Is executable** (wording varies).
 4. Double-click the AppImage. Do not run it with sudo or as administrator.
 
 If your system cannot mount AppImages, open a terminal in its folder and run:
 
 ```sh
-chmod +x HelixSR-Desktop-0.1.7-x86_64.AppImage
-./HelixSR-Desktop-0.1.7-x86_64.AppImage --appimage-extract-and-run
+chmod +x HelixSR-Desktop-0.1.8-x86_64.AppImage
+./HelixSR-Desktop-0.1.8-x86_64.AppImage --appimage-extract-and-run
 ```
 
 This fallback extracts the app temporarily and does not require FUSE or administrator access. [AppImage documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html) explains the options.
@@ -33,6 +33,8 @@ For setup checks, missing DLSS input, shortcuts and configuration retention, fol
 
 The app distinguishes detected OptiScaler files, configuration and available runtime evidence. Frame generation is reported separately and is preserved. Presence of files does not prove a feature is active in gameplay.
 
+For a managed game, **Recorded route** describes its existing installation. New native scans prefer DLLs in the game root or detected executable directory over nested SDK copies, then prefer the SR filename within that location tier. Existing managed targets are not migrated. This does not establish that a Control crash is fixed.
+
 ## Updates and removal
 
 The **HelixSR model** dropdown on the Games tab shows supported networks. Currently **HelixSR Model E**, sourced from NVIDIA DLSS 310.7.0, is the only reviewed choice. The confirmation binds the model and release shown; an upstream change requires another review. DLSS 4 and FSR-derived models will appear only after upstream release and app support. See [model support and future variants](MODEL_VARIANTS.md).
@@ -43,7 +45,11 @@ The **HelixSR model** dropdown on the Games tab shows supported networks. Curren
 
 **App updates** checks desktop releases separately from Decky releases. Automatic checks can be switched on or off. Downloading a newer AppImage verifies its official release metadata and saves a separate executable in your desktop configuration folder's `app-updates` directory. Close the old app, open the new downloaded AppImage, and replace your shortcut when ready. Downloads do not automatically execute code or overwrite the running app.
 
-Use **Disable**, **Enable**, or **Remove** from the selected game. Removal restores the original files. These local actions reuse verified prepared packages from either app and do not need a new upstream download. If an interrupted transaction is reported, close the game and use the reviewed recovery action. Do not delete its recovery journal manually.
+Use **Disable**, **Enable**, or **Remove** from the selected game when its ownership checks pass. Removal restores the original files. These local actions reuse verified prepared packages from either app and do not need a new upstream download. If an interrupted transaction is reported, close the game and use the reviewed recovery action. Do not delete its recovery journal manually.
+
+A **Managed files changed** message means the conflicting file no longer matches HelixSR's recorded installed bytes. The status is **Needs review**, even if the record says HelixSR was enabled. Steam verification may replace DLLs or remove mods, but it does not reconcile HelixSR's installed-file hash record and cannot by itself guarantee that the block clears. Keep mutation and recovery guards in place; interrupted-transaction recovery stops when live files differ from its allowed hashes.
+
+Close the game and read the exact conflicting filename. Preserve installation records and original files until ownership is resolved. Do not delete records or backups or force an install. [Report the conflict](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml) with the filename, desktop and HelixSR versions, **Recorded route**, Proton version and short relevant logs, with personal details removed.
 
 Both apps share installation records beside each game in `<Game> Mod Files/HelixSR-Decky`. Desktop preferences are separate under `$XDG_CONFIG_HOME/helixsr-desktop`, or `~/.config/helixsr-desktop` by default. Locally generated NVIDIA-derived network files must remain on the device where they were generated.
 

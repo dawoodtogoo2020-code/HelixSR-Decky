@@ -353,6 +353,46 @@ class AssessmentTests(Fixtures):
         self.assertEqual(data['targets'], [str(self.native)])
         self.assertNotIn(str(duplicate), data['targets'])
 
+    def test_runtime_loader_preferred_over_nested_sr_dll(self):
+        self.native.unlink()
+        loader = write(self.root / manager.DLL, pe(ffx=True))
+        for folder in ('SDK/bin/signed', 'OptiScaler/amd-fsr'):
+            with self.subTest(folder=folder):
+                duplicate = write(self.root / folder / self.native.name, pe(ffx=True))
+                data = self.m.assess(self.game)
+                self.assertEqual(data['route'], 'direct')
+                self.assertEqual(data['compatibility'], 'candidate')
+                self.assertEqual(data['targets'], [str(loader)])
+            duplicate.unlink()
+
+    def test_executable_directory_loader_preferred_over_nested_sr_dll(self):
+        self.native.unlink()
+        (self.root / 'Example.exe').unlink()
+        write(self.root / 'Binaries/Win64/Example-Win64-Shipping.exe', pe(dx12=True))
+        loader = write(self.root / 'Binaries/Win64' / manager.DLL, pe(ffx=True))
+        write(self.root / 'SDK/bin/signed' / self.native.name, pe(ffx=True))
+        data = self.m.assess(self.game)
+        self.assertEqual(data['route'], 'direct')
+        self.assertEqual(data['compatibility'], 'candidate')
+        self.assertEqual(data['targets'], [str(loader)])
+
+    def test_same_runtime_tier_prefers_sr_filename_over_loader(self):
+        write(self.root / manager.DLL, pe(ffx=True))
+        data = self.m.assess(self.game)
+        self.assertEqual(data['targets'], [str(self.native)])
+
+    def test_nested_native_targets_remain_fallback_with_sr_filename_preference(self):
+        self.native.unlink()
+        write(self.root / 'Native' / manager.DLL, pe(ffx=True))
+        nested_sr = write(self.root / 'Native' / self.native.name, pe(ffx=True))
+        data = self.m.assess(self.game)
+        self.assertEqual(data['route'], 'direct')
+        self.assertEqual(data['targets'], [str(nested_sr)])
+        nested_sr.unlink()
+        data = self.m.assess(self.game)
+        self.assertEqual(data['route'], 'direct')
+        self.assertEqual(data['targets'], [str(self.root / 'Native' / manager.DLL)])
+
     def test_export_table_beyond_four_megabytes_is_detected(self):
         payload = bytearray(pe(ffx=True, dx12=True))
         raw = payload[0x200:]
@@ -1153,6 +1193,62 @@ class LatestCoordinatorTests(Fixtures):
 
 
 class TransactionTests(Fixtures):
+    def test_missing_managed_native_target_retains_recorded_state_and_blocks_changes(self):
+        self.package()
+        self.action('install')
+        for enabled in (True, False):
+            if not enabled:
+                self.action('disable')
+            with self.subTest(enabled=enabled):
+                receipt = self.m.record(self.game)
+                live_bytes = self.native.read_bytes()
+                self.native.unlink()
+                try:
+                    data = self.m.assess_safe(self.game)
+                    self.assertTrue(data['managed'])
+                    self.assertEqual(data['route'], 'direct')
+                    self.assertEqual(data['enabled'], enabled)
+                    self.assertEqual(data['installed_version'], receipt['version'])
+                    self.assertEqual(data['targets'], receipt['targets'])
+                    self.assertEqual(data['compatibility'], 'blocked')
+                    self.assertIn('Managed files changed; ownership needs review before further changes: '
+                                  + self.native.name, data['reasons'])
+                    for action in ('update', 'remove', 'disable', 'enable'):
+                        with self.assertRaisesRegex(ValueError, 'Managed files changed'):
+                            self.m.preview(self.game['id'], action)
+                    self.assertEqual(self.m.record(self.game), receipt)
+                    self.assertFalse(self.native.exists())
+                finally:
+                    self.native.write_bytes(live_bytes)
+        self.action('remove')
+
+    def test_managed_nested_native_targets_survive_new_discovery_preference(self):
+        nested = self.root / 'SDK/bin/signed' / self.native.name
+        nested.parent.mkdir(parents=True)
+        self.native.rename(nested)
+        self.package()
+        self.action('install')
+        receipt = self.m.record(self.game)
+        self.assertEqual(receipt['targets'], [str(nested)])
+        # Older discovery could select this nested SR DLL even alongside an
+        # ordinary root loader. Its receipt must continue to own only the SR DLL.
+        unrelated = write(self.root / manager.DLL, pe() + b'ordinary game loader')
+        unrelated_bytes = unrelated.read_bytes()
+        for action in ('update', 'disable', 'remove'):
+            with self.subTest(action=action):
+                data = self.m.assess(self.game)
+                self.assertEqual(data['compatibility'], 'candidate')
+                self.assertEqual(data['route'], 'direct')
+                self.assertEqual(data['targets'], receipt['targets'])
+                self.action(action)
+                self.assertEqual(unrelated.read_bytes(), unrelated_bytes)
+                if action == 'update':
+                    self.assertEqual(self.m.record(self.game)['targets'], receipt['targets'])
+                    self.assertEqual(self.m.record(self.game)['baseline'], receipt['baseline'])
+                else:
+                    self.assertEqual(nested.read_bytes(), self.original)
+        self.assertFalse(self.m.record(self.game))
+
     def test_selected_executable_requires_own_dx12_evidence(self):
         self.native.unlink()
         write(self.root / 'nvngx_dlss.dll', pe())

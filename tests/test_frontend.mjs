@@ -3,6 +3,23 @@ import test from "node:test";
 
 import { proxyOptions } from "../src/launchOptions.ts";
 import { PluginInstaller } from "../src/pluginInstaller.ts";
+import { gameStatus } from "../src/gameStatus.ts";
+
+test("changed managed files cannot appear as a healthy enabled install", () => {
+  const enabled = {compatibility: "candidate", managed: true, enabled: true, legacy: false, installed_version: "1.8.1"};
+  assert.equal(gameStatus(enabled).label, "Enabled");
+  assert.equal(gameStatus(enabled).installed, true);
+  const conflict = gameStatus({...enabled, compatibility: "blocked"});
+  assert.equal(conflict.label, "Needs review");
+  assert.equal(conflict.installed, false);
+  assert.match(conflict.summary, /Needs review.*Recorded as enabled/);
+  assert.notEqual(conflict.color, gameStatus(enabled).color);
+  const recovery = gameStatus({...enabled, recovery_available: true});
+  assert.equal(recovery.label, "Recovery needed");
+  assert.equal(recovery.installed, false);
+  assert.match(gameStatus({...enabled, enabled: false}).summary, /disabled/);
+  assert.equal(gameStatus({...enabled, compatibility: "blocked", executable_selection_needed: true}).label, "Choose executable");
+});
 
 const artifact = {artifact: "file:///private/update-attempt.zip", name: "HelixSR Decky", version: "0.1.3", sha256: "a".repeat(64), install_type: 2};
 

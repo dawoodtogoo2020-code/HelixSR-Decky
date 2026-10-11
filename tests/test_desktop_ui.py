@@ -141,6 +141,35 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertIn('OptiScaler runtime: unknown', self.window.evidence.toPlainText())
         self.assertIn('Frame generation:', self.window.evidence.toPlainText())
 
+    def test_conflict_from_fresh_details_overrides_enabled_status_and_actions(self):
+        self.backend.game.update(managed=True, enabled=True, installed_version='1.8.1')
+        self.window._library_received(self.backend.library())
+        self.settle()
+        self.assertIn('Enabled', self.window.games.currentText())
+        self.assertTrue(self.window.install.isEnabled())
+        self.backend.game.update(compatibility='blocked', reasons=['Managed files changed: amd_fidelityfx_dx12.dll'])
+        self.window.select_game()
+        self.settle()
+        self.assertIn('Needs review', self.window.games.currentText())
+        self.assertIn('HelixSR: Needs review', self.window.status.text())
+        self.assertIn('Recorded as enabled', self.window.status.text())
+        self.assertIn('#f1ca7e', self.window.status.styleSheet())
+        self.assertIn('Recorded route: optiscaler', self.window.evidence.toPlainText())
+        self.assertIn('Managed files changed', self.window.evidence.toPlainText())
+        self.assertFalse(self.window.install.isEnabled())
+        self.assertTrue(all(not button.isEnabled() for key, button in self.window.actions.items() if key != 'recover'))
+        self.assertFalse(any(c[0] in ('install', 'apply') for c in self.backend.calls))
+
+    def test_interrupted_transaction_does_not_appear_as_healthy_enabled(self):
+        self.backend.game.update(managed=True, enabled=True, compatibility='blocked', recovery_available=True)
+        self.window._library_received(self.backend.library())
+        self.settle()
+        self.assertIn('Recovery needed', self.window.games.currentText())
+        self.assertIn('Recovery needed', self.window.status.text())
+        self.assertIn('Recorded as enabled', self.window.status.text())
+        self.assertFalse(self.window.install.isEnabled())
+        self.assertTrue(self.window.actions['recover'].isEnabled())
+
     def test_executable_choice_refreshes_details_and_reaches_review(self):
         self.backend.game.update(executable_choices=[dict(path='bin/x64/game.exe', dx12=False),
                                   dict(path='bin/x64_dx12/game.exe', dx12=True)],

@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 import { FaAdjust } from "react-icons/fa";
 import { proxyOptions } from "./launchOptions";
 import { PluginInstaller, PluginArtifact } from "./pluginInstaller";
+import { gameStatus } from "./gameStatus";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -419,8 +420,10 @@ function Content() {
   }
   const running = jobs.some(x => x.state === "running");
   const disabled = busy || running || modalOpen || !!pluginUpdate?.pending;
-  const games = (data?.games || []).filter(g => g.compatibility === "candidate" || g.recovery_available || g.managed || g.executable_selection_needed);
-  const unavailable = (data?.games || []).filter(g => !games.includes(g));
+  const libraryGames = (data?.games || []).map(g => game?.id === g.id ? game : g);
+  const games = libraryGames.filter(g => g.compatibility === "candidate" || g.recovery_available || g.managed || g.executable_selection_needed);
+  const unavailable = libraryGames.filter(g => !games.includes(g));
+  const selectedStatus = game ? gameStatus(game) : undefined;
   const infoStyle = { fontSize: "13px", lineHeight: "1.45", overflowWrap: "anywhere" as const, whiteSpace: "pre-wrap" as const };
 
   return <div className="helixsr-decky">
@@ -436,14 +439,14 @@ function Content() {
       .helixsr-decky .helix-status{color:#8ee8bc}`}</style>
     <PanelSection title="Games">
       <PanelSectionRow><div className="helix-card helix-muted">{busy && !data ? "Detecting installed games…" : `${data?.games.length || 0} detected · ${games.filter(g => g.compatibility === "candidate").length} installation candidates`}</div></PanelSectionRow>
-      <div className={`${game?.enabled || game?.legacy ? "helix-installed" : ""} helix-selected`}><PanelSectionRow>
+      <div className={`${selectedStatus?.installed ? "helix-installed" : ""} helix-selected`}><PanelSectionRow>
         <DropdownItem layout="below" label="Game" menuLabel="Detected games" selectedOption={selected}
           strDefaultLabel={games.length ? "Select a game" : "No compatible games detected"} disabled={busy || modalOpen || !games.length}
-          rgOptions={games.map(g => ({ data: g.id, label: <span style={{ borderLeft: `3px solid ${g.enabled || g.legacy ? "#55cd92" : "#8b8297"}`, paddingLeft: 8 }}>{g.name} · {g.executable_selection_needed ? "Choose executable" : g.recovery_available ? "Recovery needed" : g.compatibility !== "candidate" ? "Needs review" : g.managed ? g.enabled ? "Enabled" : "Disabled" : g.legacy ? "Existing HelixSR" : "Not installed"}</span> }))}
+          rgOptions={games.map(g => ({ data: g.id, label: <span style={{ borderLeft: `3px solid ${gameStatus(g).color}`, paddingLeft: 8 }}>{g.name} · {gameStatus(g).label}</span> }))}
           onChange={option => chooseGame(String(option.data))} />
       </PanelSectionRow></div>
       {game && <>
-        <PanelSectionRow><div className="helix-muted" style={{ color: game.enabled ? "#8ee8bc" : "#c5d1df" }}>{game.enabled ? `HelixSR enabled · ${game.installed_version}` : game.legacy ? "Existing HelixSR installation" : "HelixSR is not enabled"}</div></PanelSectionRow>
+        <PanelSectionRow><div className="helix-muted" style={{ color: selectedStatus?.color }}>{selectedStatus?.summary}</div></PanelSectionRow>
         {!game.managed && game.route === "optiscaler" && !!game.executable_choices?.length && (game.executable_choices.length > 1 || !game.executable_choices.some(choice => choice.path === game.selected_executable)) && <>
           <PanelSectionRow><DropdownItem layout="below" label="Game executable" menuLabel="Choose the executable you launch"
             selectedOption={game.selected_executable} strDefaultLabel="Choose a game executable" disabled={disabled}
@@ -464,8 +467,8 @@ function Content() {
     {game && <PanelSection title={game.name}>
       <PanelSectionRow><div className="helix-card" style={infoStyle}>
         {game.source} · {game.compatibility}{"\n"}
-        Route: {game.route === "direct" ? "Native FSR 3.1 replacement" : game.route === "optiscaler" ? "OptiScaler proxy" : "None detected"}{"\n"}
-        HelixSR: {game.managed ? `${game.enabled ? "enabled" : "disabled"}, ${game.installed_version}` : game.legacy ? "existing unmanaged install" : "unmanaged"}{"\n"}
+        {game.managed ? "Recorded route" : "Detected route"}: {game.route === "direct" ? "Native FSR 3.1 replacement" : game.route === "optiscaler" ? "OptiScaler proxy" : "None detected"}{"\n"}
+        {selectedStatus?.summary}{"\n"}
         Prepared: {game.package_version || "none on this drive"}{"\n"}
         Installed model: {game.installed_model || "not installed"}{"\n"}
         {game.reasons.join("\n")}

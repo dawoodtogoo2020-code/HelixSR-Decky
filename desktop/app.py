@@ -38,6 +38,18 @@ TERMS = (
 )
 
 
+def game_status(game):
+    review = bool(game) and (game.get('compatibility') != 'candidate' or bool(game.get('recovery_available')))
+    state = ('Choose executable' if game.get('executable_selection_needed') else
+             'Recovery needed' if game.get('recovery_available') else
+             'Needs review' if review else 'Enabled' if game.get('enabled') else
+             'Installed, disabled' if game.get('managed') else
+             'Existing unmanaged installation' if game.get('legacy') else 'Not installed')
+    recorded = f"Recorded as {'enabled' if game.get('enabled') else 'disabled'}" if review and game.get('managed') else ''
+    color = '#f1ca7e' if review else '#82dfaf' if game.get('managed') or game.get('legacy') else '#a2a3af'
+    return state, recorded, color
+
+
 def open_external_url(url):
     """Use host tools without passing the bundled Qt/library environment to them."""
     parsed = urlsplit(url)
@@ -397,9 +409,9 @@ class MainWindow(QMainWindow):
         self.unavailable.clear()
         for game in self._games.values():
             if game.get("compatibility") == "candidate" or game.get("managed") or game.get("recovery_available") or game.get("executable_selection_needed"):
-                state = "Choose executable" if game.get("executable_selection_needed") else "Enabled" if game.get("enabled") else "Installed" if game.get("managed") or game.get("legacy") else "Not installed"
+                state, _, color = game_status(game)
                 self.games.addItem(f"{game.get('name', game['id'])} · {state}", game["id"])
-                self.games.setItemData(self.games.count() - 1, QColor("#82dfaf" if game.get('enabled') or game.get('managed') or game.get('legacy') else "#a2a3af"), Qt.ForegroundRole)
+                self.games.setItemData(self.games.count() - 1, QColor(color), Qt.ForegroundRole)
             else:
                 self.unavailable.addItem(f"{game.get('name', '')}: {'; '.join(game.get('reasons', [])) or game.get('compatibility', 'unknown')}")
         index = self.games.findData(previous)
@@ -449,6 +461,10 @@ class MainWindow(QMainWindow):
     def _details_received(self, gid, value, reset_model=True):
         if self.games.currentData() == gid:
             self.game = value
+            self._games[gid] = value
+            state, _, color = game_status(value)
+            self.games.setItemText(self.games.currentIndex(), f"{value.get('name', gid)} · {state}")
+            self.games.setItemData(self.games.currentIndex(), QColor(color), Qt.ForegroundRole)
             self._render_game(reset_model=reset_model)
         if not self.app_update:
             QTimer.singleShot(0, lambda: self.check_app(False))
@@ -462,14 +478,16 @@ class MainWindow(QMainWindow):
             self.executables.addItem(f"{executable['path']} · {renderer}", executable['path'])
         self.executables.setCurrentIndex(self.executables.findData(game.get("selected_executable")))
         self.executables.blockSignals(False)
-        state = "Enabled" if game.get("enabled") else "Installed, disabled" if game.get("managed") else "Existing unmanaged installation" if game.get("legacy") else "Not installed"
+        state, recorded, color = game_status(game)
         self.status.setText(f"HelixSR: {state} · Version: {game.get('installed_version') or 'none'}\n"
+                            + (recorded + '\n' if recorded else '') +
                             f"Installed model: {game.get('installed_model') or 'not installed'}\n{game.get('folder', '')}")
         if reset_model:
             self.models.setCurrentIndex(max(0, self.models.findData(game.get('installed_variant'))))
-        self.status.setStyleSheet("color: #82dfaf" if game.get("enabled") or game.get("managed") or game.get("legacy") else "color: #a2a3af")
+        self.status.setStyleSheet(f"color: {color}")
         opti = game.get("optiscaler") or {}
-        text = (f"Route: {game.get('route') or 'none detected'}\n"
+        route_label = 'Recorded route' if game.get('managed') else 'Detected route'
+        text = (f"{route_label}: {game.get('route') or 'none detected'}\n"
                 f"Target executable: {game.get('main_exe') or 'unknown'}\n"
                 f"OptiScaler installed: {'yes' if opti.get('present') else 'no detected files'}\n"
                 f"OptiScaler HelixSR route configured: {'yes' if opti.get('helix_configured') else 'no'}\n"

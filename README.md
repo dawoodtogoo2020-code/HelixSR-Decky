@@ -18,7 +18,7 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 * Supports install, update, disable, enable, remove, explicit adoption of a legacy native HelixSR installation and recovery of interrupted transactions. Keeps essential originals and installation records in a named companion folder beside the game on the same filesystem. Cleans completed staging and temporary transaction copies.
 * Reports OptiScaler files, whether the selected Helix route involves OptiScaler, mapped-module evidence where available and bounded log excerpts. Reports native game frame-generation settings, OptiScaler configuration, matching MAKO/LSFG-VK profiles and running-process environment separately. A configured multiplier or installed plugin is not proof of active frame generation.
 * Explains missing OptiScaler/DLSS input, proxy override conflicts, backend/provider mismatches and overlay shortcuts. Preserves owned configuration edits through updates and disable/enable; removal retains configuration installation records. Reviewed Steam launch changes have durable recovery intents and preserve existing supported environment assignments.
-* Blocks detected anti-cheat, active games, incomplete Steam installs/download staging, wrong architecture, unmanaged injector conflicts and changed managed files. Uses no root plugin flag.
+* Blocks detected anti-cheat, active games, incomplete Steam installs/download staging, wrong architecture, unmanaged injector conflicts and changed managed files. Conflicted installations show Needs review with their recorded state and route. Native discovery prefers DLLs beside the game or executable before nested SDK copies; existing managed targets stay recorded. Uses no root plugin flag.
 
 ## Install
 

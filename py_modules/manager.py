@@ -717,18 +717,29 @@ class Manager:
         tree = scan_tree(root)
         names = [(d / n, n.lower()) for d, ns in tree for n in ns]
         inputs = sorted({INPUTS[n] for _, n in names if n in INPUTS})
-        targets = [p for p, n in names if n == 'amd_fidelityfx_upscaler_dx12.dll']
-        targets = targets or [p for p, n in names if n == DLL]
+        targets = [p for p, n in names if n in ('amd_fidelityfx_upscaler_dx12.dll', DLL)]
         exes = [p for p, n in names if n.endswith('.exe') and
                 not re.search(r'launcher|crash|setup|redist|unins|helper|easyanticheat|beservice', n)]
         exes.sort(key=lambda p: (p.name.lower().endswith('-win64-shipping.exe'), p.stat().st_size), reverse=True)
         main = exes[0] if exes else None
-        runtime_targets = [p for p in targets if p.parent == root or main and p.parent == main.parent]
-        if runtime_targets:
-            targets = runtime_targets
-        direct_legacy = any(pe_info(p)['helix'] for p in targets)
         rec = self.record(game)
-        native_api = bool(targets) and all(pe_info(p)['ffx'] for p in targets)
+        if rec.get('route') == 'direct':
+            # Existing installations retain their owned targets, even if a
+            # newer discovery heuristic would choose another native DLL.
+            targets = [checked_path(root, str(Path(p).relative_to(root))) for p in rec['targets']]
+        else:
+            runtime_targets = [p for p in targets if p.parent == root or main and p.parent == main.parent]
+            if runtime_targets:
+                targets = runtime_targets
+            # Prefer runtime locations before the SR filename, so bundled SDK
+            # or injector copies cannot displace the game's native loader DLL.
+            sr_targets = [p for p in targets if p.name.lower() == 'amd_fidelityfx_upscaler_dx12.dll']
+            targets = sr_targets or targets
+        # Missing owned DLLs remain in target evidence and are blocked by the
+        # receipt's file hashes below, without losing managed state to a PE read.
+        probe_targets = [p for p in targets if p.is_file()] if rec.get('route') == 'direct' else targets
+        direct_legacy = any(pe_info(p)['helix'] for p in probe_targets)
+        native_api = bool(probe_targets) and all(pe_info(p)['ffx'] for p in probe_targets)
         route = rec.get('route') or ('direct' if native_api else 'optiscaler' if inputs and main else
                                     'direct' if targets else None)
         # Native API discovery uses the original heuristic independently of an
@@ -763,7 +774,7 @@ class Manager:
         if not route:
             reasons.append('No supported DLSS, XeSS, FSR 2 or native FSR 3.1 DLL detected')
         if route == 'direct':
-            for p in targets:
+            for p in probe_targets:
                 info = pe_info(p)
                 if info['arch'] != 'x64' or not info['ffx']:
                     blocked.append(f'{p.name}: expected x64 FidelityFX API not found')
@@ -824,7 +835,7 @@ class Manager:
                         continue
                 actual = sha(p) if p.is_file() else None
                 if actual != expected:
-                    blocked.append('Managed files changed, possibly a game update. Restore through Steam or resolve conflict first: ' + rel)
+                    blocked.append('Managed files changed; ownership needs review before further changes: ' + rel)
         # Symlink candidates may hide API files and must never be mutated.
         for p in targets + ([main] if main else []):
             checked_path(root, str(p.relative_to(root)))
@@ -839,7 +850,7 @@ class Manager:
                     selected_executable=(main.relative_to(root).as_posix() if main else
                                          rec.get('selected_executable')) if route == 'optiscaler' else None,
                     managed=bool(rec), enabled=rec.get('enabled', False), installed_version=rec.get('version') or
-                    next((pe_info(p).get('helix_version') for p in targets if pe_info(p)['helix']), None),
+                    next((pe_info(p).get('helix_version') for p in probe_targets if pe_info(p)['helix']), None),
                     legacy=legacy, package_version=package[2]['version'] if package else None,
                     installed_model=variant_label(rec.get('variant')) if rec or legacy else None,
                     installed_variant=rec.get('variant', {}).get('id') if valid_variant(rec.get('variant')) else None,
