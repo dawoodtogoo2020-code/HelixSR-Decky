@@ -1,5 +1,6 @@
 """The public fallback accepts only the exact official asset digest and byte size."""
 import sys
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -153,6 +154,33 @@ class WebLatestReleaseTests(unittest.TestCase):
                 self.assertEqual(request.full_url, CDN)
         with self.assertRaisesRegex(ValueError, 'redirect'):
             redirect.redirect_request(request, None, 302, 'Found', {}, CDN)
+
+    def test_vendored_parser_decodes_html_entities_in_asset_link(self):
+        parser = release._AssetRows(HREF)
+        parser.feed(row(href=HREF.replace('.zip', '.z&#105;p')))
+        parser.close()
+        self.assertEqual(parser.digest(), DIGEST)
+
+    def test_fresh_process_imports_without_standard_html_or_markupbase(self):
+        modules = str(Path(__file__).resolve().parents[1] / 'py_modules')
+        script = '''import importlib.abc, sys
+class Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'html' or fullname.startswith('html.') or fullname == '_markupbase':
+            raise ModuleNotFoundError(fullname)
+sys.meta_path.insert(0, Block())
+for name in list(sys.modules):
+    if name == 'html' or name.startswith('html.') or name == '_markupbase':
+        del sys.modules[name]
+sys.path.insert(0, sys.argv[1])
+import github_release
+assert github_release._AssetRows
+assert 'html.parser' not in sys.modules
+assert '_markupbase' not in sys.modules
+'''
+        result = subprocess.run([sys.executable, '-S', '-c', script, modules],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

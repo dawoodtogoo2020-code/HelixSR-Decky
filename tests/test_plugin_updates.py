@@ -112,6 +112,20 @@ class PluginUpdateFixtures(unittest.TestCase):
 
 
 class ReleaseValidationTests(PluginUpdateFixtures):
+    def test_new_release_requires_bundled_parser_and_its_notices(self):
+        modules = ('optiscaler_setup', 'launch_receipts', 'operation_lock', 'host_environment',
+                   'model_variants', 'build_runtime', 'github_release', '_helix_html',
+                   '_helix_html_parser', '_helix_html_entities', '_helix_markupbase')
+        extra = {f'{plugin_updates.FOLDER}/py_modules/{name}.py': b'# fixture\n' for name in modules}
+        extra.update({f'{plugin_updates.FOLDER}/licenses/{name}': b'fixture license/provenance\n'
+                      for name in ('cpython-3.11.17-LICENSE.txt', 'cpython-3.11.17-PROVENANCE.json')})
+        archive_bytes(self.root, '0.1.14', extra=extra)
+        plugin_updates.validate_zip(self.root / 'fixture.zip', '0.1.14')
+        for name in extra:
+            archive_bytes(self.root, '0.1.14', extra=extra, omit=(name,))
+            with self.subTest(omitted=name), self.assertRaisesRegex(ValueError, 'Incomplete'):
+                plugin_updates.validate_zip(self.root / 'fixture.zip', '0.1.14')
+
     def test_semver_is_strict_and_release_identity_is_exact(self):
         self.assertEqual(plugin_updates.semver("v0.1.11"), (0, 1, 11))
         for invalid in ("1.2", "1.2.3-beta", "01.2.3", 123, None):

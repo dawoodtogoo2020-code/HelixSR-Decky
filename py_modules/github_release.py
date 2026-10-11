@@ -1,5 +1,5 @@
 """Bounded public GitHub release metadata fallback when the API is rate limited."""
-from html.parser import HTMLParser
+from _helix_html_parser import HTMLParser
 import re
 import ssl
 import urllib.parse

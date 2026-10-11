@@ -73,6 +73,8 @@ def build():
         shutil.copy2(ROOT / name, share / name)
     licenses = share / 'licenses'
     licenses.mkdir()
+    for name in ('cpython-3.11.17-LICENSE.txt', 'cpython-3.11.17-PROVENANCE.json'):
+        shutil.copy2(ROOT / 'licenses' / name, licenses / name)
     qt_notices = ROOT / ('licenses/qt-' + qt_version)
     if not (qt_notices / 'qtbase/LICENSES/LGPL-3.0-only.txt').is_file():
         raise SystemExit('Missing reviewed Qt upstream license texts')

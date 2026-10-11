@@ -15,6 +15,8 @@ You may inspect, modify and replace these libraries, including for debugging you
 
 Other bundled runtime components include Python under the Python Software Foundation license, PyInstaller under GPLv2 with its bootloader exception, altgraph under MIT, packaging under Apache-2.0/BSD-2-Clause, setuptools under MIT, and dependency hook notices. License texts are included with the runtime. [Python source](https://www.python.org/downloads/source/), [PyInstaller 6.22.3 source and exception](https://github.com/pyinstaller/pyinstaller/tree/v6.22.3), and [PyInstaller hooks](https://github.com/pyinstaller/pyinstaller-hooks-contrib) are publicly available.
 
+The shared backend also includes four pure-Python HTML parsing modules from CPython 3.11.17 under private module names, with internal import names changed so Decky does not require omitted host modules. Their full upstream license and source/hash provenance are included as `cpython-3.11.17-LICENSE.txt` and `cpython-3.11.17-PROVENANCE.json` in the AppImage's licenses directory. See THIRD_PARTY_NOTICES.md for the modification summary.
+
 The AppImage runtime source and license are available from [AppImage type2-runtime](https://github.com/AppImage/type2-runtime). The build tool is [appimagetool](https://github.com/AppImage/appimagetool), pinned in the build script by SHA-256. It is used during packaging, not installed as a game dependency.
 
 Complete application source, modifications, dependency versions and build scripts are in the [desktop-v0.1.1 source release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/tree/desktop-v0.1.1). See THIRD_PARTY_NOTICES.md for notices that apply to the separate Decky plugin.

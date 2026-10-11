@@ -91,6 +91,12 @@ def validate_zip(path, version):
                             ('optiscaler_setup', 'launch_receipts', 'operation_lock', 'host_environment'))
         if semver(version) >= (0, 1, 9):
             required.update(f'{FOLDER}/py_modules/{name}.py' for name in ('model_variants', 'build_runtime'))
+        if semver(version) >= (0, 1, 14):
+            required.update(f'{FOLDER}/py_modules/{name}.py' for name in
+                            ('github_release', '_helix_html', '_helix_html_parser',
+                             '_helix_html_entities', '_helix_markupbase'))
+            required.update(f'{FOLDER}/licenses/{name}' for name in
+                            ('cpython-3.11.17-LICENSE.txt', 'cpython-3.11.17-PROVENANCE.json'))
         if not required <= seen:
             raise ValueError('Incomplete plugin ZIP')
         for name in ('plugin.json', 'package.json'):

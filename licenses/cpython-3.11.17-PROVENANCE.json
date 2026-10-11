@@ -1,0 +1,39 @@
+{
+  "project": "CPython",
+  "tag": "v3.11.17",
+  "commit": "e6392eb68a39cef49c9fe6431253050caa17a426",
+  "source_base": "https://raw.githubusercontent.com/python/cpython/e6392eb68a39cef49c9fe6431253050caa17a426/",
+  "license": "cpython-3.11.17-LICENSE.txt",
+  "files": [
+    {
+      "source": "Lib/html/__init__.py",
+      "vendored": "py_modules/_helix_html.py",
+      "source_sha256": "923d82d821e75e8d235392c10c145ab8587927b3faf9c952bbd48081eebd8522",
+      "vendored_sha256": "b49a3e75c7c10e7389ee73b5c20e953cd53b72f82490f5989e8b274139a5cace",
+      "changes": ["Replace import from html.entities with _helix_html_entities"]
+    },
+    {
+      "source": "Lib/html/parser.py",
+      "vendored": "py_modules/_helix_html_parser.py",
+      "source_sha256": "3a02c73b41c1095a7cddb8b824387ffb875b19f37e0e6f591753d7a88a2fe52a",
+      "vendored_sha256": "583cce1498834d2deebf7e3ecb69f069997097440761cca13cf2761764787195",
+      "changes": ["Replace import _markupbase with _helix_markupbase as _markupbase", "Replace import from html with _helix_html"]
+    },
+    {
+      "source": "Lib/html/entities.py",
+      "vendored": "py_modules/_helix_html_entities.py",
+      "source_sha256": "282b7cdd567bbbf3d7d7ccd49fae1d3ebc7f7ab64058d781193620913773731b",
+      "vendored_sha256": "282b7cdd567bbbf3d7d7ccd49fae1d3ebc7f7ab64058d781193620913773731b",
+      "changes": []
+    },
+    {
+      "source": "Lib/_markupbase.py",
+      "vendored": "py_modules/_helix_markupbase.py",
+      "source_sha256": "cb14dd6f2e2439eb70b806cd49d19911363d424c2b6b9f4b73c9c08022d47030",
+      "vendored_sha256": "cb14dd6f2e2439eb70b806cd49d19911363d424c2b6b9f4b73c9c08022d47030",
+      "changes": []
+    }
+  ],
+  "license_source": "LICENSE",
+  "license_sha256": "3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf"
+}

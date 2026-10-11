@@ -2,6 +2,10 @@
 
 Plugin code: MIT, see LICENSE.
 
+## Bundled HTML parser
+
+The backend includes CPython 3.11.17's pure-Python HTML parser, entity table, HTML helpers and markup base under the private `_helix_html` and `_helix_markupbase` module names. Decky's frozen Python omits these standard-library modules. Only internal import names were changed to avoid modifying or shadowing the host's libraries. Upstream copyright and license terms remain separate from this project's MIT license. The full [CPython license](licenses/cpython-3.11.17-LICENSE.txt), source URLs, original and modified hashes, and change summary are included in [the provenance record](licenses/cpython-3.11.17-PROVENANCE.json). Both distributions include these notices.
+
 ## Components included in the frontend
 
 The distributable includes the following code and icon data in `dist/index.js`. Their licenses remain separate from the plugin's MIT license.

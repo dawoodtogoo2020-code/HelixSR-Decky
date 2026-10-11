@@ -12,6 +12,8 @@ semver(version)
 out = root.parent / f'HelixSR-Decky-{version}.zip'
 allowed = ['main.py', 'plugin.json', 'package.json', 'LICENSE', 'README.md', 'INSTALL_GUIDE.md', 'OPTISCALER_GUIDE.md', 'DESKTOP_GUIDE.md', 'STATUS_GUIDE.md', 'MODEL_VARIANTS.md', 'THIRD_PARTY_NOTICES.md']
 license_files = [
+    'licenses/cpython-3.11.17-LICENSE.txt',
+    'licenses/cpython-3.11.17-PROVENANCE.json',
     'licenses/decky-api-LGPL-2.1.txt',
     'licenses/react-icons-LICENSE.txt',
     'licenses/font-awesome-free-5-LICENSE.txt',
