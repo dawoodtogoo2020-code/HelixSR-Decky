@@ -15,13 +15,14 @@ from PySide6.QtCore import QThread, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QFileDialog, QGroupBox, QHBoxLayout, QLabel, QListWidget, QMainWindow,
-    QAbstractItemView, QPushButton, QScrollArea, QTabWidget, QTextEdit,
+    QGroupBox, QHBoxLayout, QLabel, QListWidget, QMainWindow,
+    QPushButton, QScrollArea, QTabWidget, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
 from .version import VERSION
 from .system import system_environment
+from .folder_dialog import FolderDialog
 
 PROJECT = "https://github.com/dawoodtogoo2020-code/HelixSR-Decky"
 GUIDE = PROJECT + "/blob/main/DESKTOP_GUIDE.md"
@@ -480,13 +481,8 @@ class MainWindow(QMainWindow):
             return
         self._modal = True
         self._controls()
-        dialog = QFileDialog(self, "Select installed game folders")
+        dialog = FolderDialog(self)
         self._active_dialog = dialog
-        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
-        dialog.setFileMode(QFileDialog.Directory)
-        dialog.setOption(QFileDialog.ShowDirsOnly, True)
-        for view in dialog.findChildren(QAbstractItemView):
-            view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         accepted = dialog.exec() == QDialog.Accepted
         folders = dialog.selectedFiles() if accepted else []
         self._modal = False

@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from desktop.backend import DesktopBackend
 from test_backend import pe
+from manager import PACKAGE_FILES, sha
 
 
 class DesktopBackendTests(unittest.TestCase):
@@ -51,9 +52,12 @@ class DesktopBackendTests(unittest.TestCase):
         (game / 'amd_fidelityfx_upscaler_dx12.dll').write_bytes(pe(ffx=True))
         prepared = self.home / 'prepared'
         prepared.mkdir()
-        (prepared / 'amd_fidelityfx_dx12.dll').write_bytes(pe(ffx=True, helix=True))
+        for name in PACKAGE_FILES:
+            payload = prepared / name
+            payload.parent.mkdir(parents=True, exist_ok=True)
+            payload.write_bytes(pe(ffx=True, helix=True) if name.endswith('.dll') else b'prepared fixture')
         good = dict(path=str(prepared), version='1.2.3', prepared_at=1,
-                    files={'amd_fidelityfx_dx12.dll': 'a' * 64}, release_sha256='b' * 64)
+                    files={name: sha(prepared / name) for name in PACKAGE_FILES}, release_sha256='b' * 64)
         bad_values = [dict(prepared_at='broken'), dict(prepared_at=True),
             dict(prepared_at=float('inf')), dict(prepared_at=-1),
             dict(files=[]), dict(files={}), dict(files={'../escape.dll': 'a' * 64}),

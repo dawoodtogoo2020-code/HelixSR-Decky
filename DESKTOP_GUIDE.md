@@ -23,7 +23,7 @@ This fallback extracts the app temporarily and does not require FUSE or administ
 1. Steam libraries and installed games from known launcher locations are detected automatically. Click **Refresh games** if a download just finished.
 2. Choose a game from the dropdown. Unavailable entries show a reason and cannot be installed.
 3. For another launcher, choose **Import games from → Heroic, Lutris, Legendary, or Steam shortcuts**, then **Import now**. The app reads installed records; it does not start the launcher or alter its database.
-4. For an unlisted game, use **Import game folders**. You can add several folders. Select each game's install folder, not an entire drive or Wine prefix.
+4. For an unlisted game, use **Import game folders → Add folder**. Add each game's install folder to the list, then choose **Import listed folders**. You can remove a mistaken entry before importing. Select each game's install folder, not an entire drive or Wine prefix.
 5. Close the game. Click **Install HelixSR** or **Update HelixSR**, review the files and terms, and confirm. Only confirm DirectX 12 when your game's selected renderer uses it.
 6. Wait for **HelixSR enabled**. Downloads, dependencies and local network preparation happen automatically. Keep at least 3 GiB free on the game's drive while preparing.
 7. Follow the displayed launch-option guidance. For native FSR replacement, select AMD FSR in the game's settings. For an OptiScaler route, follow the displayed input and Proton override instructions. The desktop app displays these instructions and does not change Steam launch options for you.

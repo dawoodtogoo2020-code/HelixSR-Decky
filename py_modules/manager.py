@@ -40,6 +40,7 @@ INPUTS = {'nvngx_dlss.dll': 'DLSS', 'libxess.dll': 'XeSS',
 ANTI = ('easyanticheat', 'battleye', 'beclient', 'equ8', 'faceit', 'vanguard')
 LICENSE_REV = 'helixsr-local-nvidia-network-2026-10'
 RELEASE_POLICY = 2
+AUTO_PACKAGE = object()
 
 
 def load_release(settings):
@@ -380,6 +381,8 @@ class Manager:
 
     def _verify_package_payloads(self, package, route=None):
         """Prove every payload an operation may consume is in the recorded manifest."""
+        if route not in (None, 'direct', 'optiscaler'):
+            raise ValueError('Unknown package route')
         path, record = package[1], package[2]
         required = set(PACKAGE_FILES if route in (None, 'optiscaler') else NETWORK + (DLL,))
         if not required.issubset(record['files']):
@@ -389,13 +392,13 @@ class Manager:
         if framegen.is_file():
             required.add(framegen_name)
         try:
-            return all(name in record['files'] and not self._symlink_in_path(path / name)
+            return all(not self._symlink_in_path(path / name)
                        and (path / name).is_file() and sha(path / name) == record['files'][name]
-                       for name in required)
+                       for name in record['files'])
         except OSError:
             return False
 
-    def package(self, game):
+    def package(self, game, route=None, release=None):
         # Packages remain on the same filesystem as the selected game.
         choices = []
         for record in self.cfg.get('packages', {}).values():
@@ -405,7 +408,8 @@ class Manager:
         # A separate frontend has separate settings, but package records are kept
         # beside games. Read records only from games already discovered/imported.
         seen = set()
-        for known in self.entries.values():
+        known_games = [game] + list(self.entries.values())
+        for known in known_games:
             try:
                 companion = self.companion(known)
                 record_path = companion / 'records/package.json'
@@ -418,12 +422,17 @@ class Manager:
                 candidate = self._package_record(record, game, companion)
                 if candidate:
                     choices.append((*candidate, 1))
-            except (ValueError, OSError):
+            except (ValueError, OSError, RecursionError, KeyError, TypeError):
                 continue
+        if release is not None:
+            choices = [choice for choice in choices
+                       if choice[2].get('version') == release.get('version')
+                       and choice[2].get('release_sha256') == release.get('sha256')]
         if not choices:
             return None
-        selected = max(choices, key=lambda x: (x[0], x[2].get('prepared_at', 0), x[3]))
-        return selected[:3]
+        choices.sort(key=lambda x: (x[0], x[2].get('prepared_at', 0), x[3]), reverse=True)
+        return next((choice[:3] for choice in choices
+                     if self._verify_package_payloads(choice[:3], route)), None)
 
     def refresh(self):
         entries, warnings = discover(self.home, self.cfg.get('imports', []))
@@ -557,7 +566,7 @@ class Manager:
         for p in targets + ([main] if main else []):
             checked_path(root, str(p.relative_to(root)))
         aware = awareness(dict(game, managed=bool(rec), enabled=rec.get('enabled', False)), tree, self.home, route, target)
-        package = self.package(game)
+        package = self.package(game, route)
         data = dict(game, compatibility='blocked' if blocked else 'candidate' if route else 'unsupported',
                     reasons=blocked + reasons, route=route, inputs=inputs, target=str(target) if target else None,
                     targets=[str(p) for p in targets], main_exe=str(main) if main else None,
@@ -719,7 +728,7 @@ class Manager:
                 operation = contextlib.ExitStack()
                 try:
                     operation.enter_context(operation_lock(self.companion(game)))
-                    self.prepare(game, job)
+                    prepared_package = self.prepare(game, job)
                     if kind == 'install_latest':
                         if self.cancel.is_set():
                             raise ValueError('Cancelled before installation')
@@ -731,7 +740,11 @@ class Manager:
                             if data['legacy']:
                                 self.mutate(game, data, 'adopt')
                                 data = self.assess(game)
-                            result = self.mutate(game, data, 'update' if self.record(game) else 'install')
+                            if not prepared_package:
+                                raise ValueError('Verified prepared package unavailable after preparation')
+                            result = self.mutate(game, data,
+                                                 'update' if self.record(game) else 'install',
+                                                 prepared_package)
                             job['result'] = result
                         job['state'], job['message'] = 'completed', result['message']
                     else:
@@ -770,11 +783,10 @@ class Manager:
             raise ValueError(release.get('error', 'Check upstream updates first'))
         if self.cfg.get('license') != license_key(release):
             raise ValueError('Upstream release changed; review and accept its terms before preparation')
-        cached = self.package(game)
-        if cached and cached[2]['version'] == release['version'] and cached[2].get('release_sha256') == release['sha256']:
-            if self._verify_package_payloads(cached):
-                job['message'] = 'Reusing the verified prepared package on this drive'
-                return
+        cached = self.package(game, release=release)
+        if cached:
+            job['message'] = 'Reusing the verified prepared package on this drive'
+            return cached
         companion = self.companion(game)
         work = companion / 'staging' / job['id']
         work.mkdir(parents=True, exist_ok=False)
@@ -864,6 +876,7 @@ class Manager:
             atomic_json(companion / 'records/package.json', record)
             for n in NETWORK:
                 (final / n).chmod(0o600)
+            return version(record['version']), final, record
         finally:
             # Work is exclusively owned by this job. Logs and successful package remain.
             shutil.rmtree(work, ignore_errors=True)
@@ -897,7 +910,7 @@ class Manager:
             if data['legacy'] and action != 'adopt':
                 raise ValueError('Import existing direct installation first')
             if action in ('install', 'update', 'enable'):
-                package = self.package(game)
+                package = self.package(game, data['route'])
                 if not package:
                     raise ValueError('Prepare HelixSR on this drive first')
                 if not self._verify_package_payloads(package, data['route']):
@@ -925,7 +938,7 @@ class Manager:
                         warning='Close the game. Originals are retained for disable/remove. Game settings and frame generation are not changed.',
                         expires_at=time.time()+120)
 
-    def fingerprint(self, game, data, include_package=True):
+    def fingerprint(self, game, data, include_package=True, package=AUTO_PACKAGE):
         # Observe game drift separately from an install's conflict checks.
         # Potential new dependencies must be stable before/after preparation.
         rec = self.record(game)
@@ -939,17 +952,19 @@ class Manager:
             p = checked_path(Path(game['folder']), rel)
             files[rel] = sha(p) if p.is_file() else None
         files['manifest'] = sha(game['manifest']) if game.get('manifest') else None
-        package = self.package(game)
+        if package is AUTO_PACKAGE:
+            package = self.package(game, data['route'])
         if package and include_package:
             files['package_path'] = str(package[1])
             files['package_files'] = {n: sha(package[1] / n) for n in package[2]['files']}
         return hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
 
-    def planned_paths(self, game, data, action):
+    def planned_paths(self, game, data, action, package=AUTO_PACKAGE):
         rec, root = self.record(game), Path(game['folder'])
+        if package is AUTO_PACKAGE:
+            package = self.package(game, data['route'])
         if rec:
             paths = list(rec['baseline'])
-            package = self.package(game)
             if (action in ('install', 'update', 'enable', 'latest') and data['route'] == 'optiscaler'
                     and (action == 'latest' or package and (package[1] / 'amd-fsr' / AMD_FG).is_file())):
                 path = str((Path(data['target']) / 'HelixSR' / AMD_FG).relative_to(root))
@@ -972,7 +987,6 @@ class Manager:
                      'HelixSR/helixsr.dll', 'HelixSR/helixsr_upscaler.dll',
                      'HelixSR/amd_fidelityfx_upscaler_dx12.amd.dll', 'HelixSR/helixsr-install.json']
             names += ['HelixSR/' + n for n in NETWORK]
-            package = self.package(game)
             if action == 'latest' or package and (package[1] / 'amd-fsr' / AMD_FG).is_file():
                 names.append('HelixSR/' + AMD_FG)
             return [str((target / n).relative_to(root)) for n in names]
@@ -1001,17 +1015,21 @@ class Manager:
             self.rollback(game)
             return {'message': 'Interrupted transaction recovered'}
         data = self.assess(game)
-        if data['compatibility'] != 'candidate' or self.fingerprint(game, data) != preview['fingerprint']:
+        package = self.package(game, data['route'])
+        if (data['compatibility'] != 'candidate'
+                or self.fingerprint(game, data, package=package) != preview['fingerprint']):
             raise ValueError('Game changed since preview; refresh and review again')
-        return self.mutate(game, data, preview['action'])
+        return self.mutate(game, data, preview['action'], package)
 
     @game_locked
-    def mutate(self, game, data, action):
+    def mutate(self, game, data, action, package=AUTO_PACKAGE):
         root, companion = Path(game['folder']), self.companion(game)
         tx = companion / 'transaction'
         if tx.exists():
             raise ValueError('Interrupted transaction exists; recover it first')
-        paths = self.planned_paths(game, data, action)
+        if package is AUTO_PACKAGE:
+            package = self.package(game, data['route'])
+        paths = self.planned_paths(game, data, action, package)
         size = sum((root / p).stat().st_size for p in paths if (root / p).is_file())
         if shutil.disk_usage(root).free < size * 3 + (128 << 20):
             raise ValueError('Insufficient free space for safe file transaction')
@@ -1061,7 +1079,6 @@ class Manager:
                 self.restore_baseline(game, previous)
                 previous['enabled'] = False
             elif action in ('install', 'update', 'enable'):
-                package = self.package(game)
                 if not package:
                     raise ValueError('Prepared package unavailable')
                 previous['enabled'], previous['version'] = True, package[2]['version']
@@ -1069,7 +1086,7 @@ class Manager:
                 # Their paths were conflict-checked, snapshotted and journaled above.
                 for rel in paths:
                     previous['baseline'].setdefault(rel, before[rel])
-                self.install_payload(game, data, previous, package[1])
+                self.install_payload(game, data, previous, package)
             previous['current'] = {rel: sha(root / rel) if (root / rel).is_file() else None for rel in paths}
             previous['updated_at'], previous['game_build'] = time.time(), game.get('build')
             if game.get('manifest'):
@@ -1195,13 +1212,17 @@ class Manager:
             shutil.rmtree(self.companion(game) / 'originals', ignore_errors=True)
         shutil.rmtree(tx)
 
-    def copy_atomic(self, src, dst):
-        self.track_write(dst, sha(src))
+    def copy_atomic(self, src, dst, expected=None):
+        source_hash = sha(src)
+        if expected is not None and source_hash != expected:
+            raise ValueError('Prepared package changed during installation')
+        expected = expected or source_hash
+        self.track_write(dst, expected)
         dst.parent.mkdir(parents=True, exist_ok=True)
         temp = dst.with_name(dst.name + '.helixsr-decky.tmp')
         try:
             shutil.copy2(src, temp)
-            if sha(src) != sha(temp):
+            if sha(src) != expected or sha(temp) != expected:
                 raise ValueError('Copy verification failed')
             with temp.open('r+b') as f:
                 os.fsync(f.fileno())
@@ -1212,6 +1233,7 @@ class Manager:
 
     def install_payload(self, game, data, rec, package):
         root = Path(game['folder'])
+        package_path, package_record = package[1], package[2]
         if data['route'] == 'direct':
             for target in map(Path, rec['targets']):
                 rel = str(target.relative_to(root))
@@ -1219,9 +1241,9 @@ class Manager:
                 if sha(original) != rec['baseline'][rel]:
                     raise ValueError('Original FidelityFX DLL changed')
                 self.copy_atomic(original, target.with_name(target.stem + '.original.dll'))
-                self.copy_atomic(package / DLL, target)
+                self.copy_atomic(package_path / DLL, target, package_record['files'][DLL])
                 for name in NETWORK:
-                    self.copy_atomic(package / name, target.parent / name)
+                    self.copy_atomic(package_path / name, target.parent / name, package_record['files'][name])
                 self.write_managed_json(target.parent / 'helixsr-install.json',
                             {'route': 'direct', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version')})
         else:
@@ -1230,15 +1252,21 @@ class Manager:
                                  ('optiscaler/fakenvapi.dll', 'fakenvapi.dll'), ('optiscaler/fakenvapi.ini', 'fakenvapi.ini'),
                                  (DLL, 'HelixSR/helixsr.dll'), (DLL, 'HelixSR/helixsr_upscaler.dll'),
                                  ('amd-fsr/amd_fidelityfx_upscaler_dx12.dll', 'HelixSR/amd_fidelityfx_upscaler_dx12.amd.dll')]:
-                self.copy_atomic(package / source, target / dest)
+                self.copy_atomic(package_path / source, target / dest, package_record['files'][source])
             for name in NETWORK:
-                self.copy_atomic(package / name, target / 'HelixSR' / name)
-            source = text(package / 'optiscaler/OptiScaler.ini')
+                self.copy_atomic(package_path / name, target / 'HelixSR' / name, package_record['files'][name])
+            settings_path = package_path / 'optiscaler/OptiScaler.ini'
+            settings_bytes = settings_path.read_bytes()
+            if hashlib.sha256(settings_bytes).hexdigest() != package_record['files']['optiscaler/OptiScaler.ini']:
+                raise ValueError('Prepared package changed during installation')
+            source = settings_bytes.decode('utf-8')
             settings = [('Dx12Upscaler', 'fsr31'),
                                ('FfxDx12Path', str(target / 'HelixSR/helixsr.dll').replace('/', '\\')),
                                ('FfxDx12SRPath', str(target / 'HelixSR/helixsr_upscaler.dll').replace('/', '\\'))]
-            if (package / 'amd-fsr' / AMD_FG).is_file():
-                self.copy_atomic(package / 'amd-fsr' / AMD_FG, target / 'HelixSR' / AMD_FG)
+            if (package_path / 'amd-fsr' / AMD_FG).is_file():
+                name = 'amd-fsr/' + AMD_FG
+                self.copy_atomic(package_path / name, target / 'HelixSR' / AMD_FG,
+                                 package_record['files'][name])
                 settings.append(('FfxDx12FGPath', str(target / 'HelixSR' / AMD_FG).replace('/', '\\')))
             for key, value in settings:
                 if key.startswith('Ffx'):

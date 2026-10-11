@@ -519,6 +519,51 @@ class SharedPackageTests(Fixtures):
         download.assert_not_called()
         self.assertIn('Reusing', job['message'])
 
+    def test_prepare_prefers_exact_digest_over_newer_same_version_candidate(self):
+        matching, release = ReleaseTests.cached_preparation(self)
+        newer = self.base / 'newer-cache/v1.2.3'
+        for name in manager.PACKAGE_FILES:
+            write(newer / name, (matching / name).read_bytes())
+        other = dict(self.m.cfg['packages'][str(matching)], path=str(newer),
+                     release_sha256='b' * 64, prepared_at=200)
+        self.m.cfg['packages'][str(newer)] = other
+        job = {'id': 'exact-digest-cache'}
+        with patch.object(self.m, 'check_update', return_value=release), \
+                patch('manager.urllib.request.urlopen') as download:
+            self.m.prepare(self.game, job)
+        download.assert_not_called()
+        self.assertIn('Reusing', job['message'])
+
+    def test_corrupt_newer_cache_falls_back_to_older_verified_cache(self):
+        older = self.package()
+        self.m.cfg['packages'][str(older)]['prepared_at'] = 100
+        newer = self.base / 'newer-cache/v1.2.3'
+        for name in manager.PACKAGE_FILES:
+            write(newer / name, (older / name).read_bytes())
+        record = dict(self.m.cfg['packages'][str(older)], path=str(newer), prepared_at=200)
+        self.m.cfg['packages'][str(newer)] = record
+        write(newer / manager.DLL, b'corrupt newer package')
+        self.assertEqual(self.m.package(self.game)[1], older)
+        self.action('install')
+        self.assertEqual(manager.sha(self.native), manager.sha(older / manager.DLL))
+
+    def test_target_companion_is_discovered_before_entries_are_populated(self):
+        package, _ = self.companion_package()
+        shared = manager.Manager(self.home, self.base / 'empty-entry-settings')
+        self.assertEqual(shared.package(self.game)[1], package)
+
+    def test_malformed_json_and_corrupt_known_entry_do_not_hide_target_package(self):
+        package, _ = self.companion_package()
+        other = self.base / 'games/Malformed'
+        write(other / 'Other.exe', pe(dx12=True))
+        other_game = dict(id='fixture:malformed', folder=str(other), name='Malformed')
+        record_path = self.m.companion(other_game) / 'records/package.json'
+        write(record_path, '[' * 2000 + '0' + ']' * 2000)
+        shared = manager.Manager(self.home, self.base / 'malformed-entry-settings')
+        shared.entries = {'malformed': other_game, 'missing': {'id': 'missing'},
+                          'wrong': {'id': 'wrong', 'folder': None}}
+        self.assertEqual(shared.package(self.game)[1], package)
+
     def test_incomplete_companion_manifest_is_not_selected(self):
         _, record = self.companion_package()
         record['files'] = {manager.DLL: record['files'][manager.DLL]}
@@ -531,7 +576,7 @@ class SharedPackageTests(Fixtures):
         shared = self.separate_manager()
         write(package / manager.DLL, pe(ffx=True, helix=True) + b'tampered')
         before = self.native.read_bytes()
-        with self.assertRaisesRegex(ValueError, 'incomplete or changed'):
+        with self.assertRaisesRegex(ValueError, 'Prepare HelixSR'):
             shared.preview(self.game['id'], 'install')
         self.assertEqual(self.native.read_bytes(), before)
 
@@ -574,9 +619,14 @@ class SharedPackageTests(Fixtures):
         self.m.cfg['packages'][str(package)]['files'] = {
             manager.DLL: manager.sha(package / manager.DLL)}
         before = self.native.read_bytes()
-        with self.assertRaisesRegex(ValueError, 'incomplete or changed'):
+        with self.assertRaisesRegex(ValueError, 'Prepare HelixSR'):
             self.m.preview(self.game['id'], 'install')
         self.assertEqual(self.native.read_bytes(), before)
+
+    def test_unknown_package_route_is_rejected(self):
+        self.package()
+        with self.assertRaisesRegex(ValueError, 'Unknown package route'):
+            self.m.package(self.game, 'unexpected')
 
 
 class ReleaseMetadataTests(Fixtures):
@@ -935,6 +985,16 @@ class LatestCoordinatorTests(Fixtures):
         self.join_worker()
         return token, self.m.jobs[job['id']]
 
+    def competing_package(self, folder, version_, digest, prepared_at):
+        for name in manager.PACKAGE_FILES:
+            write(folder / name, (self.prepared / name).read_bytes())
+        write(folder / manager.DLL, pe(ffx=True, helix=True) + version_.encode())
+        record = dict(path=str(folder), version=version_, release_sha256=digest,
+                      prepared_at=prepared_at,
+                      files={name: manager.sha(folder / name) for name in manager.PACKAGE_FILES})
+        self.m.cfg['packages'][str(folder)] = record
+        return folder
+
     def test_cached_package_latest_install_and_repeat_update(self):
         with patch('manager.urllib.request.urlopen') as download:
             _, first = self.latest()
@@ -947,6 +1007,20 @@ class LatestCoordinatorTests(Fixtures):
             self.assertIn('update', second['result']['message'].lower())
             self.assertEqual(manager.sha(self.native), manager.sha(self.prepared / manager.DLL))
             download.assert_not_called()
+
+    def test_latest_installs_exact_official_release_when_newer_cache_exists(self):
+        future = self.competing_package(self.base / 'future/v9.9.9', '9.9.9', 'f' * 64, 500)
+        _, job = self.latest()
+        self.assertEqual(job['state'], 'completed', job.get('message'))
+        self.assertEqual(manager.sha(self.native), manager.sha(self.prepared / manager.DLL))
+        self.assertNotEqual(manager.sha(self.native), manager.sha(future / manager.DLL))
+
+    def test_latest_installs_exact_digest_when_same_version_asset_was_replaced(self):
+        replaced = self.competing_package(self.base / 'replaced/v1.2.3', '1.2.3', 'b' * 64, 500)
+        _, job = self.latest()
+        self.assertEqual(job['state'], 'completed', job.get('message'))
+        self.assertEqual(manager.sha(self.native), manager.sha(self.prepared / manager.DLL))
+        self.assertNotEqual(manager.sha(self.native), manager.sha(replaced / manager.DLL))
 
     def test_game_mutation_during_prepare_refused_and_preserved(self):
         foreign = self.original + b'foreign game update'
@@ -1065,6 +1139,45 @@ class TransactionTests(Fixtures):
         with self.assertRaises(ValueError):
             self.m.execute(token)
         self.assertEqual(self.native.read_bytes(), self.original)
+
+    def test_package_drift_during_copy_rolls_back_without_unverified_bytes(self):
+        package = self.package()
+        token = self.m.preview(self.game['id'], 'install')['token']
+        real_copy = manager.shutil.copy2
+        changed = [False]
+        def copy(src, dst, *args, **kwargs):
+            if not changed[0] and Path(src) == package / manager.DLL:
+                changed[0] = True
+                write(src, b'changed between verification and copy')
+            return real_copy(src, dst, *args, **kwargs)
+        with patch('manager.shutil.copy2', side_effect=copy):
+            with self.assertRaisesRegex(ValueError, 'Copy verification failed'):
+                self.m.execute(token)
+        self.assertEqual(self.native.read_bytes(), self.original)
+        self.assertFalse(self.m.record(self.game))
+        self.assertFalse((self.m.companion(self.game) / 'transaction').exists())
+
+    def test_execute_keeps_the_verified_package_selected_for_its_fingerprint(self):
+        selected = self.package()
+        self.m.cfg['packages'][str(selected)]['prepared_at'] = 100
+        token = self.m.preview(self.game['id'], 'install')['token']
+        real_fingerprint = self.m.fingerprint
+        added = [False]
+        def fingerprint(*args, **kwargs):
+            result = real_fingerprint(*args, **kwargs)
+            if not added[0]:
+                added[0] = True
+                newer = self.base / 'appeared-after-fingerprint/v1.2.3'
+                for name in manager.PACKAGE_FILES:
+                    write(newer / name, (selected / name).read_bytes())
+                write(newer / manager.DLL, pe(ffx=True, helix=True) + b'newer valid payload')
+                record = dict(self.m.cfg['packages'][str(selected)], path=str(newer), prepared_at=200)
+                record['files'] = {name: manager.sha(newer / name) for name in manager.PACKAGE_FILES}
+                self.m.cfg['packages'][str(newer)] = record
+            return result
+        with patch.object(self.m, 'fingerprint', side_effect=fingerprint):
+            self.m.execute(token)
+        self.assertEqual(manager.sha(self.native), manager.sha(selected / manager.DLL))
 
     def test_running_game_execution_blocked(self):
         self.package()
