@@ -1,4 +1,5 @@
 """Monitor state, stale health, and owned-controller cleanup."""
+import os
 import sys
 import tempfile
 import time
@@ -89,6 +90,80 @@ class StatusMonitorTests(unittest.TestCase):
             self.assertFalse(value['overlay']['visible_verified'])
             self.assertEqual(self.monitor.configure('game', False)['overlay']['state'], 'disabled')
         self.assertEqual(self.manager.calls, [('get', 'game'), ('assess', None)])
+
+    def test_source_child_uses_current_python_and_helper_script(self):
+        directory = Path(self.tmp.name) / 'session'
+        with patch.object(status_monitor.sys, 'frozen', False, create=True):
+            command = status_monitor.child_command(directory, 'nonce', env={'PATH': '/usr/bin'})
+        self.assertEqual(command[0], sys.executable)
+        self.assertEqual(Path(command[1]).name, 'overlay_helper.py')
+        self.assertEqual(command[2:], [str(directory), 'nonce'])
+
+    def test_frozen_decky_uses_host_python_and_sanitized_display_environment(self):
+        appdir = '/tmp/.mount_helix/usr'
+        supplied = dict(DISPLAY=':0', XAUTHORITY='/run/user/1000/xauth',
+                        XDG_SESSION_TYPE='wayland', APPDIR=appdir,
+                        PATH=os.pathsep.join((appdir + '/bin', '/usr/bin')),
+                        LD_LIBRARY_PATH=appdir + '/lib', PYTHONHOME=appdir)
+        child = Mock()
+        child.poll.return_value = 0
+        with patch.object(status_monitor.sys, 'frozen', True, create=True), \
+                patch.object(status_monitor.platform, 'system', return_value='Linux'), \
+                patch.object(status_monitor, 'display_environment', return_value=supplied), \
+                patch.object(status_monitor, 'private_directory', return_value=Path(self.tmp.name)), \
+                patch.object(status_monitor.shutil, 'which', return_value='/usr/bin/python3') as which, \
+                patch.object(status_monitor.subprocess, 'Popen', return_value=child) as popen, \
+                patch.object(status_monitor.threading, 'Thread', DormantThread):
+            value = self.monitor.configure('game', True)
+            self.assertTrue(value['enabled'])
+            command = popen.call_args.args[0]
+            env = popen.call_args.kwargs['env']
+            self.assertEqual(command[0], '/usr/bin/python3')
+            self.assertEqual(Path(command[1]).name, 'overlay_helper.py')
+            self.assertEqual(command[2:], [str(self.monitor.directory), self.monitor.nonce])
+            self.assertEqual(which.call_args.kwargs['path'], env['PATH'])
+            self.assertEqual(env['PATH'], '/usr/bin')
+            self.assertNotIn('PYTHONHOME', env)
+            self.assertNotIn('LD_LIBRARY_PATH', env)
+            self.assertEqual([env[key] for key in ('DISPLAY', 'XAUTHORITY', 'XDG_SESSION_TYPE')],
+                             [supplied[key] for key in ('DISPLAY', 'XAUTHORITY', 'XDG_SESSION_TYPE')])
+            self.monitor.configure('game', False)
+
+    def test_frozen_desktop_opt_in_uses_own_child_and_environment(self):
+        desktop = status_monitor.StatusMonitor(self.manager, frozen_child=True)
+        supplied = dict(DISPLAY=':0', XAUTHORITY='/run/user/1000/xauth',
+                        XDG_SESSION_TYPE='wayland', PYTHONHOME='/frozen/python')
+        child = Mock()
+        child.poll.return_value = 0
+        with patch.object(status_monitor.sys, 'frozen', True, create=True), \
+                patch.object(status_monitor.platform, 'system', return_value='Linux'), \
+                patch.object(status_monitor, 'display_environment', return_value=supplied), \
+                patch.object(status_monitor, 'private_directory', return_value=Path(self.tmp.name)), \
+                patch.object(status_monitor.subprocess, 'Popen', return_value=child) as popen, \
+                patch.object(status_monitor.threading, 'Thread', DormantThread):
+            self.assertTrue(desktop.configure('game', True)['enabled'])
+            self.assertEqual(popen.call_args.args[0],
+                             [sys.executable, '--status-overlay-child', str(desktop.directory), desktop.nonce])
+            self.assertEqual(popen.call_args.kwargs['env'], supplied)
+            desktop.configure('game', False)
+
+    def test_frozen_decky_missing_host_python_keeps_sampler_and_reports_overlay_limit(self):
+        supplied = dict(DISPLAY=':0', PATH='/usr/bin')
+        with patch.object(status_monitor.sys, 'frozen', True, create=True), \
+                patch.object(status_monitor.platform, 'system', return_value='Linux'), \
+                patch.object(status_monitor, 'display_environment', return_value=supplied), \
+                patch.object(status_monitor, 'private_directory', return_value=Path(self.tmp.name)), \
+                patch.object(status_monitor.shutil, 'which', return_value=None), \
+                patch.object(status_monitor.subprocess, 'Popen') as popen, \
+                patch.object(status_monitor.threading, 'Thread', DormantThread):
+            value = self.monitor.configure('game', True)
+            self.assertTrue(value['enabled'])
+            self.assertEqual(value['game_id'], 'game')
+            self.assertEqual(value['overlay']['state'], 'unavailable')
+            self.assertIn('Python', value['overlay']['detail'])
+            self.assertTrue(self.monitor.thread.started)
+            popen.assert_not_called()
+            self.monitor.configure('game', False)
 
     def test_child_outage_replaces_previous_healthy_overlay(self):
         child = Mock()

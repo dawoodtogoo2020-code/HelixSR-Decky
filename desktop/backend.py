@@ -85,7 +85,7 @@ class DesktopBackend:
                 os.replace(path, backup)
                 self.warnings.append(f'Unreadable desktop settings preserved at {backup}; per-game records remain available.')
         self.manager = Manager(self.home, self.settings)
-        self.status_monitor = StatusMonitor(self.manager)
+        self.status_monitor = StatusMonitor(self.manager, frozen_child=bool(getattr(sys, 'frozen', False)))
         self.app_updates = AppUpdates(self.settings)
 
     def overlay_status(self):

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import stat
 import subprocess
 import sys
@@ -13,6 +14,7 @@ import time
 import uuid
 
 from runtime_status import RuntimeEvidence
+from host_environment import host_environment
 
 
 def private_directory(path):
@@ -49,10 +51,15 @@ def display_environment():
     return env
 
 
-def child_command(directory, nonce):
-    if getattr(sys, 'frozen', False):
+def child_command(directory, nonce, *, frozen_child=False, env=None):
+    if frozen_child:
         return [sys.executable, '--status-overlay-child', str(directory), nonce]
-    return [sys.executable, str(Path(__file__).with_name('overlay_helper.py')), str(directory), nonce]
+    interpreter = sys.executable
+    if getattr(sys, 'frozen', False):
+        interpreter = shutil.which('python3', path=(env or {}).get('PATH'))
+        if not interpreter:
+            raise ValueError('System Python 3 is required for the Decky overlay helper')
+    return [interpreter, str(Path(__file__).with_name('overlay_helper.py')), str(directory), nonce]
 
 
 def record_stamp(path):
@@ -64,8 +71,9 @@ def record_stamp(path):
 
 
 class StatusMonitor:
-    def __init__(self, manager):
+    def __init__(self, manager, *, frozen_child=False):
         self.manager = manager
+        self.frozen_child = frozen_child
         self.lock = threading.RLock()
         self.control = threading.RLock()
         self.stop = threading.Event()
@@ -115,7 +123,10 @@ class StatusMonitor:
                     parent = private_directory(Path(self.manager.home) / '.cache/helixsr-status')
                     self.directory = Path(tempfile.mkdtemp(prefix='session-', dir=parent))
                     self.nonce = uuid.uuid4().hex
-                    self.child = subprocess.Popen(child_command(self.directory, self.nonce), env=display_environment(),
+                    env = display_environment()
+                    if getattr(sys, 'frozen', False) and not self.frozen_child:
+                        env = host_environment(env)
+                    self.child = subprocess.Popen(child_command(self.directory, self.nonce, frozen_child=self.frozen_child, env=env), env=env,
                                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     self.started_at = time.monotonic()
                 except (OSError, ValueError) as exc:
