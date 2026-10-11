@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QThread, QTimer, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QThread, QTimer, Qt, Slot
 from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
@@ -121,6 +121,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.backend = backend
         self._task = None
+        self._task_done = None
         self._modal = False
         self._closing = False
         self._closed = False
@@ -298,23 +299,45 @@ class MainWindow(QMainWindow):
             return False
         task = Task(call, self)
         self._task = task
-        def finish():
-            self._task = None
-            if task.error:
-                self._notify(task.error, True)
-            elif not self._closing:
-                try:
-                    done(task.value)
-                except Exception as exc:
-                    self._notify(str(exc), True)
-            task.deleteLater()
-            self._controls()
-            if self._closing:
-                self._finish_close()
-        task.finished.connect(finish)
+        self._task_done = done
+        task.finished.connect(self._task_finished, Qt.QueuedConnection)
         self._controls()
         task.start()
         return True
+
+    def _take_task_result(self):
+        """Join before releasing the worker's callable, result and native object."""
+        if QThread.currentThread() != self.thread():
+            raise RuntimeError("Task completion must run on the GUI thread")
+        task = self._task
+        if task is None or self.sender() is not task:
+            return None
+        task.wait()
+        result = (task.value, task.error, self._task_done)
+        self._task = None
+        self._task_done = None
+        task.call = task.value = task.error = None
+        task.deleteLater()
+        return result
+
+    @Slot()
+    def _task_finished(self):
+        # A QObject receiver provides an explicit GUI-thread context. Do not
+        # connect finished to a closure retaining the worker and its payload.
+        result = self._take_task_result()
+        if result is None:
+            return
+        value, error, done = result
+        if error:
+            self._notify(error, True)
+        elif not self._closing:
+            try:
+                done(value)
+            except Exception as exc:
+                self._notify(str(exc), True)
+        self._controls()
+        if self._closing:
+            self._finish_close()
 
     def _controls(self, *_):
         active = any(j.get("state") in ACTIVE for j in self._jobs)
@@ -588,24 +611,26 @@ class MainWindow(QMainWindow):
             return
         task = Task(self.backend.close, self)
         self._task = task
-        def finish():
-            if task.error:
-                self._closing = False
-                self._task = None
-                self._notify(task.error, True)
-                self.timer.start()
-                self._controls()
-            elif task.value is False:
-                self._task = None
-                self._notify("Installation is still stopping. Keeping the app open until its worker exits.")
-                QTimer.singleShot(1500, self._finish_close)
-            else:
-                self._closed = True
-                self._task = None
-                self.close()
-            task.deleteLater()
-        task.finished.connect(finish)
+        task.finished.connect(self._close_finished, Qt.QueuedConnection)
         task.start()
+
+    @Slot()
+    def _close_finished(self):
+        result = self._take_task_result()
+        if result is None:
+            return
+        value, error, _ = result
+        if error:
+            self._closing = False
+            self._notify(error, True)
+            self.timer.start()
+            self._controls()
+        elif value is False:
+            self._notify("Installation is still stopping. Keeping the app open until its worker exits.")
+            QTimer.singleShot(1500, self._finish_close)
+        else:
+            self._closed = True
+            self.close()
 
 
 class SmokeBackend:
@@ -653,8 +678,12 @@ def main(argv=None):
     parser.add_argument("--home")
     parser.add_argument("--settings")
     parser.add_argument("--smoke-test", action="store_true")
+    parser.add_argument("--smoke-cycles", type=int, default=0,
+                        help="Exercise 1-20 read-only fixture UI cycles before smoke-test exit")
     parser.add_argument("--screenshot")
     args = parser.parse_args(argv)
+    if args.smoke_cycles and (not args.smoke_test or not 1 <= args.smoke_cycles <= 20):
+        parser.error("--smoke-cycles requires --smoke-test and a value from 1 to 20")
     if args.smoke_test:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     if args.screenshot and not Path(args.screenshot).is_absolute():
@@ -675,7 +704,11 @@ def main(argv=None):
                 if families:
                     app.setFont(QFont(families[0], 10))
                     break
-    if args.smoke_test:
+    smoke_driver = None
+    if args.smoke_cycles:
+        from .smoke import StressBackend, StressDriver
+        backend = StressBackend()
+    elif args.smoke_test:
         backend = SmokeBackend()
     else:
         from .backend import DesktopBackend
@@ -685,7 +718,9 @@ def main(argv=None):
     for sig in previous_handlers:
         signal.signal(sig, window.receive_shutdown_signal)
     window.show()
-    if args.smoke_test:
+    if args.smoke_cycles:
+        smoke_driver = StressDriver(window, args.smoke_cycles)
+    elif args.smoke_test:
         def complete():
             if window._task:
                 QTimer.singleShot(50, complete)
@@ -698,16 +733,29 @@ def main(argv=None):
             window.close()
         QTimer.singleShot(500, complete)
     try:
-        return app.exec()
+        status = app.exec()
+        if smoke_driver is not None:
+            smoke_driver.validate()
+        return status
     finally:
         try:
             dispose_window(app, window)
+            if smoke_driver is not None:
+                from shiboken6 import isValid
+                if isValid(window):
+                    raise RuntimeError("Smoke test left the native window alive")
             if existing_app is None:
                 app.deleteLater()
                 QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+                if smoke_driver is not None and QApplication.instance() is not None:
+                    raise RuntimeError("Smoke test left a QApplication alive")
         finally:
-            for sig, handler in previous_handlers.items():
-                signal.signal(sig, handler)
+            try:
+                if smoke_driver is not None:
+                    smoke_driver.cleanup()
+            finally:
+                for sig, handler in previous_handlers.items():
+                    signal.signal(sig, handler)
 
 
 if __name__ == "__main__":

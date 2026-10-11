@@ -93,95 +93,33 @@ class DesktopShutdownTests(unittest.TestCase):
     def test_failed_folder_import_never_reports_completion(self):
         self.run_import(True)
 
-    def test_production_main_disposes_nested_picker_ui_before_interpreter_exit(self):
+    def test_repeated_production_processes_dispose_full_ui_workflows(self):
         root = Path(os.environ.get('HELIXSR_TEST_TMP', 'D:/Downloads/Codex/hsrtmp' if os.name == 'nt' else tempfile.gettempdir()))
         root.mkdir(parents=True, exist_ok=True)
-        script = r"""
-import gc, json, os, sys
-from pathlib import Path
-from unittest.mock import patch
-from PySide6.QtCore import QTimer
+        # Each process reaches Python finalization. In-process widget tests alone
+        # cannot catch fatal C-extension reference-count failures during exit.
+        script = """
+import gc
 from PySide6.QtWidgets import QApplication
-import desktop.app as ui
-
-root = Path(sys.argv[1])
-folders = [root / 'Game One', root / 'Game Two']
-for folder in folders:
-    folder.mkdir()
-record = {'folders': [], 'launchers': [], 'closed': 0, 'destroyed': False, 'errors': []}
-
-class Backend:
-    def __init__(self, **kwargs): pass
-    def library(self): return dict(games=[], jobs=[], warnings=[], release={})
-    def check_app_updates(self, force=False): return dict(auto_check=False)
-    def import_folders(self, values):
-        record['folders'] = values
-        return self.library()
-    def import_launcher(self, source):
-        record['launchers'].append(source)
-        return self.library()
-    def close(self):
-        record['closed'] += 1
-        return True
-
-class AutomatedWindow(ui.MainWindow):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.stage = 0
-        self.destroyed.connect(lambda: record.update(destroyed=True))
-        self.workflow = QTimer(self)
-        self.workflow.setInterval(20)
-        self.workflow.timeout.connect(self.advance)
-        self.workflow.start()
-    def advance(self):
-        if self._task or self._modal or self._closing: return
-        try:
-            if self.stage == 0:
-                self.stage = 1
-                QTimer.singleShot(20, self.pick_folders)
-                self.import_folders()
-            elif self.stage in (1, 2):
-                source = ('heroic', 'lutris')[self.stage - 1]
-                self.stage += 1
-                self.launchers.setCurrentIndex(self.launchers.findData(source))
-                self.import_button.click()
-            elif self.stage == 3:
-                self.stage = 4
-                assert record['folders'] == [str(f.resolve()) for f in folders]
-                assert record['launchers'] == ['heroic', 'lutris']
-                self.close()
-        except Exception as exc:
-            record['errors'].append(str(exc))
-            self.receive_shutdown_signal()
-    def pick_folders(self):
-        dialog = self._active_dialog
-        for folder in folders:
-            def choose(path=folder):
-                picker = dialog._picker
-                picker.setDirectory(str(path))
-                QTimer.singleShot(30, picker.accept)
-            QTimer.singleShot(30, choose)
-            dialog.add_button.click()
-        dialog.import_button.click()
-
-with patch('desktop.backend.DesktopBackend', Backend), patch.object(ui, 'MainWindow', AutomatedWindow):
-    status = ui.main(['--home', str(root), '--settings', str(root / 'settings')])
+from desktop.app import main
+status = main(['--smoke-test', '--smoke-cycles', '3'])
 assert status == 0, status
-assert record['destroyed'], record
-assert record['closed'] == 1, record
 assert QApplication.instance() is None
-assert not record['errors'], record
-for _ in range(3): gc.collect()
-print('PRODUCTION_CLOSE_OK ' + json.dumps(record), flush=True)
+for _ in range(3):
+    gc.collect()
+print('FINAL_GC_OK', flush=True)
 """
-        with tempfile.TemporaryDirectory(dir=root, prefix='shutdown-process-') as temp:
-            env = dict(os.environ, QT_QPA_PLATFORM='offscreen', TEMP=str(root), TMP=str(root), HELIXSR_TEST_TMP=str(root))
-            process = subprocess.run([sys.executable, '-c', script, temp], cwd=Path(__file__).resolve().parents[1],
-                                     env=env, capture_output=True, text=True, timeout=25)
-            self.assertEqual(process.returncode, 0, process.stdout + '\n' + process.stderr)
-            self.assertIn('PRODUCTION_CLOSE_OK', process.stdout)
-            self.assertNotIn('Fatal Python error', process.stderr)
-            self.assertNotIn('QThread: Destroyed while thread', process.stderr)
+        env = dict(os.environ, TEMP=str(root), TMP=str(root), HELIXSR_TEST_TMP=str(root))
+        for attempt in range(5):
+            with self.subTest(process=attempt):
+                process = subprocess.run([sys.executable, '-c', script],
+                                         cwd=Path(__file__).resolve().parents[1],
+                                         env=env, capture_output=True, text=True, timeout=70)
+                self.assertEqual(process.returncode, 0, process.stdout + '\n' + process.stderr)
+                self.assertIn('PRODUCTION_STRESS_OK', process.stdout)
+                self.assertIn('FINAL_GC_OK', process.stdout)
+                self.assertNotIn('Fatal Python error', process.stderr)
+                self.assertNotIn('QThread: Destroyed while thread', process.stderr)
 
 
 if __name__ == '__main__':
