@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.7.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
+3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.8.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -87,6 +87,8 @@ For **HelixSR inside a game**, and troubleshooting:
 4. For changed hashes, stop and review whether Steam updated the game. **Recover interrupted file transaction** restores only a matching transaction. File or build conflicts stop recovery before restoration. Steam verification may be needed; it can also remove other mods.
 
 If an older app reports **Network output missing or incomplete** while preparing HelixSR 1.8.0, update the **Decky plugin to 0.1.7 or newer**, then retry Install/Update HelixSR. This concerns generated model files, not your internet connection. The fix requests the separate output files supported by upstream. If preparation still fails, copy a short sanitized build-log excerpt; keep generated weights and kernels private.
+
+For **Network build failed**, use plugin **0.1.8 or newer**. Preparation now checks installed Proton in external Steam libraries, custom tools and known Flatpak Steam locations, and probes whether each runtime starts on the host before selecting it. A Flatpak runtime may still need dependencies from its sandbox; detection alone does not guarantee shader compilation. The original upstream search remains the fallback. If no Proton is available, install a Proton version through Steam and retry. Permission or space errors require fixing the game drive first. Open **Show diagnostics and logs** for the selected game and copy only the final error lines from the build log, with private paths removed. These are local preparation errors, not proof of a game compatibility problem.
 
 ## 9. Report a problem
 

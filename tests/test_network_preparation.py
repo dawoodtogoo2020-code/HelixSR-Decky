@@ -1,10 +1,12 @@
 """Fresh builds must keep separate model outputs even when upstream embeds by default."""
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import shlex
 import shutil
+import subprocess
 import sys
 import unittest
 from unittest.mock import patch
@@ -46,6 +48,33 @@ else:
     print('separate model files ready')
 '''
 
+# The guarded upstream Wine/DXC layout, with no downloads or real shader build.
+WINE_BLOCK = r'''DATA="$HERE/compiler $ ' data"
+mkdir -p "$DATA/dxc-win/bin/x64"
+die() { printf '%s\n' "$*"; exit 1; }
+WINE=""
+# official Proton first, then custom Proton builds, then a system Wine
+for p in "$HOME"/.local/share/Steam/steamapps/common/Proton*/files/bin/wine; do
+    if [ -x "$p" ]; then WINE="$p"; break; fi
+done
+[ -z "$WINE" ] && command -v wine >/dev/null && WINE=$(command -v wine)
+[ -n "$WINE" ] || die "no Proton or Wine found (needed to run the shader compiler); install Proton in Steam or Wine"
+DXC="$DATA/dxc-wine.sh"
+cat > "$DXC" <<EOF
+#!/usr/bin/env bash
+args=()
+for a in "\$@"; do case "\$a" in /*) args+=("Z:\$(printf '%s' "\$a" | tr / '\\\\')") ;; *) args+=("\$a") ;; esac; done
+WINEPREFIX="$DATA/wineprefix" WINEDEBUG=-all exec "$WINE" "$DATA/dxc-win/bin/x64/dxc.exe" "\${args[@]}"
+EOF
+chmod +x "$DXC"
+'''
+RUNTIME_SHELL = SHELL.replace('DXC=fixture-compiler\n', WINE_BLOCK)
+RUNTIME_CONVERTER = '''import subprocess
+import sys
+subprocess.run([sys.argv[sys.argv.index('--dxc') + 1], "/tmp/shader $ ' source.hlsl",
+                '-E', 'main', 'literal $ value'], check=True)
+''' + CONVERTER
+
 
 class AdapterTests(unittest.TestCase):
     def test_converter_receives_separate_output_and_game_installer_is_excluded(self):
@@ -63,6 +92,63 @@ class AdapterTests(unittest.TestCase):
     def test_removed_converter_option_requires_review(self):
         with self.assertRaisesRegex(ValueError, 'network output changed'):
             manager.build_only_script(SHELL, CONVERTER.replace('--separate-files', '--new-output'))
+
+    def test_changed_runtime_markers_fail_closed(self):
+        for marker in ('WINE=""', '# official Proton first', 'cat > "$DXC" <<EOF',
+                       'chmod +x "$DXC"', 'WINEDEBUG=-all exec "$WINE"'):
+            with self.subTest(marker=marker), self.assertRaisesRegex(ValueError, 'runtime changed'):
+                manager.build_only_script(RUNTIME_SHELL.replace(marker, 'changed'), CONVERTER, True)
+
+
+class RuntimeAndErrorTests(unittest.TestCase):
+    def test_unusable_runtime_is_skipped_and_argv_is_not_shell_code(self):
+        candidates = [Path('/Steam library/broken/files/bin/wine'),
+                      Path('/Steam library/Proton/files/bin/wine')]
+        with patch('manager.platform.system', return_value='Linux'), \
+                patch('manager.wine_candidates', return_value=candidates), \
+                patch('manager.subprocess.run', side_effect=[
+                    OSError('not executable on this host'),
+                    subprocess.CompletedProcess([], 0, 'wine-9.0\n')]) as run:
+            selected, notes = manager.select_build_wine('/home/test', {'PATH': '/usr/bin'})
+        self.assertEqual(selected, candidates[1])
+        self.assertIn('Skipped build runtime', notes[0])
+        self.assertEqual(run.call_args.args[0], [str(candidates[1]), '--version'])
+        self.assertNotIn('shell', run.call_args.kwargs)
+        self.assertEqual(run.call_args.kwargs['env'], {'PATH': '/usr/bin'})
+
+    def test_all_probe_failures_keep_upstream_fallback(self):
+        with patch('manager.platform.system', return_value='Linux'), \
+                patch('manager.wine_candidates', return_value=[Path('/p/wine')]), \
+                patch('manager.subprocess.run', side_effect=subprocess.TimeoutExpired('wine', 3)):
+            selected, notes = manager.select_build_wine('/home/test', {})
+        self.assertIsNone(selected)
+        self.assertEqual(len(notes), 1)
+
+    def test_success_exit_without_wine_version_is_not_a_runtime(self):
+        with patch('manager.platform.system', return_value='Linux'), \
+                patch('manager.wine_candidates', return_value=[Path('/p/wine')]), \
+                patch('manager.subprocess.run', return_value=subprocess.CompletedProcess([], 0, 'not Wine')):
+            self.assertIsNone(manager.select_build_wine('/home/test', {})[0])
+
+    def test_failure_reports_specific_reason_and_bounded_tail(self):
+        for log, expected in [('ERROR: no Proton or Wine found', 'Install Proton'),
+                              ('bash: helper: Permission denied', 'executable support'),
+                              ('No space left on device', 'ran out of space'),
+                              ('earlier output\nValueError: shader compilation failed', 'shader compilation failed')]:
+            with self.subTest(log=log), self.assertRaisesRegex(ValueError, expected):
+                manager.check_build_exit(1, False, log)
+        with self.assertRaises(ValueError) as error:
+            manager.check_build_exit(1, False, '\x1b[31m' + 'x' * 10000)
+        self.assertLess(len(str(error.exception)), 400)
+        self.assertNotIn('\x1b', str(error.exception))
+
+    def test_cancellation_precedes_failure_details(self):
+        with self.assertRaisesRegex(ValueError, '^Cancelled$'):
+            manager.check_build_exit(1, True, 'no Proton or Wine found')
+
+    def test_unknown_runtime_layout_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, 'compiler runtime changed'):
+            manager.build_only_script(SHELL, CONVERTER, True)
 
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'Requires Linux shell integration')
@@ -127,6 +213,40 @@ class FreshPreparationTests(Fixtures):
             process.assert_not_called()
         self.assertEqual(self.native.read_bytes(), self.original)
         self.assertFalse(self.m.cfg.get('packages'))
+
+    def test_external_and_flatpak_runtime_reaches_dxc_with_literal_paths(self):
+        for flatpak in (False, True):
+            with self.subTest(flatpak=flatpak):
+                steam = self.home / ('.var/app/com.valvesoftware.Steam/.local/share/Steam' if flatpak
+                                     else '.local/share/Steam')
+                external = self.base / "external $ ' library"
+                wine = external / 'steamapps/common/Proton Fixture/files/bin/wine'
+                wine.parent.mkdir(parents=True, exist_ok=True)
+                record = self.base / 'wine-arguments.json'
+                wine.write_text('#!' + sys.executable + '\n' +
+                                'import json, os, sys\n' +
+                                'if sys.argv[1:] == ["--version"]:\n'
+                                '    print("wine-9.0")\n'
+                                'else:\n' +
+                                '    from pathlib import Path\n' +
+                                '    Path(' + repr(str(record)) + ').write_text(json.dumps({"args": sys.argv[1:], '
+                                '"prefix": os.environ["WINEPREFIX"]}))\n', encoding='utf-8')
+                wine.chmod(0o755)
+                metadata = steam / 'steamapps/libraryfolders.vdf'
+                metadata.parent.mkdir(parents=True, exist_ok=True)
+                metadata.write_text('"libraryfolders" { "1" { "path" "' + str(external) + '" } }')
+                (_, folder, _), job = self.prepare_fixture(RUNTIME_CONVERTER, RUNTIME_SHELL)
+                captured = json.loads(record.read_text())
+                self.assertTrue(captured['args'][0].endswith("compiler $ ' data/dxc-win/bin/x64/dxc.exe"))
+                self.assertEqual(captured['args'][1:], ["Z:\\tmp\\shader $ ' source.hlsl", '-E', 'main', 'literal $ value'])
+                self.assertTrue(captured['prefix'].endswith("compiler $ ' data/wineprefix"))
+                self.assertIn('Build runtime: ' + str(wine.resolve()), job['log'])
+                self.assertEqual(self.native.read_bytes(), self.original)
+                self.assertTrue(all((folder / name).is_file() for name in manager.NETWORK))
+                # Force the second iteration to exercise fresh Flatpak discovery.
+                metadata.unlink()
+                self.m.cfg['packages'].clear()
+                shutil.rmtree(folder)
 
 
 if __name__ == '__main__':

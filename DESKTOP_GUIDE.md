@@ -5,15 +5,15 @@ HelixSR Desktop is a standalone Linux app. Decky Loader is optional. It manages 
 ## Download and open
 
 1. Switch your SteamOS device to Desktop Mode.
-2. Download **HelixSR-Desktop-0.1.3-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.3). Save it in a folder such as `Applications` under your own home folder.
+2. Download **HelixSR-Desktop-0.1.4-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.4). Save it in a folder such as `Applications` under your own home folder.
 3. In your file manager, right-click the AppImage, open **Properties → Permissions**, and enable **Is executable** (wording varies).
 4. Double-click the AppImage. Do not run it with sudo or as administrator.
 
 If your system cannot mount AppImages, open a terminal in its folder and run:
 
 ```sh
-chmod +x HelixSR-Desktop-0.1.3-x86_64.AppImage
-./HelixSR-Desktop-0.1.3-x86_64.AppImage --appimage-extract-and-run
+chmod +x HelixSR-Desktop-0.1.4-x86_64.AppImage
+./HelixSR-Desktop-0.1.4-x86_64.AppImage --appimage-extract-and-run
 ```
 
 This fallback extracts the app temporarily and does not require FUSE or administrator access. [AppImage documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html) explains the options.
@@ -53,6 +53,8 @@ Hardware portability and game compatibility are separate. HelixSR has its own [u
 Steam Deck is the device used for release runtime checks. Other SteamOS devices and Steam Machine are supported targets; physical validation on those models is still needed. UI startup and file verification do not establish gameplay stability or performance in every game.
 
 If an older app reports **Network output missing or incomplete** with HelixSR 1.8.0, use **App updates** to download desktop **0.1.3 or newer**, open the new AppImage, then retry Install/Update HelixSR. This concerns generated model files, not your internet connection. If it persists, include a short sanitized build-log excerpt in your report.
+
+For **Network build failed**, update to desktop **0.1.4 or newer**. Preparation checks installed Proton in external Steam libraries, custom tools and known Flatpak Steam locations, and uses a discovered runtime only if it starts on the host. Flatpak sandbox dependencies can still prevent shader compilation; the original upstream search remains the fallback. Install Proton through Steam if none is available, and resolve any drive permission or free-space error before retrying. The **Jobs** tab shows preparation output; selected-game diagnostics also include retained build logs. Include only the final error lines with private paths removed in a bug report. A local build failure does not establish that the game itself is incompatible.
 
 ## Report a problem
 
