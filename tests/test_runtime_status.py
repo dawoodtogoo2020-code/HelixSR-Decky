@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'py_modules'))
@@ -146,6 +147,123 @@ class RuntimeEvidenceTests(unittest.TestCase):
         self.mapped = True
         self.session = None
         self.assertEqual(self.evidence.sample()['state'], 'unverified')
+
+    def test_armed_existing_log_rewrite_captures_fresh_startup_once(self):
+        for previous in ('historical line\n' * 20 + SUCCESS, 'old\n'):
+            with self.subTest(previous_size=len(previous)):
+                evidence = runtime_status.RuntimeEvidence(self.game)
+                self.processes = []
+                self.log.write_text(previous)
+                self.assertEqual(evidence.sample()['state'], 'not_running')
+                self.processes = [self.proc]
+                self.mapped = False
+                self.assertEqual(evidence.sample()['state'], 'unverified')
+                self.log.write_text(SUCCESS)
+                self.mapped = True
+                with patch.object(runtime_status, 'writing_log', return_value=True):
+                    self.assertEqual(evidence.sample()['state'], 'output')
+                    self.assertEqual(evidence.sample()['state'], 'output')
+
+    def test_armed_existing_log_needs_changed_bytes_and_exact_writer(self):
+        self.processes = []
+        self.log.write_text(SUCCESS)
+        self.assertEqual(self.evidence.sample()['state'], 'not_running')
+        self.processes = [self.proc]
+        os.utime(self.log, None)
+        with patch.object(runtime_status, 'writing_log', return_value=True):
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+        self.processes = []
+        self.evidence.sample()
+        self.processes = [self.proc]
+        self.log.write_text('old baseline\n')
+        with patch.object(runtime_status, 'writing_log', return_value=False):
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+
+    def test_later_rotation_cannot_replay_log_after_first_inspection(self):
+        self.processes = []
+        self.log.write_text('historical line\n')
+        self.assertEqual(self.evidence.sample()['state'], 'not_running')
+        self.processes = [self.proc]
+        with patch.object(runtime_status, 'writing_log', return_value=True):
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            self.log.rename(self.root / 'helixsr.previous.log')
+            self.log.write_text(SUCCESS)
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+
+    def test_oversized_startup_rewrite_is_unavailable(self):
+        self.processes = []
+        self.log.write_text('historical line\n')
+        self.assertEqual(self.evidence.sample()['state'], 'not_running')
+        self.processes = [self.proc]
+        self.log.write_text('x' * runtime_status.LIMIT + SUCCESS)
+        with patch.object(runtime_status, 'writing_log', return_value=True):
+            self.assertEqual(self.evidence.sample()['state'], 'unavailable')
+            self.assertNotEqual(self.evidence.sample()['state'], 'output')
+
+    def test_helper_only_process_does_not_disarm_prelaunch_baseline(self):
+        self.processes = []
+        self.log.write_text('historical line\n')
+        with patch.object(runtime_status, 'executable_session',
+                          side_effect=lambda proc, *_: None if proc['pid'] == 900 else self.session), \
+                patch.object(runtime_status, 'writing_log', return_value=True):
+            self.assertEqual(self.evidence.sample()['state'], 'not_running')
+            self.processes = [dict(pid=900, started_at=90)]
+            self.assertEqual(self.evidence.sample()['state'], 'unverified')
+            self.processes = [dict(pid=900, started_at=90), self.proc]
+            self.log.write_text(SUCCESS)
+            self.assertEqual(self.evidence.sample()['state'], 'output')
+
+
+class ExecutableSessionTests(unittest.TestCase):
+    """Proton wrapper arguments must not impersonate the running game."""
+
+    def session(self, argv, expected=r'S:\games\PRAGMATA.exe', *, started_at=100,
+                stat_present=True, changed_start=False):
+        cmdline = b'\0'.join(arg.encode() for arg in argv) + b'\0'
+        stat = '123 (process name with spaces) ' + ' '.join(['0'] * 19 + ['9001'])
+        changed_stat = '123 (process name with spaces) ' + ' '.join(['0'] * 19 + ['9002'])
+        stat_reads = 0
+
+        def read_bytes(path):
+            self.assertEqual(path.name, 'cmdline')
+            return cmdline
+
+        def read_text(path):
+            nonlocal stat_reads
+            self.assertEqual(path.name, 'stat')
+            if not stat_present:
+                raise FileNotFoundError(path)
+            stat_reads += 1
+            return changed_stat if changed_start and stat_reads > 1 else stat
+
+        with patch.object(Path, 'read_bytes', autospec=True, side_effect=read_bytes), \
+                patch.object(Path, 'read_text', autospec=True, side_effect=read_text), \
+                patch.object(Path, 'stat', autospec=True,
+                             return_value=SimpleNamespace(st_uid=getattr(os, 'getuid', lambda: 0)())):
+            return runtime_status.executable_session(
+                dict(pid=123, started_at=started_at), expected)
+
+    def test_windows_game_argv_zero_is_attributed_to_its_session(self):
+        for expected, command in (
+            (r'S:\games\PRAGMATA.exe', r'S:\games\PRAGMATA.exe'),
+            (r'Z:\steamapps\common\PRAGMATA.exe', r'Z:\steamapps\common\PRAGMATA.exe'),
+            (r'Z:\steamapps\common\PRAGMATA.exe', r'S:\games\PRAGMATA.exe'),
+        ):
+            with self.subTest(expected=expected, command=command):
+                self.assertEqual(self.session([command, '-dx12'], expected), (123, '9001'))
+
+    def test_wrapper_or_steam_argv_zero_cannot_borrow_later_game_argument(self):
+        for wrapper in ('reaper', 'srt-bwrap', 'pv-adverb', 'python3', 'steam.exe'):
+            with self.subTest(wrapper=wrapper):
+                self.assertIsNone(self.session([wrapper, r'S:\games\PRAGMATA.exe']))
+
+    def test_other_executable_and_missing_process_identity_are_unverified(self):
+        self.assertIsNone(self.session([r'S:\games\OTHER.exe',
+                                        r'S:\games\PRAGMATA.exe']))
+        self.assertIsNone(self.session([r'S:\games\PRAGMATA.exe'], started_at=0))
+        self.assertIsNone(self.session([r'S:\games\PRAGMATA.exe'], stat_present=False))
+        self.assertIsNone(self.session([r'S:\games\PRAGMATA.exe'], changed_start=True))
+        self.assertIsNone(self.session([], expected=r'S:\games\PRAGMATA.exe'))
 
 
 from test_backend import Fixtures

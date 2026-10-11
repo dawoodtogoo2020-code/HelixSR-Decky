@@ -63,13 +63,19 @@ def executable_session(proc, expected):
         return None
     try:
         base = Path('/proc') / str(proc['pid'])
+        if hasattr(os, 'getuid') and base.stat().st_uid != os.getuid():
+            return None
+        before = (base / 'stat').read_text().rsplit(')', 1)[1].split()[19]
         args = (base / 'cmdline').read_bytes()[:32768].split(b'\0')
-        name = Path(expected).name.lower()
-        candidates = [arg.decode(errors='replace').replace('\\', '/').split('/')[-1].lower()
-                      for arg in args if arg.lower().endswith(b'.exe')]
-        if name not in candidates:
+        name = str(expected).replace('\\', '/').split('/')[-1].lower()
+        # Reaper, Proton and steam.exe all carry the game path in later
+        # arguments. Only the executable's own argv[0] identifies this process.
+        actual = args[0].decode(errors='replace').replace('\\', '/').split('/')[-1].lower()
+        if not name or name != actual:
             return None
         start_ticks = (base / 'stat').read_text().rsplit(')', 1)[1].split()[19]
+        if not start_ticks.isdigit() or start_ticks != before:
+            return None
         return (proc['pid'], start_ticks)
     except (OSError, ValueError, IndexError):
         return None
@@ -117,6 +123,7 @@ class RuntimeEvidence:
         self.failed = False
         self.prelaunch = False
         self.absent = set()
+        self.startup_reads = set()
 
     @staticmethod
     def _cursor(stream, info):
@@ -141,6 +148,10 @@ class RuntimeEvidence:
                 self.absent.discard(str(path))
 
     def _read(self, path, proc):
+        startup = str(path) in self.startup_reads
+        # One inspection per primed path in this new session. Later rotation,
+        # missing files and failed writer authentication cannot earn a retry.
+        self.startup_reads.discard(str(path))
         with_regular, info = regular_beneath(path, self.root)
         with with_regular as stream:
             identity = (info.st_dev, info.st_ino)
@@ -163,8 +174,19 @@ class RuntimeEvidence:
             if not cursor or cursor['identity'] != identity or info.st_size < cursor['offset'] or not continuous:
                 self.event = None
                 self.ready.discard(str(path))
-                self.cursors[str(path)] = self._cursor(stream, info)
-                return []
+                if (startup and cursor and writing_log(proc['pid'], info)
+                        and executable_session(proc, self.expected) == self.session):
+                    # A log primed while idle was demonstrably rewritten for
+                    # this new game, which holds this inode's writable FD.
+                    # Capture its one-time initialization, not historical text.
+                    if info.st_size > LIMIT:
+                        self.cursors[str(path)] = self._cursor(stream, info)
+                        raise ValueError('Startup runtime log exceeds the bounded read limit')
+                    cursor = dict(identity=identity, offset=0, pending=b'', prefix=b'', anchor=b'')
+                    self.cursors[str(path)] = cursor
+                else:
+                    self.cursors[str(path)] = self._cursor(stream, info)
+                    return []
             offset = cursor['offset']
             if info.st_size - offset > LIMIT:
                 # Discard an overflow rather than promote a truncated historic fragment.
@@ -190,15 +212,20 @@ class RuntimeEvidence:
         sessions = [(s, p) for s, p in sessions if s]
         if len(sessions) != 1:
             self.session = None
-            self.cursors.clear()
             self.event = None
             self.ready.clear()
             self.failed = False
+            self.startup_reads.clear()
             if processes:
-                self.prelaunch = False
-                self.absent.clear()
+                # Steam/Proton helpers appear before the real executable. Keep
+                # an already armed idle baseline, without reading new log text.
+                if sessions or not self.prelaunch:
+                    self.cursors.clear()
+                    self.prelaunch = False
+                    self.absent.clear()
                 return dict(base, state='unverified', label='Game running; HelixSR unverified',
                             detail='The running executable could not be identified uniquely. No current output claim.')
+            self.cursors.clear()
             self._prime()
             self.prelaunch = True
             return dict(base, state='not_running', label='No running game observed',
@@ -209,11 +236,15 @@ class RuntimeEvidence:
             if not self.prelaunch:
                 self.cursors.clear()
                 self.absent.clear()
+                self.startup_reads.clear()
+            else:
+                self.startup_reads = set(self.cursors)
             self.prelaunch = False
             self.event = None
             self.ready.clear()
             self.failed = False
         if self.game.get('managed') and not self.game.get('enabled'):
+            self.startup_reads.clear()
             return dict(base, state='disabled', label='Recorded installation disabled',
                         detail='Close the game and enable HelixSR before testing again.')
         if not self.game.get('managed') or not mapped_paths(proc['pid'], self.modules):

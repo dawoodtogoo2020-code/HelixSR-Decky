@@ -264,7 +264,7 @@ def render(directory, nonce):
             x.x.XClearWindow(x.display, window)
             x.x.XSetForeground(x.display, gc, 0x8ee8bc if data.get('state') == 'output' else 0xf1ca7e)
             lines = ['HelixSR | ' + plain(data.get('game_name'), 40), plain(data.get('label'), 62),
-                     'Version ' + plain(data.get('version'), 15) + ' | ' + plain(data.get('model'), 30),
+                     'Recorded ' + plain(data.get('version'), 15) + ' | ' + plain(data.get('model'), 30),
                      'Session log evidence | image quality unverified']
             for i, line in enumerate(lines):
                 encoded = plain(line, max(20, (width - 24) // 6)).encode('ascii')
