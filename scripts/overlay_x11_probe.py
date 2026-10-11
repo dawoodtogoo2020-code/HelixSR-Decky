@@ -132,7 +132,7 @@ class HelperSession:
 
     def start(self):
         self.frame()
-        command = ([self.child_executable, '--appimage-extract-and-run', '--status-overlay-child',
+        command = ([self.child_executable, '--status-overlay-child',
                     str(self.directory), self.nonce] if self.child_executable else
                    [sys.executable, str(ROOT / 'py_modules' / 'overlay_helper.py'),
                     str(self.directory), self.nonce])
@@ -263,10 +263,23 @@ def run(child_executable=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--child-executable', type=Path,
-                        help='Frozen AppImage executable to run with --appimage-extract-and-run --status-overlay-child')
+                        help='AppImage to extract and test its actual frozen helper subprocess, matching production sys.executable')
     args = parser.parse_args()
     try:
-        print(json.dumps(run(str(args.child_executable) if args.child_executable else None)))
+        if args.child_executable:
+            # The AppImage extraction launcher is a supervisor. Production uses
+            # the inner frozen sys.executable, which owns the X11 connection.
+            # Test that exact process handle, rather than killing its wrapper.
+            image = args.child_executable.resolve(strict=True)
+            with tempfile.TemporaryDirectory(prefix='helixsr-frozen-overlay-') as extracted:
+                subprocess.run([str(image), '--appimage-extract'], cwd=extracted, check=True,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30)
+                child = Path(extracted) / 'squashfs-root/usr/bin/helixsr-desktop/helixsr-desktop'
+                if not child.is_file():
+                    raise ValueError('Frozen executable missing from extracted AppImage')
+                print(json.dumps(run(str(child))))
+        else:
+            print(json.dumps(run()))
         return 0
     except Exception as exc:
         print(json.dumps(dict(result='failed', error=str(exc), visibility_verified=False)), file=sys.stderr)
