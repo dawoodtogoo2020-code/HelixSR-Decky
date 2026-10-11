@@ -10,7 +10,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ['3.11.16', '3.11.17']
-        qt: ['6.11.3', '6.12.0']
+        qt: ['6.11.2', '6.12.0']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -26,5 +26,6 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -c 'import sys,PySide6,shiboken6; print(sys.version); print(PySide6.__version__,shiboken6.__version__)'
+          python tests/qt_none_probe.py
           python -m unittest discover -s tests -p 'test_desktop_*.py'
           xvfb-run -a env QT_QPA_PLATFORM=xcb python -m desktop.app --smoke-test --smoke-cycles 10
