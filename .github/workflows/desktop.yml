@@ -23,6 +23,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -m unittest discover -s tests -p 'test_*.py'
+          python tests/qt_none_probe.py
           pip-audit -r desktop/requirements-build.txt
           python -m desktop.app --smoke-test --screenshot "$PWD/desktop-source-smoke.png"
           xvfb-run -a env QT_QPA_PLATFORM=xcb python -m desktop.app --smoke-test --smoke-cycles 5

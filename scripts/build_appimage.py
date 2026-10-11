@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,11 @@ def run(args, **kwargs):
 def build():
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         raise SystemExit('Build on Linux x86_64')
+    qt_version = importlib.metadata.version('PySide6-Essentials')
+    pinned = re.search(r'^PySide6-Essentials==([0-9.]+)$',
+                       (ROOT / 'desktop/requirements-build.txt').read_text(), re.M)
+    if not pinned or qt_version != pinned[1] or importlib.metadata.version('shiboken6') != qt_version:
+        raise SystemExit('Install the exact reviewed Qt binding pair from requirements-build.txt')
     build_root = ROOT / 'build-desktop'
     if build_root.exists():
         raise SystemExit('Existing desktop build directory; use a clean checkout')
@@ -66,10 +72,10 @@ def build():
         shutil.copy2(ROOT / name, share / name)
     licenses = share / 'licenses'
     licenses.mkdir()
-    qt_notices = ROOT / 'licenses/qt-6.12.0'
+    qt_notices = ROOT / ('licenses/qt-' + qt_version)
     if not (qt_notices / 'qtbase/LICENSES/LGPL-3.0-only.txt').is_file():
         raise SystemExit('Missing reviewed Qt upstream license texts')
-    shutil.copytree(qt_notices, licenses / 'Qt-6.12.0')
+    shutil.copytree(qt_notices, licenses / ('Qt-' + qt_version))
     for name in ('PySide6-Essentials', 'shiboken6', 'pyinstaller',
                  'pyinstaller-hooks-contrib', 'altgraph', 'packaging', 'setuptools'):
         dist = importlib.metadata.distribution(name)

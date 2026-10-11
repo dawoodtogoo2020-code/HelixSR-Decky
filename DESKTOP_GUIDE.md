@@ -58,4 +58,4 @@ You can also comment on the [HelixSR video](https://www.youtube.com/watch?v=atLk
 
 ## Run from source
 
-Use Python 3.11 or newer and a user-owned virtual environment. Install `PySide6-Essentials==6.12.0` and `shiboken6==6.12.0`, then run `python -m desktop.app` from the repository. The [source](https://github.com/dawoodtogoo2020-code/HelixSR-Decky) includes the desktop backend, native UI, regression tests and build scripts.
+Use Python 3.11 or newer and a user-owned virtual environment. Install `PySide6-Essentials==6.11.2` and `shiboken6==6.11.2`, then run `python -m desktop.app` from the repository. The [source](https://github.com/dawoodtogoo2020-code/HelixSR-Decky) includes the desktop backend, native UI, regression tests and build scripts.

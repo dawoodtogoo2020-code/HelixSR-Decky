@@ -2,12 +2,12 @@
 
 HelixSR Desktop application source and its original icon are MIT-licensed. See LICENSE. This AppImage contains no HelixSR game DLLs, DLSS DLLs or generated HelixSR network assets. Those are obtained or generated separately on the user's device under their own terms.
 
-The AppImage includes dynamically linked Qt for Python (PySide6-Essentials and shiboken6 6.12.0), Qt libraries and platform plugins. PySide6 is available under LGPLv3, GPLv2/GPLv3 or a commercial license. This distribution uses the open-source LGPL option for the modules it imports (QtCore, QtGui and QtWidgets). Qt and third-party notices from the matching official Qt/PySide 6.12.0 source tags, together with available wheel notices, are included under `usr/share/helixsr-desktop/licenses` in the extracted AppImage. The source URLs and verified file hashes are recorded in `licenses/qt-6.12.0/sources.json` in this repository.
+The AppImage includes dynamically linked Qt for Python (PySide6-Essentials and shiboken6 6.11.2), Qt libraries and platform plugins. PySide6 is available under LGPLv3, GPLv2/GPLv3 or a commercial license. This distribution uses the open-source LGPL option for the modules it imports (QtCore, QtGui and QtWidgets). Qt and third-party notices from the matching official Qt/PySide 6.11.2 source tags, together with available wheel notices, are included under `usr/share/helixsr-desktop/licenses` in the extracted AppImage. The source URLs and verified file hashes are recorded in `licenses/qt-6.11.2/sources.json` in this repository.
 
 Corresponding upstream sources:
 
-- [PySide/shiboken 6.12.0 sources](https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/)
-- [Qt 6.12 sources](https://download.qt.io/official_releases/qt/6.12/)
+- [PySide/shiboken 6.11.2 sources](https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/)
+- [Qt 6.11 sources](https://download.qt.io/official_releases/qt/6.11/)
 - [Qt open-source licensing](https://doc.qt.io/qt-6/licensing.html)
 - [LGPLv3](https://www.gnu.org/licenses/lgpl-3.0.html) and [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html)
 
