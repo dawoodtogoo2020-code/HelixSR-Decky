@@ -407,6 +407,29 @@ class AssessmentTests(Fixtures):
         write(self.root / 'dxgi.dll', b'existing unrelated proxy')
         self.assertEqual(self.m.assess(self.game)['compatibility'], 'blocked')
 
+    def test_alternate_optiscaler_proxies_block_second_install(self):
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        for name in ('dbghelp.dll', 'd3d12.dll', 'wininet.dll', 'winhttp.dll', 'OptiScaler.asi'):
+            with self.subTest(name=name):
+                proxy = write(self.root / name, pe() + b'OptiScaler fixture')
+                data = self.m.assess(self.game)
+                self.assertEqual(data['compatibility'], 'blocked')
+                self.assertTrue(any(name in reason for reason in data['reasons']))
+                self.assertIn(str(proxy), data['optiscaler']['dlls'])
+                with self.assertRaisesRegex(ValueError, 'Existing unmanaged injector'):
+                    self.m.preview(self.game['id'], 'install')
+                self.assertFalse((self.root / 'dxgi.dll').exists())
+                self.assertEqual(proxy.read_bytes(), pe() + b'OptiScaler fixture')
+                proxy.unlink()
+
+    def test_ordinary_alternate_proxy_names_are_not_blocked(self):
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        for name in ('dbghelp.dll', 'd3d12.dll', 'wininet.dll', 'winhttp.dll', 'OptiScaler.asi'):
+            write(self.root / name, pe())
+        self.assertEqual(self.m.assess(self.game)['compatibility'], 'candidate')
+
     def test_legacy_requires_explicit_adoption_and_original(self):
         write(self.native, pe(ffx=True, helix=True))
         self.assertTrue(self.m.assess(self.game)['legacy'])

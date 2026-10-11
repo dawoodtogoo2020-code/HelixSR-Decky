@@ -8,6 +8,21 @@ import time
 from library import text, read_json, vdf, steam_roots
 from optiscaler_setup import setup_report
 
+OPTISCALER_PROXIES = ('dxgi.dll', 'winmm.dll', 'version.dll', 'dbghelp.dll',
+                     'd3d12.dll', 'wininet.dll', 'winhttp.dll', 'optiscaler.asi')
+
+
+def optiscaler_proxy(path):
+    """Identify supported proxy aliases without treating ordinary game DLLs as injectors."""
+    path = Path(path)
+    if path.name.lower() not in OPTISCALER_PROXIES or path.is_symlink() or not path.is_file():
+        return False
+    try:
+        with path.open('rb') as stream:
+            return b'OptiScaler' in stream.read(32 << 20)
+    except OSError:
+        return False
+
 
 def flag(value):
     s = str(value).strip().lower()
@@ -111,13 +126,8 @@ def awareness(game, tree, home, route, target=None):
                     value = re.search(r'(?im)^\s*Enabled\s*=\s*([^\r\n;]+)', section[1])
                     if value:
                         fg.append(evidence('OptiScaler', 'FrameGen.Enabled', value[1].strip(), p))
-            if lower in ('dxgi.dll', 'winmm.dll', 'version.dll', 'dbghelp.dll', 'd3d12.dll', 'optiscaler.asi'):
-                try:
-                    with p.open('rb') as f:
-                        if b'OptiScaler' in f.read(32 << 20):
-                            opti_files.append(str(p))
-                except OSError:
-                    pass
+            if optiscaler_proxy(p):
+                opti_files.append(str(p))
             if lower in ('config.ini', 'user.settings', 'dx12user.settings', 'engine.ini', 'gameusersettings.ini', 'optiscaler.ini'):
                 src = text(p, 256 << 10)
                 for k, value in re.findall(r'(?im)^\s*([^;#\r\n=]*(?:framegen|framegeneration|dlssg|xessfg|fginput|fgoutput)[^=\r\n]*)\s*=\s*([^\r\n;]+)', src):

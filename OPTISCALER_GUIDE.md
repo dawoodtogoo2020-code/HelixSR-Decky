@@ -51,3 +51,5 @@ Disable/Enable retains your owned configurations. Remove restores originals and 
 [Report a reproducible issue](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml). Include the manager version, game, renderer, exact review reason and relevant fresh logs. Remove personal details; never upload generated weights or kernels.
 
 Official references: [HelixSR troubleshooting](https://github.com/lonewolf0622/HelixSR#troubleshooting), [OptiScaler manual installation](https://github.com/optiscaler/OptiScaler/wiki/Manual-Installation), [Control Ultimate Edition notes](https://github.com/optiscaler/OptiScaler/wiki/Control-Ultimate-Edition). Upstream Control testing on Windows does not establish behavior on every SteamOS device.
+
+For an existing OptiScaler install, remove it using the installer that owns it before installing through HelixSR. The manager detects OptiScaler under its supported alternate proxy names as well as `dxgi.dll`, and stops rather than adding a second proxy. It leaves those external files untouched.

@@ -22,7 +22,7 @@ import platform
 import ssl
 from functools import lru_cache
 from library import discover, discover_launcher, safe_root, scan_tree, text
-from awareness import awareness, active_processes, text_tail
+from awareness import awareness, active_processes, text_tail, optiscaler_proxy
 from operation_lock import operation_lock, game_locked
 from host_environment import host_environment
 from build_runtime import wine_candidates
@@ -793,6 +793,11 @@ class Manager:
         if not rec and route == 'optiscaler' and target:
             occupied = [n for n in ('dxgi.dll', 'winmm.dll', 'version.dll', 'OptiScaler.ini', 'fakenvapi.dll')
                         if (target / n).exists() or (target / n).is_symlink()]
+            # Other managers can leave OptiScaler under a different supported
+            # alias. Installing dxgi beside it could load two copies. Only
+            # identified aliases conflict; ordinary game d3d12 DLLs are valid.
+            occupied += [p.name for p, _ in names if p.parent == target and
+                         p.name not in occupied and optiscaler_proxy(p)]
             helix_dir = target / 'HelixSR'
             # Removal retains runtime logs. An empty/log-only directory contains no injector.
             if helix_dir.is_symlink() or (helix_dir.exists() and

@@ -1,6 +1,6 @@
 {
   "name": "helixsr-decky",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "HelixSR manager for Decky Loader",
   "type": "module",
   "license": "MIT",
