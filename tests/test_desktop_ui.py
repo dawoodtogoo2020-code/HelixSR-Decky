@@ -150,6 +150,21 @@ class DesktopWidgetTests(unittest.TestCase):
         from desktop.app import GUIDE
         self.assertTrue(GUIDE.endswith('/DESKTOP_GUIDE.md'))
 
+    def test_setup_checks_settings_and_guide_are_visible_and_copyable(self):
+        self.window.game['main_exe'] = '/fixture/a/Game.exe'
+        self.window.game['optiscaler']['setup'] = dict(checks=['DLSS input is disabled', 'Frame generation is separate'],
+            settings={'EnableDlssInputs': 'false', 'ShortcutKey': '0x24'},
+            guide='https://github.com/dawoodtogoo2020-code/HelixSR-Decky/blob/main/OPTISCALER_GUIDE.md')
+        self.window._render_game()
+        text = self.window.evidence.toPlainText()
+        self.assertIn('Target executable: /fixture/a/Game.exe', text)
+        self.assertIn('DLSS input is disabled', text)
+        self.assertIn('ShortcutKey=0x24', text)
+        self.window.copy_launch()
+        self.assertIn('OPTISCALER_GUIDE.md', self.app.clipboard().text())
+        self.assertIn('DLSS input is disabled', self.app.clipboard().text())
+        self.assertFalse(any(c[0] in ('install', 'preview', 'license') for c in self.backend.calls))
+
     def test_many_library_warnings_keep_notice_short_and_diagnostics_intact(self):
         self.window._library_loaded = False
         warnings = [f'Steam shortcut {i}: launcher/wrapper unresolved; import game folder /fixture/game-{i}' for i in range(83)]

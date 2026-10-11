@@ -41,6 +41,7 @@ ANTI = ('easyanticheat', 'battleye', 'beclient', 'equ8', 'faceit', 'vanguard')
 LICENSE_REV = 'helixsr-local-nvidia-network-2026-10'
 RELEASE_POLICY = 2
 AUTO_PACKAGE = object()
+CONFIG_LIMIT = 1 << 20
 
 
 def load_release(settings):
@@ -316,6 +317,62 @@ class Manager:
     def record(self, game):
         return load_json(self.record_path(game))
 
+    def mutable_config_paths(self, game, rec):
+        # Only configurations this installation created are mutable. Legacy records
+        # use the same baseline/current ownership proof, without a schema migration.
+        if rec.get('route') != 'optiscaler':
+            return []
+        root = Path(game['folder'])
+        target = Path(rec['target'])
+        if not isinstance(rec.get('baseline'), dict) or not isinstance(rec.get('current'), dict):
+            raise ValueError('Invalid configuration ownership record')
+        paths = [str((target / name).relative_to(root))
+                 for name in ('OptiScaler.ini', 'fakenvapi.ini')]
+        return [rel for rel in paths if rel in rec.get('current', {})
+                and rel in rec.get('baseline', {}) and rec['baseline'][rel] is None]
+
+    def read_owned_config(self, game, rel):
+        p = checked_path(Path(game['folder']), rel)
+        flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_BINARY', 0)
+        with os.fdopen(os.open(p, flags), 'rb') as f:
+            info = os.fstat(f.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_size > CONFIG_LIMIT
+                    or os.name == 'posix' and info.st_uid != os.getuid()):
+                raise ValueError('Unsafe managed configuration: ' + rel)
+            raw = f.read(CONFIG_LIMIT + 1)
+        if len(raw) > CONFIG_LIMIT:
+            raise ValueError('Managed configuration is too large: ' + rel)
+        try:
+            content = raw.decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise ValueError('Managed configuration must be UTF-8: ' + rel) from exc
+        if '\x00' in content:
+            raise ValueError('Invalid managed configuration: ' + rel)
+        from optiscaler_setup import parse_config
+        parse_config(content)
+        return dict(content=content, sha256=hashlib.sha256(raw).hexdigest())
+
+    def retained_config(self, rec, rel):
+        container = rec.get('saved_configs', {})
+        current, baseline = rec.get('current', {}), rec.get('baseline', {})
+        allowed = {str(Path(rel).parent / name) for name in ('OptiScaler.ini', 'fakenvapi.ini')}
+        if (not isinstance(container, dict) or not isinstance(current, dict) or not isinstance(baseline, dict)
+                or any(k not in allowed or k not in current or k not in baseline or baseline[k] is not None for k in container)):
+            raise ValueError('Invalid retained configuration record')
+        saved = container.get(rel)
+        if saved is None:
+            return None
+        if not isinstance(saved, dict) or not isinstance(saved.get('content'), str):
+            raise ValueError('Invalid retained configuration: ' + rel)
+        raw = saved['content'].encode('utf-8')
+        if (len(raw) > CONFIG_LIMIT or b'\x00' in raw
+                or hashlib.sha256(raw).hexdigest() != saved.get('sha256')):
+            raise ValueError('Retained configuration hash mismatch: ' + rel)
+        from optiscaler_setup import parse_config
+        parse_config(saved['content'])
+        return saved['content']
+
     @staticmethod
     def _symlink_in_path(path):
         path = Path(path)
@@ -520,7 +577,7 @@ class Manager:
                     blocked.append(f'{p.name}: expected x64 FidelityFX API not found')
         if main and pe_info(main)['arch'] != 'x64':
             blocked.append('Main executable is not x64 Windows PE (32-bit, native Linux or unknown architecture)')
-        if route == 'optiscaler' and not any(pe_info(p)['dx12'] for p in exes):
+        if route == 'optiscaler' and not (main and pe_info(main)['dx12']):
             reasons.append('DX12 is not confirmed by executable imports; confirm the game runs DX12 before installation')
         directory_names = [str(d.relative_to(root)).lower() for d, _ in tree]
         if any(any(a in n for a in ANTI) for _, n in names) or any(any(a in n for a in ANTI) for n in directory_names):
@@ -557,8 +614,17 @@ class Manager:
         if rec:
             if game.get('build') and rec.get('game_build') and game['build'] != rec['game_build']:
                 blocked.append('Steam build changed; installation needs review')
+            mutable = self.mutable_config_paths(game, rec)
             for rel, expected in rec['current'].items():
                 p = checked_path(root, rel)
+                if rel in mutable:
+                    self.retained_config(rec, rel)
+                    if rec.get('enabled') and expected is not None:
+                        try:
+                            self.read_owned_config(game, rel)
+                        except (OSError, ValueError) as exc:
+                            blocked.append(str(exc))
+                        continue
                 actual = sha(p) if p.is_file() else None
                 if actual != expected:
                     blocked.append('Managed files changed, possibly a game update. Restore through Steam or resolve conflict first: ' + rel)
@@ -574,7 +640,7 @@ class Manager:
                     next((pe_info(p).get('helix_version') for p in targets if pe_info(p)['helix']), None),
                     legacy=legacy, package_version=package[2]['version'] if package else None,
                     recovery_available=self.recovery_available(game),
-                    dx12_confirmation_needed=route == 'optiscaler' and not any(pe_info(p)['dx12'] for p in exes),
+                    dx12_confirmation_needed=route == 'optiscaler' and not (main and pe_info(main)['dx12']),
                     **aware)
         if not detailed:
             data.pop('logs', None)
@@ -935,7 +1001,13 @@ class Manager:
             return dict(token=token, action=action, name=game['name'], route=data['route'],
                         files=self.planned_paths(game, data, action),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
-                        warning='Close the game. Originals are retained for disable/remove. Game settings and frame generation are not changed.',
+                        warning=('Close the game. Originals are retained for disable/remove. '
+                                 'Owned OptiScaler configuration edits are preserved in installation records; '
+                                 'enable restores them and update pins only HelixSR backend/provider paths. '
+                                 'Game settings, overlay hotkeys and frame-generation choices are preserved.'
+                                 if data['route'] == 'optiscaler' else
+                                 'Close the game. Originals are retained for disable/remove. '
+                                 'Game settings and frame generation are not changed.'),
                         expires_at=time.time()+120)
 
     def fingerprint(self, game, data, include_package=True, package=AUTO_PACKAGE):
@@ -948,6 +1020,7 @@ class Manager:
             if fg not in paths:
                 paths.append(fg)
         files = {}
+        files['installation_record'] = rec
         for rel in paths:
             p = checked_path(Path(game['folder']), rel)
             files[rel] = sha(p) if p.is_file() else None
@@ -1076,11 +1149,13 @@ class Manager:
                         previous['baseline'][str((target.parent / n).relative_to(root))] = None
                 previous['enabled'], previous['version'] = True, 'legacy'
             elif action in ('disable', 'remove'):
+                self.retain_configs(game, previous, action)
                 self.restore_baseline(game, previous)
                 previous['enabled'] = False
             elif action in ('install', 'update', 'enable'):
                 if not package:
                     raise ValueError('Prepared package unavailable')
+                self.retain_configs(game, previous, action)
                 previous['enabled'], previous['version'] = True, package[2]['version']
                 # Extend older managed records for newly introduced dependencies.
                 # Their paths were conflict-checked, snapshotted and journaled above.
@@ -1123,6 +1198,18 @@ class Manager:
         if digest not in allowed:
             allowed.append(digest)
             atomic_json(tx / 'journal.json', journal)
+
+    def retain_configs(self, game, rec, action):
+        if not rec.get('enabled'):
+            return
+        saved = dict(rec.get('saved_configs', {}))
+        for rel in self.mutable_config_paths(game, rec):
+            saved[rel] = self.read_owned_config(game, rel)
+        if saved:
+            # These are installation records, never disposable rollback backups.
+            atomic_json(self.companion(game) / 'records' / ('config-' + uuid.uuid4().hex + '.json'),
+                        dict(action=action, configurations=saved, time=time.time()))
+            rec['saved_configs'] = saved
 
     def unlink_managed(self, path):
         self.track_write(path, None)
@@ -1248,33 +1335,37 @@ class Manager:
                             {'route': 'direct', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version')})
         else:
             target = Path(rec['target'])
-            for source, dest in [('optiscaler/OptiScaler.dll', 'dxgi.dll'),
-                                 ('optiscaler/fakenvapi.dll', 'fakenvapi.dll'), ('optiscaler/fakenvapi.ini', 'fakenvapi.ini'),
-                                 (DLL, 'HelixSR/helixsr.dll'), (DLL, 'HelixSR/helixsr_upscaler.dll'),
-                                 ('amd-fsr/amd_fidelityfx_upscaler_dx12.dll', 'HelixSR/amd_fidelityfx_upscaler_dx12.amd.dll')]:
-                self.copy_atomic(package_path / source, target / dest, package_record['files'][source])
-            for name in NETWORK:
-                self.copy_atomic(package_path / name, target / 'HelixSR' / name, package_record['files'][name])
             settings_path = package_path / 'optiscaler/OptiScaler.ini'
             settings_bytes = settings_path.read_bytes()
             if hashlib.sha256(settings_bytes).hexdigest() != package_record['files']['optiscaler/OptiScaler.ini']:
                 raise ValueError('Prepared package changed during installation')
-            source = settings_bytes.decode('utf-8')
+            template = settings_bytes.decode('utf-8')
+            source = self.retained_config(rec, str((target / 'OptiScaler.ini').relative_to(root)))
+            source = template if source is None else source
             settings = [('Dx12Upscaler', 'fsr31'),
-                               ('FfxDx12Path', str(target / 'HelixSR/helixsr.dll').replace('/', '\\')),
-                               ('FfxDx12SRPath', str(target / 'HelixSR/helixsr_upscaler.dll').replace('/', '\\'))]
+                        ('FfxDx12Path', 'Z:' + str(target / 'HelixSR/helixsr.dll').replace('/', '\\')),
+                        ('FfxDx12SRPath', 'Z:' + str(target / 'HelixSR/helixsr_upscaler.dll').replace('/', '\\'))]
+            if (package_path / 'amd-fsr' / AMD_FG).is_file():
+                settings.append(('FfxDx12FGPath', 'Z:' + str(target / 'HelixSR' / AMD_FG).replace('/', '\\')))
+            from optiscaler_setup import pin_config
+            configured_source = pin_config(source, template, settings)
+            for source, dest in [('optiscaler/OptiScaler.dll', 'dxgi.dll'),
+                                 ('optiscaler/fakenvapi.dll', 'fakenvapi.dll'),
+                                 (DLL, 'HelixSR/helixsr.dll'), (DLL, 'HelixSR/helixsr_upscaler.dll'),
+                                 ('amd-fsr/amd_fidelityfx_upscaler_dx12.dll', 'HelixSR/amd_fidelityfx_upscaler_dx12.amd.dll')]:
+                self.copy_atomic(package_path / source, target / dest, package_record['files'][source])
+            fake_rel = str((target / 'fakenvapi.ini').relative_to(root))
+            fake = self.retained_config(rec, fake_rel)
+            if fake is None:
+                self.copy_atomic(package_path / 'optiscaler/fakenvapi.ini', target / 'fakenvapi.ini',
+                                 package_record['files']['optiscaler/fakenvapi.ini'])
+            else:
+                self.write_managed(target / 'fakenvapi.ini', fake)
+            for name in NETWORK:
+                self.copy_atomic(package_path / name, target / 'HelixSR' / name, package_record['files'][name])
             if (package_path / 'amd-fsr' / AMD_FG).is_file():
                 name = 'amd-fsr/' + AMD_FG
-                self.copy_atomic(package_path / name, target / 'HelixSR' / AMD_FG,
-                                 package_record['files'][name])
-                settings.append(('FfxDx12FGPath', str(target / 'HelixSR' / AMD_FG).replace('/', '\\')))
-            for key, value in settings:
-                if key.startswith('Ffx'):
-                    value = 'Z:' + value
-                pattern = r'(?im)^\s*' + re.escape(key) + r'\s*=.*$'
-                if not re.search(pattern, source):
-                    raise ValueError('Upstream OptiScaler configuration changed: ' + key)
-                source = re.sub(pattern, lambda _: key + '=' + value, source)
-            self.write_managed(target / 'OptiScaler.ini', source)
+                self.copy_atomic(package_path / name, target / 'HelixSR' / AMD_FG, package_record['files'][name])
+            self.write_managed(target / 'OptiScaler.ini', configured_source)
             self.write_managed_json(target / 'HelixSR/helixsr-install.json',
                         {'route': 'optiscaler', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version')})

@@ -10,7 +10,7 @@ from plugin_updates import semver, validate_zip
 version = json.loads((root / 'package.json').read_text())['version']
 semver(version)
 out = root.parent / f'HelixSR-Decky-{version}.zip'
-allowed = ['main.py', 'plugin.json', 'package.json', 'LICENSE', 'README.md', 'INSTALL_GUIDE.md', 'THIRD_PARTY_NOTICES.md']
+allowed = ['main.py', 'plugin.json', 'package.json', 'LICENSE', 'README.md', 'INSTALL_GUIDE.md', 'OPTISCALER_GUIDE.md', 'DESKTOP_GUIDE.md', 'THIRD_PARTY_NOTICES.md']
 license_files = [
     'licenses/decky-api-LGPL-2.1.txt',
     'licenses/react-icons-LICENSE.txt',

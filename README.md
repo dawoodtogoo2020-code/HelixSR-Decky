@@ -4,7 +4,7 @@ An independent Decky Loader plugin for managing HelixSR on SteamOS. It does not 
 
 Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https://github.com/lonewolf0622/HelixSR); this plugin is an independent integration.
 
-[Download the plugin ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
+[Download the plugin ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Desktop AppImage and guide](DESKTOP_GUIDE.md) · [OptiScaler setup](OPTISCALER_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
 
 ## Features
 
@@ -15,6 +15,7 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 * Prepares locally generated network files as a cancellable background job. Acceptance is tied to the selected release digest. Uses upstream portable dependencies and a separate compiler prefix; never changes SteamOS system packages or a game prefix.
 * Supports install, update, disable, enable, remove, explicit adoption of a legacy native HelixSR installation and recovery of interrupted transactions. Keeps essential originals and installation records in a named companion folder beside the game on the same filesystem. Cleans completed staging and temporary transaction copies.
 * Reports OptiScaler files, whether the selected Helix route involves OptiScaler, mapped-module evidence where available and bounded log excerpts. Reports native game frame-generation settings, OptiScaler configuration, matching MAKO/LSFG-VK profiles and running-process environment separately. A configured multiplier or installed plugin is not proof of active frame generation.
+* Explains missing OptiScaler/DLSS input, proxy override conflicts, backend/provider mismatches and overlay shortcuts. Preserves owned configuration edits through updates and disable/enable; removal retains configuration installation records. Reviewed Steam launch changes have durable recovery intents and preserve existing supported environment assignments.
 * Blocks detected anti-cheat, active games, incomplete Steam installs/download staging, wrong architecture, unmanaged injector conflicts and changed managed files. Uses no root plugin flag.
 
 ## Install

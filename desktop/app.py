@@ -420,12 +420,16 @@ class MainWindow(QMainWindow):
         self.status.setStyleSheet("color: #82dfaf" if game.get("enabled") or game.get("managed") or game.get("legacy") else "color: #a2a3af")
         opti = game.get("optiscaler") or {}
         text = (f"Route: {game.get('route') or 'none detected'}\n"
+                f"Target executable: {game.get('main_exe') or 'unknown'}\n"
                 f"OptiScaler installed: {'yes' if opti.get('present') else 'no detected files'}\n"
                 f"OptiScaler HelixSR route configured: {'yes' if opti.get('helix_configured') else 'no'}\n"
                 f"OptiScaler runtime: {opti.get('runtime', 'unknown')}\n"
                 f"HelixSR runtime: {game.get('helix_runtime', 'unknown')}\n\n"
                 f"Frame generation: {game.get('framegen_summary', 'unknown')}\n"
                 "HelixSR has no frame generation of its own. Configuration and runtime evidence are separate.\n")
+        setup = opti.get('setup') or {}
+        text += '\nSetup checks and next steps:\n' + '\n\n'.join(setup.get('checks', []))
+        text += '\n\nDetected OptiScaler settings:\n' + '\n'.join(f'{k}={v}' for k, v in setup.get('settings', {}).items())
         for row in game.get("framegen", []):
             text += f"{row.get('source')}: {row.get('key')}={row.get('value')} · {row.get('meaning', '')}\n"
         text += "\nDetected reasons:\n" + "\n".join(game.get("reasons", []))
@@ -569,6 +573,9 @@ class MainWindow(QMainWindow):
             guidance = ("Preserve your existing Steam or launcher launch options. For the OptiScaler proxy, merge dxgi=n,b into WINEDLLOVERRIDES manually. "
                         "For empty Steam options use: WINEDLLOVERRIDES=\"dxgi=n,b\" %command%\n"
                         "Do not overwrite an existing dxgi rule without reviewing it.\nExisting options:\n" + before)
+            setup = game.get('optiscaler', {}).get('setup') or {}
+            guidance += '\n\nSetup checks:\n' + '\n\n'.join(setup.get('checks', []))
+            guidance += '\n\nFull OptiScaler guide: ' + setup.get('guide', PROJECT + '/blob/main/OPTISCALER_GUIDE.md')
         else:
             guidance = ("No supported installation route has been detected. Review the game details and installation guide before changing launch options.\n"
                         "Existing options:\n" + before)

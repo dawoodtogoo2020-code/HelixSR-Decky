@@ -139,3 +139,34 @@ test("wildcards, shell expansion and repeated override assignments need review",
     'WINEDLLOVERRIDES="d3d11=n" WINEDLLOVERRIDES="d3d12=n" %command%',
   ]) assert.throws(() => proxyOptions(options), /review/i);
 });
+
+test("environment-only and multiple literal assignments stay before Steam's command", () => {
+  assert.equal(proxyOptions('MANGOHUD=1'), 'WINEDLLOVERRIDES="dxgi=n,b" MANGOHUD=1 %command%');
+  assert.equal(proxyOptions('MANGOHUD=1 FOO="two words" -dx12 -novid'), 'WINEDLLOVERRIDES="dxgi=n,b" MANGOHUD=1 FOO="two words" %command% -dx12 -novid');
+  assert.equal(proxyOptions('FOO=1 WINEDLLOVERRIDES="d3d11=n" BAR=2 -novid'), 'FOO=1 WINEDLLOVERRIDES="d3d11=n;dxgi=n,b" BAR=2 %command% -novid');
+});
+
+test("already correct dxgi is a byte-preserving no-op with a placeholder", () => {
+  for (const original of ['WINEDLLOVERRIDES=dxgi=n,b %command%', 'FOO=1  WINEDLLOVERRIDES="d3d11=n;dxgi=n,b" gamescope -f -- %command% -dx12'])
+    assert.equal(proxyOptions(original), original);
+  assert.equal(proxyOptions('WINEDLLOVERRIDES=dxgi=n,b'), 'WINEDLLOVERRIDES=dxgi=n,b %command%');
+});
+
+test("literal wrappers, whitespace and trailing arguments survive", () => {
+  const original = '  FOO="two words" gamescope -f -- %command% -novid "two words"  ';
+  assert.equal(proxyOptions(original), `WINEDLLOVERRIDES="dxgi=n,b" ${original}`);
+  assert.equal(proxyOptions('env WINEDLLOVERRIDES="d3d11=n" %command% -dx12'), 'env WINEDLLOVERRIDES="d3d11=n;dxgi=n,b" %command% -dx12');
+});
+
+test("malformed and ambiguous shell options are refused", () => {
+  for (const input of [
+    'FOO="unterminated', 'FOO=1; echo hi', '%command% | cat', '%command% && true',
+    '"FOO=1" %command%', "'WINEDLLOVERRIDES=dxgi=n,b' %command%",
+    'FOO=$HOME %command%', 'FOO=`id` %command%', 'FOO=one\\ two %command%',
+    '%command% %command%', 'prefix%command%', '"%command%"',
+    'gamescope -f', '-dx12 WINEDLLOVERRIDES=dxgi=n,b',
+    '%command% WINEDLLOVERRIDES=dxgi=n,b', 'gamescope WINEDLLOVERRIDES=dxgi=n,b %command%',
+    'WINEDLLOVERRIDES="d3d11=n;;dxgi=n,b" %command%',
+    'WINEDLLOVERRIDES="dxgi=n,b;dxgi=n,b" %command%',
+  ]) assert.throws(() => proxyOptions(input), /review/i, input);
+});

@@ -6,6 +6,7 @@ import decky
 sys.path.insert(0, str(Path(__file__).parent / 'py_modules'))
 from manager import Manager
 from plugin_updates import PluginUpdates
+from launch_receipts import LaunchReceipts
 
 
 class Plugin:
@@ -114,19 +115,27 @@ class Plugin:
     async def remember_launch_options(self, gid, before, after):
         async with self.api_lock:
             self._allow_game_change()
-            from manager import atomic_json
             game = self.manager.get_game(gid)
-            receipt = self.manager.companion(game) / 'records/launch-options.json'
-            if before == after:
-                receipt.unlink(missing_ok=True)
-                return True
-            atomic_json(receipt, {'before': before, 'after': after})
-            return True
+            return await asyncio.to_thread(LaunchReceipts(self.manager.companion(game)).remember, before, after)
 
-    async def owned_launch_options(self, gid):
-        from manager import load_json
-        game = self.manager.get_game(gid)
-        return load_json(self.manager.companion(game) / 'records/launch-options.json', None) or None
+    async def owned_launch_options(self, gid, actual=None):
+        async with self.api_lock:
+            if actual is not None:
+                self._allow_game_change()
+            game = self.manager.get_game(gid)
+            return await asyncio.to_thread(LaunchReceipts(self.manager.companion(game)).owned, actual)
+
+    async def prepare_launch_options(self, gid, before, after, restore=False):
+        async with self.api_lock:
+            self._allow_game_change()
+            game = self.manager.get_game(gid)
+            return await asyncio.to_thread(LaunchReceipts(self.manager.companion(game)).prepare, before, after, restore)
+
+    async def finalize_launch_options(self, gid, nonce, actual):
+        async with self.api_lock:
+            self._allow_game_change()
+            game = self.manager.get_game(gid)
+            return await asyncio.to_thread(LaunchReceipts(self.manager.companion(game)).finalize, nonce, actual)
 
     async def prepare(self, gid):
         async with self.api_lock:

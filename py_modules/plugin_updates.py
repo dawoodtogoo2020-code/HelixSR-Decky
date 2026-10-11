@@ -86,6 +86,9 @@ def validate_zip(path, version):
         required.update(f'{FOLDER}/py_modules/{name}.py' for name in ('manager', 'library', 'awareness'))
         if semver(version) >= (0, 1, 1):
             required.add(f'{FOLDER}/py_modules/plugin_updates.py')
+        if semver(version) >= (0, 1, 6):
+            required.update(f'{FOLDER}/py_modules/{name}.py' for name in
+                            ('optiscaler_setup', 'launch_receipts', 'operation_lock', 'host_environment'))
         if not required <= seen:
             raise ValueError('Incomplete plugin ZIP')
         for name in ('plugin.json', 'package.json'):

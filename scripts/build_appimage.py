@@ -68,7 +68,7 @@ def build():
     shutil.copy2(cursor.resolve(), internal / cursor.name)
     share = appdir / 'usr/share/helixsr-desktop'
     share.mkdir(parents=True)
-    for name in ('LICENSE', 'DESKTOP_GUIDE.md', 'DESKTOP_NOTICES.md', 'THIRD_PARTY_NOTICES.md'):
+    for name in ('LICENSE', 'DESKTOP_GUIDE.md', 'OPTISCALER_GUIDE.md', 'DESKTOP_NOTICES.md', 'THIRD_PARTY_NOTICES.md'):
         shutil.copy2(ROOT / name, share / name)
     licenses = share / 'licenses'
     licenses.mkdir()

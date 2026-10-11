@@ -6,6 +6,7 @@ import os
 import re
 import time
 from library import text, read_json, vdf, steam_roots
+from optiscaler_setup import setup_report
 
 
 def flag(value):
@@ -101,6 +102,8 @@ def awareness(game, tree, home, route, target=None):
         for name in names:
             lower = name.lower()
             p = d / name
+            if lower == 'optiscaler.ini' and (p.is_symlink() or not p.is_file()):
+                continue
             if lower == 'optiscaler.ini':
                 configs.append(p)
                 section = re.search(r'(?ims)^\[FrameGen\]\s*(.*?)(?=^\[|\Z)', text(p, 256 << 10))
@@ -202,10 +205,11 @@ def awareness(game, tree, home, route, target=None):
         evidence_state = 'recent running-process log reports neural output; visual/stability check required'
     elif any(x['path'].lower().endswith('helixsr.log') for x in logs):
         evidence_state = 'historical log available; current runtime unverified'
-    configured_helix = any(re.search(r'(?im)^\s*FfxDx12(?:SR)?Path\s*=\s*[^\r\n]*helixsr', text(p)) for p in configs)
+    setup = setup_report(target, route, options, opti_files)
+    configured_helix = setup['configured']
     return dict(optiscaler=dict(present=bool(opti_files or configs), dlls=opti_files,
                                configs=[str(p) for p in configs], involved=route == 'optiscaler' or configured_helix,
-                               helix_configured=configured_helix, runtime=opti_runtime),
+                               helix_configured=configured_helix, runtime=opti_runtime, setup=setup),
                 framegen=fg, framegen_summary='No supported per-game evidence' if not fg else 'See source-specific evidence below',
                 helix_runtime=evidence_state, processes=processes, logs=logs,
                 launch_options=options, observed_at=time.time())

@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases) and download **HelixSR-Decky-0.1.3.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
+3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.6.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -91,3 +91,5 @@ For **HelixSR inside a game**, and troubleshooting:
 Use [GitHub Issues](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new/choose). Include the game, plugin/HelixSR versions, SteamOS, Proton, route, OptiScaler and FG setup, steps, expected result and actual result. Paste only a short sanitized diagnostic excerpt. Reports are public: remove usernames, account details and private paths; never attach credentials, full home-folder data or generated network files. No email address is required.
 
 Reports are assigned to the project owner. The owner can choose **Watch → All Activity**. GitHub inbox and email delivery follow the owner's [notification preferences](https://docs.github.com/en/subscriptions-and-notifications/concepts/about-notifications).
+
+For exact OptiScaler setup, missing DLSS input, overlay shortcuts and settings retention, see the [OptiScaler guide](OPTISCALER_GUIDE.md).

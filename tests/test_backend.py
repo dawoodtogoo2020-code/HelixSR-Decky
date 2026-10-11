@@ -675,8 +675,8 @@ class AwarenessTests(Fixtures):
               'FfxDx12SRPath=Z:\\games\\HelixSR\\helixsr_upscaler.dll\n')
         data = self.inspect()
         self.assertEqual(data['route'], 'direct')
-        self.assertTrue(data['optiscaler']['helix_configured'])
-        self.assertTrue(data['optiscaler']['involved'])
+        self.assertFalse(data['optiscaler']['helix_configured'])
+        self.assertFalse(data['optiscaler']['involved'])
         self.assertEqual(data['optiscaler']['runtime'], 'unknown')
 
     def inspect(self, processes=None):
@@ -1070,6 +1070,186 @@ class LatestCoordinatorTests(Fixtures):
 
 
 class TransactionTests(Fixtures):
+    def test_selected_executable_requires_own_dx12_evidence(self):
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        write(self.root / 'Game.exe', pe() + b'largest DX11 binary' * 1024)
+        write(self.root / 'UnusedDX12.exe', pe(dx12=True))
+        data = self.m.assess(self.game)
+        self.assertEqual(Path(data['main_exe']).name, 'Game.exe')
+        self.assertTrue(data['dx12_confirmation_needed'])
+
+    def install_overlay_fixture(self):
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        package = self.package()
+        self.action('install')
+        return package
+
+    def edit_overlay_fixture(self):
+        config = self.root / 'OptiScaler.ini'
+        content = config.read_bytes().replace(b'Dx12Upscaler=fsr31', b'Dx12Upscaler=xess')
+        content = content.replace(b'FfxDx12Path=Z:', b'FfxDx12Path=user:')
+        content = content.replace(b'\n', b'\r\n')
+        content += b'; user comment\r\n[FrameGeneration]\r\nFGType=none\r\nEnabled=false\r\n[Menu]\r\nOverlayMenuKey=0x24\r\n'
+        write(config, content)
+        fake = b'; user NVAPI choices\r\n[Settings]\r\nEnable=true\r\n'
+        write(self.root / 'fakenvapi.ini', fake)
+        return content, fake
+
+    def test_overlay_update_preserves_choices_and_only_pins_backend_paths(self):
+        self.install_overlay_fixture()
+        baseline = self.m.record(self.game)['baseline']
+        edited, fake = self.edit_overlay_fixture()
+        preview = self.m.preview(self.game['id'], 'update')
+        self.assertIn('configuration edits are preserved', preview['warning'])
+        self.m.execute(preview['token'])
+        result = (self.root / 'OptiScaler.ini').read_bytes()
+        expected = edited.replace(b'Dx12Upscaler=xess', b'Dx12Upscaler=fsr31').replace(b'FfxDx12Path=user:', b'FfxDx12Path=Z:')
+        self.assertEqual(result, expected)
+        self.assertEqual((self.root / 'fakenvapi.ini').read_bytes(), fake)
+        self.assertEqual(self.m.record(self.game)['baseline'], baseline)
+
+    def test_configuration_record_failure_preserves_edited_live_files(self):
+        self.install_overlay_fixture()
+        edited, fake = self.edit_overlay_fixture()
+        prior = self.m.record(self.game)
+        original = manager.atomic_json
+        def fail_config(path, value):
+            if Path(path).name.startswith('config-'):
+                raise OSError('configuration record storage failed')
+            return original(path, value)
+        with patch('manager.atomic_json', side_effect=fail_config), self.assertRaisesRegex(OSError, 'storage failed'):
+            self.action('disable')
+        self.assertEqual((self.root / 'OptiScaler.ini').read_bytes(), edited)
+        self.assertEqual((self.root / 'fakenvapi.ini').read_bytes(), fake)
+        self.assertEqual(self.m.record(self.game), prior)
+
+    def test_update_failure_rolls_back_exact_configuration_and_record(self):
+        self.install_overlay_fixture()
+        edited, fake = self.edit_overlay_fixture()
+        prior = self.m.record(self.game)
+        original = self.m.copy_atomic
+        failed = False
+        def fail_after_copy(source, dest, digest=None):
+            nonlocal failed
+            original(source, dest, digest)
+            if not failed:
+                failed = True
+                raise OSError('payload replacement failed')
+        with patch.object(self.m, 'copy_atomic', side_effect=fail_after_copy), self.assertRaisesRegex(OSError, 'replacement failed'):
+            self.action('update')
+        self.assertEqual((self.root / 'OptiScaler.ini').read_bytes(), edited)
+        self.assertEqual((self.root / 'fakenvapi.ini').read_bytes(), fake)
+        self.assertEqual(self.m.record(self.game), prior)
+
+    def test_malformed_saved_configuration_container_blocks(self):
+        self.install_overlay_fixture()
+        rec = self.m.record(self.game)
+        for invalid in (None, [], {'unknown.ini': {'content': '', 'sha256': 'a' * 64}},
+                        {'dxgi.dll': {'content': '', 'sha256': 'a' * 64}}):
+            rec['saved_configs'] = invalid
+            manager.atomic_json(self.m.record_path(self.game), rec)
+            self.assertEqual(self.m.assess_safe(self.game)['compatibility'], 'blocked')
+
+    def test_malformed_configuration_blocks_and_misplaced_key_never_changes_payload(self):
+        self.install_overlay_fixture()
+        config = self.root / 'OptiScaler.ini'
+        config.write_text('[Upscalers]\nDx12Upscaler=fsr31\nDx12Upscaler=xess\n')
+        with self.assertRaises(ValueError):
+            self.action('disable')
+        config.write_text('[Other]\nDx12Upscaler=xess\n')
+        before = config.read_bytes()
+        proxy = (self.root / 'dxgi.dll').read_bytes()
+        with self.assertRaisesRegex(ValueError, 'misplaced'):
+            self.action('update')
+        self.assertEqual(config.read_bytes(), before)
+        self.assertEqual((self.root / 'dxgi.dll').read_bytes(), proxy)
+
+    def test_overlay_disable_enable_remove_keeps_configuration_records(self):
+        self.install_overlay_fixture()
+        edited, fake = self.edit_overlay_fixture()
+        self.action('disable')
+        rec = self.m.record(self.game)
+        self.assertFalse((self.root / 'OptiScaler.ini').exists())
+        self.assertEqual(rec['saved_configs']['OptiScaler.ini']['content'].encode(), edited)
+        self.action('enable')
+        restored = (self.root / 'OptiScaler.ini').read_bytes()
+        self.assertIn(b'OverlayMenuKey=0x24\r\n', restored)
+        self.assertIn(b'FGType=none\r\nEnabled=false\r\n', restored)
+        self.assertEqual((self.root / 'fakenvapi.ini').read_bytes(), fake)
+        self.action('remove')
+        self.assertFalse(self.m.record(self.game))
+        records = list((self.m.companion(self.game) / 'records').glob('config-*.json'))
+        contents = [manager.load_json(path)['configurations']['OptiScaler.ini']['content'].encode() for path in records]
+        self.assertIn(edited, contents)
+        self.assertIn(restored, contents)
+        self.assertFalse((self.root / 'OptiScaler.ini').exists())
+
+    def test_overlay_edit_after_preview_blocks_without_discarding_edit(self):
+        self.install_overlay_fixture()
+        token = self.m.preview(self.game['id'], 'disable')['token']
+        edited, _ = self.edit_overlay_fixture()
+        with self.assertRaisesRegex(ValueError, 'changed since preview'):
+            self.m.execute(token)
+        self.assertEqual((self.root / 'OptiScaler.ini').read_bytes(), edited)
+
+    def test_overlay_binary_and_network_drift_still_block(self):
+        self.install_overlay_fixture()
+        for rel in ('dxgi.dll', 'fakenvapi.dll', 'HelixSR/helixsr_weights.bin'):
+            with self.subTest(rel=rel):
+                path = self.root / rel
+                original = path.read_bytes()
+                write(path, original + b'tamper')
+                with self.assertRaisesRegex(ValueError, 'Managed files changed'):
+                    self.m.preview(self.game['id'], 'remove')
+                write(path, original)
+
+    def test_overlay_invalid_utf8_oversized_and_missing_configs_block(self):
+        self.install_overlay_fixture()
+        path = self.root / 'OptiScaler.ini'
+        original = path.read_bytes()
+        for content in (b'\xff', b'x' * (manager.CONFIG_LIMIT + 1), b'key=\x00'):
+            with self.subTest(content_length=len(content)):
+                write(path, content)
+                with self.assertRaises(ValueError):
+                    self.m.preview(self.game['id'], 'disable')
+        path.unlink()
+        with self.assertRaises(ValueError):
+            self.m.preview(self.game['id'], 'disable')
+        write(path, original)
+
+    def test_overlay_symlink_and_hardlink_configs_block(self):
+        self.install_overlay_fixture()
+        path = self.root / 'OptiScaler.ini'
+        outside = write(self.base / 'foreign.ini', path.read_bytes())
+        path.unlink()
+        try:
+            path.symlink_to(outside)
+        except OSError:
+            pass
+        else:
+            with self.assertRaisesRegex(ValueError, 'Symlink'):
+                self.m.preview(self.game['id'], 'disable')
+            path.unlink()
+        os.link(outside, path)
+        with self.assertRaisesRegex(ValueError, 'Unsafe managed configuration'):
+            self.m.preview(self.game['id'], 'disable')
+
+    def test_retained_config_change_after_preview_blocks_enable(self):
+        self.install_overlay_fixture()
+        self.edit_overlay_fixture()
+        self.action('disable')
+        token = self.m.preview(self.game['id'], 'enable')['token']
+        rec = self.m.record(self.game)
+        saved = rec['saved_configs']['OptiScaler.ini']
+        saved['content'] += '; another edit\n'
+        import hashlib
+        saved['sha256'] = hashlib.sha256(saved['content'].encode()).hexdigest()
+        manager.atomic_json(self.m.record_path(self.game), rec)
+        with self.assertRaisesRegex(ValueError, 'changed since preview'):
+            self.m.execute(token)
+
     def test_optiscaler_install_disable_enable_remove(self):
         self.native.unlink()
         write(self.root / 'nvngx_dlss.dll', pe())

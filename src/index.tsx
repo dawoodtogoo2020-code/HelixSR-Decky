@@ -42,7 +42,9 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
   appid?: string;
   reasons: string[]; route: string | null; inputs: string[]; managed: boolean; enabled: boolean;
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
-  optiscaler: { present: boolean; involved: boolean; helix_configured?: boolean; runtime: string; dlls: string[] };
+  main_exe?: string; target?: string;
+  optiscaler: { present: boolean; involved: boolean; helix_configured?: boolean; runtime: string; dlls: string[];
+    setup?: { checks: string[]; backend: string; override: string; overlay_shortcut: string; settings: Record<string, string>; guide: string } };
   framegen: FG[]; framegen_summary: string; helix_runtime: string;
   launch_options: string; logs?: { path: string; modified: number; excerpt: string }[] };
 type Release = { version?: string; error?: string; checked_at?: number; page?: string };
@@ -66,8 +68,10 @@ const previewAction = callable<[string, string, boolean], Preview>("preview_acti
 const applyAction = callable<[string], { message: string }>("apply_action");
 const previewLatest = callable<[string, boolean], Preview>("preview_latest");
 const installLatest = callable<[string], Job>("install_latest");
-const rememberLaunch = callable<[string, string, string], boolean>("remember_launch_options");
-const ownedLaunch = callable<[string], { before: string; after: string } | null>("owned_launch_options");
+type LaunchIntent = { nonce: string; before: string; after: string; restore: boolean };
+const prepareLaunch = callable<[string, string, string, boolean], LaunchIntent>("prepare_launch_options");
+const finalizeLaunch = callable<[string, string, string], unknown>("finalize_launch_options");
+const ownedLaunch = callable<[string, string], { before: string; after: string; pending?: LaunchIntent } | null>("owned_launch_options");
 
 async function liveLaunchOptions(appid: number): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -87,6 +91,7 @@ function chooseGame(id: string) {
 }
 // Steam can unmount the quick-access panel when a dialog opens. Keep the lock across mounts.
 let interactionBusy = false;
+let reviewApplying = false;
 let dialogShowing = false;
 let interactionAfter = 0;
 const interactionListeners = new Set<() => void>();
@@ -105,16 +110,23 @@ function nativeUpdateFinished(name: string) {
   pluginInstaller.finished(name);
 }
 function finishInteraction() {
+  if (reviewApplying) { dialogShowing = false; return; }
   interactionBusy = false; dialogShowing = false;
   interactionAfter = Date.now() + 700;
   interactionListeners.forEach(fn => fn());
 }
 async function interact(fn: () => Promise<void>) {
-  if (interactionBusy || Date.now() < interactionAfter) return;
+  if (interactionBusy || reviewApplying || Date.now() < interactionAfter) return;
   interactionBusy = true;
   interactionListeners.forEach(listener => listener());
   try { await fn(); }
   finally { if (!dialogShowing) finishInteraction(); }
+}
+function beginReview() {
+  if (reviewApplying) return false;
+  reviewApplying = true; interactionBusy = true;
+  interactionListeners.forEach(listener => listener());
+  return true;
 }
 function openDialog(modal: ReactNode) {
   dialogShowing = true;
@@ -192,7 +204,7 @@ function Content() {
   const [importOpen, setImportOpen] = useState(!!pendingFolders.length);
   const [launcher, setLauncher] = useState(selectedLauncher);
   const [importMessage, setImportMessage] = useState(launcherImportMessage);
-  const [modalOpen, setModalOpen] = useState(interactionBusy);
+  const [modalOpen, setModalOpen] = useState(interactionBusy || reviewApplying || pluginInstaller.locked);
   const [pluginUpdate, setPluginUpdate] = useState(latestPluginStatus);
   const [pluginInstallMessage, setPluginInstallMessage] = useState(pluginInstaller.message);
   const selectedRef = useRef(selected);
@@ -206,7 +218,7 @@ function Content() {
   }, []);
 
   useEffect(() => {
-    const changed = () => { setModalOpen(interactionBusy || pluginInstaller.locked); setPluginInstallMessage(pluginInstaller.message); };
+    const changed = () => { setModalOpen(interactionBusy || reviewApplying || pluginInstaller.locked); setPluginInstallMessage(pluginInstaller.message); };
     interactionListeners.add(changed); changed();
     return () => { interactionListeners.delete(changed); };
   }, []);
@@ -302,12 +314,12 @@ function Content() {
         <p>Files: {p.files.join(", ")}</p>
       </div>}
       strOKButtonText={data?.license_accepted ? "Install / update HelixSR" : "Accept terms and install"}
-      onOK={() => void run(async () => {
+      onOK={() => { if (!beginReview()) return; void run(async () => {
         await setLicense(true);
         const job = await installLatest(p.token);
         watchJobs([job]);
         setData(d => d ? { ...d, license_accepted: true } : d);
-      })} />);
+      }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
   }
 
   async function action(name: string) {
@@ -319,39 +331,44 @@ function Content() {
         <p>{p.warning}</p><p>Route: {p.route}. In game: select {p.select_upscaler}.</p>
         <p>Files: {p.files.join(", ")}</p>
       </div>} strOKButtonText="Apply reviewed change" strCancelButtonText="Cancel"
-      onOK={() => { void run(() => applyAction(p.token)).then(result => {
+      onOK={() => { if (!beginReview()) return; void run(() => applyAction(p.token)).then(async result => {
         if (result) toaster.toast({ title: "HelixSR Decky", body: result.message });
-        void refresh();
-      }); }} />);
+        await refresh();
+      }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
   }
   async function launchChange(restore = false) {
     if (!game?.appid) return;
     const appid = Number(game.appid);
     const before = await run(() => liveLaunchOptions(appid));
     if (before === undefined) return;
-    const receipt = await run(() => ownedLaunch(game.id));
+    const receipt = await run(() => ownedLaunch(game.id, before));
+    if (receipt === undefined) return;
     let after: string;
     try {
-      if (restore) {
+      if (receipt?.pending) {
+        if (receipt.pending.restore !== restore) throw new Error("Finish the pending launch-option change using the same action first.");
+        after = receipt.pending.after;
+      } else if (restore) {
         if (!receipt || receipt.after !== before) throw new Error("Launch options changed outside the plugin. Review them in Steam.");
         after = receipt.before;
       } else {
-        if (receipt && before === receipt.after) throw new Error("Plugin override is already applied.");
         after = proxyOptions(before);
+        if (after === before) { toaster.toast({ title: "HelixSR Decky", body: "OptiScaler proxy launch option is already configured" }); return; }
       }
     } catch (e) { setError(String(e)); return; }
     openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={restore ? "Restore previous launch options" : "Enable Proton OptiScaler proxy"}
       strDescription={<div style={{ overflowWrap: "anywhere" }}><p>Before: {before || "empty"}</p><p>After: {after || "empty"}</p></div>}
-      onOK={() => void run(async () => {
+      onOK={() => { if (!beginReview()) return; void run(async () => {
         const current = await liveLaunchOptions(appid);
         if (current !== before) throw new Error("Live launch options changed since preview");
+        const intent = await prepareLaunch(game.id, before, after, restore);
         SteamClient.Apps.SetAppLaunchOptions(appid, after);
         const saved = await liveLaunchOptions(appid);
         if (saved !== after) throw new Error("Steam did not confirm saved launch options");
-        await rememberLaunch(game.id, restore ? after : before, after);
+        await finalizeLaunch(game.id, intent.nonce, saved);
         toaster.toast({ title: "HelixSR Decky", body: "Steam launch options saved and verified" });
         await refresh();
-      })} />);
+      }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
   }
   async function updatePlugin(resume = false) {
     if (typeof DeckyBackend === "undefined" || typeof DeckyBackend.callable !== "function" || !DeckyBackend.addEventListener || !DeckyBackend.removeEventListener) {
@@ -437,8 +454,8 @@ function Content() {
         HelixSR has no frame generation of its own. Settings and runtime evidence are separate.
       </div></PanelSectionRow>
       {game.route === "optiscaler" && <PanelSectionRow><div style={infoStyle}>
-        Proton may require WINEDLLOVERRIDES="dxgi=n,b" before your existing launch command.
-        Preserve other launch options. Verify OptiScaler.log after launch.
+        Target: {game.main_exe || game.target || "unknown"}{"\n"}
+        {(game.optiscaler.setup?.checks || []).join("\n\n")}
       </div></PanelSectionRow>}
       {game.route === "optiscaler" && game.appid && <>
         <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>
@@ -447,6 +464,7 @@ function Content() {
       <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiagnostics(!diagnostics)}>{diagnostics ? "Hide diagnostics" : "Show diagnostics and logs"}</ButtonItem></PanelSectionRow>
       {diagnostics && <PanelSectionRow><div style={infoStyle}>
         Folder: {game.folder}{"\n"}Launch options: {game.launch_options || "none detected"}{"\n"}
+        {Object.entries(game.optiscaler.setup?.settings || {}).map(([key, value]) => `${key}=${value}`).join("\n")}{"\n"}
         {(game.logs || []).map(l => `${l.path}\n${new Date(l.modified * 1000).toLocaleString()}\n${l.excerpt}`).join("\n\n") || "No supported logs found"}
       </div></PanelSectionRow>}
     </PanelSection>}

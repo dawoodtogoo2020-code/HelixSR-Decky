@@ -190,6 +190,18 @@ class ReleaseValidationTests(PluginUpdateFixtures):
         with self.assertRaisesRegex(ValueError, 'Incomplete'):
             plugin_updates.validate_zip(path, '0.1.1')
 
+    def test_setup_release_requires_its_new_runtime_modules(self):
+        required = ('optiscaler_setup', 'launch_receipts', 'operation_lock', 'host_environment')
+        extra = {f'{plugin_updates.FOLDER}/py_modules/{name}.py': b'# fixture\n' for name in required}
+        path = self.root / 'setup-release.zip'
+        path.write_bytes(archive_bytes(self.root, version='0.1.6', extra=extra))
+        plugin_updates.validate_zip(path, '0.1.6')
+        for name in required:
+            path.write_bytes(archive_bytes(self.root, version='0.1.6', extra=extra,
+                             omit=(f'{plugin_updates.FOLDER}/py_modules/{name}.py',)))
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'Incomplete'):
+                plugin_updates.validate_zip(path, '0.1.6')
+
 
 class SchedulingAndNetworkTests(PluginUpdateFixtures):
     def test_auto_toggle_persists_and_due_uses_retry_and_success_intervals(self):
