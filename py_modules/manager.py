@@ -26,6 +26,8 @@ from awareness import awareness, active_processes, text_tail
 from operation_lock import operation_lock, game_locked
 from host_environment import host_environment
 from build_runtime import wine_candidates
+from model_variants import (DEFAULT_VARIANT, catalog, package_selection, same_release,
+                            select_variant, valid_variant, variant_label, verify_recipe, verify_outputs)
 
 REPO = 'lonewolf0622/HelixSR'
 API = f'https://api.github.com/repos/{REPO}/releases/latest'
@@ -67,10 +69,12 @@ def validate_release(release):
     return release
 
 
-def license_key(release):
+def license_key(release, variant_id=None):
     if not isinstance(release, dict) or not release.get('version') or not release.get('sha256'):
         return None
-    return {'terms': LICENSE_REV, 'version': release['version'], 'release_sha256': release['sha256']}
+    selected = select_variant(variant_id)
+    return {'terms': LICENSE_REV, 'version': release['version'], 'release_sha256': release['sha256'],
+            'variant_id': selected['id'], 'adapter': selected['adapter']}
 
 
 def sha(path):
@@ -467,6 +471,11 @@ class Manager:
         """Validate untrusted package metadata without changing either game."""
         if not isinstance(record, dict):
             return None
+        if 'variant' in record and not valid_variant(record['variant']):
+            return None
+        if 'variant' in record and (not isinstance(record.get('files'), dict)
+                                    or 'helixsr_setup.json' not in record['files']):
+            return None
         path, release_digest = record.get('path'), record.get('release_sha256')
         prepared = record.get('prepared_at', 0)
         files = record.get('files')
@@ -522,6 +531,8 @@ class Manager:
             raise ValueError('Unknown package route')
         path, record = package[1], package[2]
         required = set(PACKAGE_FILES if route in (None, 'optiscaler') else NETWORK + (DLL,))
+        if record.get('variant'):
+            required.add('helixsr_setup.json')
         if not required.issubset(record['files']):
             return False
         framegen_name = 'amd-fsr/' + AMD_FG
@@ -529,19 +540,29 @@ class Manager:
         if framegen.is_file():
             required.add(framegen_name)
         try:
-            return all(not self._symlink_in_path(path / name)
+            verified = all(not self._symlink_in_path(path / name)
                        and (path / name).is_file() and sha(path / name) == record['files'][name]
                        for name in record['files'])
-        except OSError:
+            if verified and record.get('variant'):
+                verify_outputs(path)
+                api = pe_info(path / DLL)
+                verified = api['arch'] == 'x64' and bool(api['ffx'])
+            return verified
+        except (OSError, ValueError, KeyError, TypeError, struct.error):
             return False
 
-    def package(self, game, route=None, release=None):
+    def package(self, game, route=None, release=None, variant_id=None, selection=None, installed=None):
         # Packages remain on the same filesystem as the selected game.
+        selected = select_variant(variant_id)
         choices = []
-        for record in self.cfg.get('packages', {}).values():
-            candidate = self._package_record(record, game)
-            if candidate:
-                choices.append((*candidate, 0))
+        for namespace in ('packages', 'variant_packages_v1'):
+            records = self.cfg.get(namespace, {})
+            if not isinstance(records, dict):
+                continue
+            for record in records.values():
+                candidate = self._package_record(record, game)
+                if candidate:
+                    choices.append((*candidate, 0))
         # A separate frontend has separate settings, but package records are kept
         # beside games. Read records only from games already discovered/imported.
         seen = set()
@@ -551,25 +572,91 @@ class Manager:
                 companion = self.companion(known)
                 record_path = companion / 'records/package.json'
                 key = str(record_path)
-                if (key in seen or self._symlink_in_path(record_path)
-                        or not record_path.is_file() or record_path.stat().st_size > 1 << 20):
+                if key in seen:
                     continue
                 seen.add(key)
-                record = load_json(record_path)
-                candidate = self._package_record(record, game, companion)
-                if candidate:
-                    choices.append((*candidate, 1))
+                records = []
+                if (not self._symlink_in_path(record_path) and record_path.is_file()
+                        and record_path.stat().st_size <= 1 << 20):
+                    try:
+                        records.append(load_json(record_path))
+                    except (OSError, ValueError, TypeError, RecursionError):
+                        pass
+                indexed = self.package_index(companion / 'records/packages-v1.json')
+                if indexed is not None:
+                    records.extend(indexed)
+                for record in records:
+                    candidate = self._package_record(record, game, companion)
+                    if candidate:
+                        choices.append((*candidate, 1))
             except (ValueError, OSError, RecursionError, KeyError, TypeError):
                 continue
         if release is not None:
             choices = [choice for choice in choices
                        if choice[2].get('version') == release.get('version')
-                       and choice[2].get('release_sha256') == release.get('sha256')]
+                       and choice[2].get('release_sha256') == release.get('sha256')
+                       and valid_variant(choice[2].get('variant'))]
+        # Legacy caches remain usable for recovery/enable, without claiming model
+        # provenance. Future release caches must carry a reviewed variant identity.
+        choices = [choice for choice in choices
+                   if (valid_variant(choice[2].get('variant'))
+                       and choice[2]['variant']['id'] == selected['id'])
+                   or ('variant' not in choice[2] and choice[0] <= (1, 8, 1)
+                       and selected['id'] == DEFAULT_VARIANT)]
+        if selection is not None:
+            choices = [choice for choice in choices if package_selection(choice[2]) == selection]
+        elif installed is not None:
+            choices = [choice for choice in choices if choice[2]['version'] == installed.get('version')
+                       and self.matches_installed_payload(game, installed, choice[2])]
+            if len({package_selection(choice[2]) for choice in choices}) != 1:
+                return None
         if not choices:
             return None
         choices.sort(key=lambda x: (x[0], x[2].get('prepared_at', 0), x[3]), reverse=True)
         return next((choice[:3] for choice in choices
                      if self._verify_package_payloads(choice[:3], route)), None)
+
+    def package_index(self, path):
+        try:
+            if self._symlink_in_path(path) or not path.is_file() or path.stat().st_size > 1 << 20:
+                return None
+            index = load_json(path)
+            records = index.get('packages') if isinstance(index, dict) and index.get('schema') == 1 else None
+            return records if isinstance(records, list) and len(records) <= 256 else None
+        except (ValueError, OSError, RecursionError, TypeError):
+            return None
+
+    def matches_installed_payload(self, game, installed, package_record):
+        """Recover an old enabled install's identity from its owned output hashes."""
+        if not installed.get('enabled'):
+            return False
+        try:
+            root = Path(game['folder'])
+            pairs = []
+            if installed['route'] == 'direct':
+                for target in map(Path, installed['targets']):
+                    pairs.append((str(target.relative_to(root)), DLL))
+                    pairs.extend((str((target.parent / name).relative_to(root)), name) for name in NETWORK)
+            elif installed['route'] == 'optiscaler':
+                game_target = Path(installed['target'])
+                target = game_target / 'HelixSR'
+                pairs = [(str((target / name).relative_to(root)), DLL)
+                         for name in ('helixsr.dll', 'helixsr_upscaler.dll')]
+                pairs += [(str((target / name).relative_to(root)), name) for name in NETWORK]
+                pairs += [(str((game_target / 'dxgi.dll').relative_to(root)), 'optiscaler/OptiScaler.dll'),
+                          (str((game_target / 'fakenvapi.dll').relative_to(root)), 'optiscaler/fakenvapi.dll'),
+                          (str((target / 'amd_fidelityfx_upscaler_dx12.amd.dll').relative_to(root)),
+                           'amd-fsr/amd_fidelityfx_upscaler_dx12.dll')]
+                fg_rel = str((target / AMD_FG).relative_to(root))
+                fg_hash = package_record['files'].get('amd-fsr/' + AMD_FG)
+                if installed['current'].get(fg_rel) != fg_hash:
+                    return False
+                if fg_hash:
+                    pairs.append((fg_rel, 'amd-fsr/' + AMD_FG))
+            return bool(pairs) and all(installed['current'].get(rel) == package_record['files'][name]
+                                       for rel, name in pairs)
+        except (ValueError, TypeError, KeyError):
+            return False
 
     def refresh(self):
         entries, warnings = discover(self.home, self.cfg.get('imports', []))
@@ -579,6 +666,7 @@ class Manager:
             games.append(self.assess_safe(game, detailed=False))
         release = load_release(self.settings)
         return dict(games=games, warnings=warnings, release=release,
+                    model_catalog=catalog(),
                     license_accepted=bool(self.cfg.get('license')) and self.cfg.get('license') == license_key(release),
                     jobs=list(self.jobs.values()))
 
@@ -719,6 +807,8 @@ class Manager:
                     managed=bool(rec), enabled=rec.get('enabled', False), installed_version=rec.get('version') or
                     next((pe_info(p).get('helix_version') for p in targets if pe_info(p)['helix']), None),
                     legacy=legacy, package_version=package[2]['version'] if package else None,
+                    installed_model=variant_label(rec.get('variant')) if rec or legacy else None,
+                    installed_variant=rec.get('variant', {}).get('id') if valid_variant(rec.get('variant')) else None,
                     recovery_available=self.recovery_available(game),
                     dx12_confirmation_needed=route == 'optiscaler' and not (main and pe_info(main)['dx12']),
                     **aware)
@@ -753,11 +843,19 @@ class Manager:
         self.save()
         return self.refresh()
 
-    def accept_license(self, accepted):
+    def accept_license(self, accepted, token=None):
         release = self.check_update() if accepted else {}
         if accepted and release.get('error'):
             raise ValueError(release['error'])
-        key = license_key(release) if accepted else None
+        selected = None
+        if accepted and token:
+            reviewed = self.previews.get(token)
+            if not reviewed or reviewed.get('action') != 'latest' or time.time() > reviewed['expires']:
+                raise ValueError('Installation review expired; review the change again')
+            if not same_release(release, reviewed['release']):
+                raise ValueError('Upstream release changed since review; review Install or Update again')
+            selected = reviewed['variant_id']
+        key = license_key(release, selected) if accepted else None
         if accepted and not key:
             raise ValueError('Check upstream release metadata before accepting preparation terms')
         self.cfg['license'] = key
@@ -827,8 +925,12 @@ class Manager:
         atomic_json(self.settings / 'release.json', old)
         return old
 
-    def preview_latest(self, gid, dx12_confirmed=False):
+    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None):
         with self.lock:
+            selected = select_variant(variant_id)
+            release = self.check_update()
+            if release.get('error') or not release.get('version'):
+                raise ValueError(release.get('error') or 'Check upstream updates first')
             game = self.get_game(gid)
             data = self.assess(game)
             if data['compatibility'] != 'candidate':
@@ -840,8 +942,10 @@ class Manager:
                 self.previews.pop(self.preview(gid, 'adopt', dx12_confirmed)['token'], None)
             token = uuid.uuid4().hex
             self.previews[token] = dict(game=gid, action='latest', expires=time.time()+120,
+                                       release=dict(release), variant_id=selected['id'],
                                        fingerprint=self.fingerprint(game, data, include_package=False))
             return dict(token=token, name=game['name'], action='latest', route=data['route'],
+                        model=selected['label'], variant_id=selected['id'], release_version=release['version'],
                         files=self.planned_paths(game, data, 'latest'),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
                         warning='Download required files, prepare the local network and install or update HelixSR for this game. Existing native HelixSR is imported first. Close the game. Frame generation is preserved.')
@@ -863,11 +967,15 @@ class Manager:
             if kind not in ('prepare', 'install_latest'):
                 raise ValueError('Unsupported background operation')
             release = load_release(self.settings)
-            if not self.cfg.get('license') or self.cfg.get('license') != license_key(release):
+            if preview and not same_release(release, preview['release']):
+                raise ValueError('Upstream release changed since review; review Install or Update again')
+            selected = select_variant(preview.get('variant_id') if preview else None)
+            if not self.cfg.get('license') or self.cfg.get('license') != license_key(release, selected['id']):
                 raise ValueError('Accept local network preparation terms first')
             self.cancel.clear()
             job = {'id': uuid.uuid4().hex, 'kind': kind, 'game': game['name'], 'gid': gid, 'state': 'running',
-                   'message': 'Starting', 'started_at': time.time(), 'log': ''}
+                   'message': 'Starting', 'started_at': time.time(), 'log': '',
+                   'variant_id': selected['id'], 'reviewed_release': dict(release)}
             self.jobs[job['id']] = job
 
             def run():
@@ -927,13 +1035,21 @@ class Manager:
         release = self.check_update(True)
         if release.get('error') or not release.get('version'):
             raise ValueError(release.get('error', 'Check upstream updates first'))
-        if self.cfg.get('license') != license_key(release):
+        selected = select_variant(job.get('variant_id'))
+        if self.cfg.get('license') != license_key(release, selected['id']):
             raise ValueError('Upstream release changed; review and accept its terms before preparation')
-        cached = self.package(game, release=release)
+        if job.get('reviewed_release') and not same_release(release, job['reviewed_release']):
+            raise ValueError('Upstream release changed since review; review Install or Update again')
+        cached = self.package(game, release=release, variant_id=selected['id'])
         if cached:
             job['message'] = 'Reusing the verified prepared package on this drive'
             return cached
         companion = self.companion(game)
+        index_path = companion / 'records/packages-v1.json'
+        if self._symlink_in_path(index_path) or self._symlink_in_path(companion / 'packages'):
+            raise ValueError('Prepared package records cannot use symlink directories')
+        if index_path.exists() and (not index_path.is_file() or index_path.stat().st_size > 1 << 20):
+            raise ValueError('Prepared package index is unsafe or too large; review its installation records')
         work = companion / 'staging' / job['id']
         work.mkdir(parents=True, exist_ok=False)
         archive = work / 'release.zip'
@@ -968,6 +1084,7 @@ class Manager:
             setup = (package / 'helixsr-setup.sh').read_text()
             build = package / 'decky-build-only.sh'
             converter = (package / 'setup/helixsr_setup.py').read_text()
+            model = verify_recipe(package, selected['id'])
             env = dict(os.environ, XDG_DATA_HOME=str(companion / 'dependencies'),
                        TMPDIR=str(work / 'tmp'), PIP_CACHE_DIR=str(companion / 'dependencies/pip'),
                        HELIXSR_FORCE_PORTABLE='1', PYTHONUNBUFFERED='1')
@@ -1015,21 +1132,37 @@ class Manager:
                 if not (package / name).is_file() or (package / name).stat().st_size < 1024:
                     raise ValueError('Generated HelixSR model files are missing or incomplete. '
                                      'See the build log; this is not an internet connection error.')
+            verify_outputs(package)
+            api = pe_info(package / DLL)
+            if api['arch'] != 'x64' or not api['ffx']:
+                raise ValueError('Prepared HelixSR DLL has an unsupported installation interface')
             build.unlink()
-            final = companion / 'packages' / ('v' + release['version'])
+            final = companion / 'packages' / (selected['id'] + '-v' + release['version']
+                                              + '-' + release['sha256'][:12] + '-' + model['recipe_sha256'][:12])
             final.parent.mkdir(parents=True, exist_ok=True)
             if final.exists():
                 # A changed cache can be rebuilt without overwriting the previous owned path.
                 final = final.with_name(final.name + '-' + job['id'][:8])
             os.replace(package, final)
-            payloads = PACKAGE_FILES
+            payloads = PACKAGE_FILES + ('helixsr_setup.json',)
             if (final / 'amd-fsr' / AMD_FG).is_file():
                 payloads += ('amd-fsr/' + AMD_FG,)
             record = dict(version=release['version'], path=str(final), release_sha256=release['sha256'],
-                          files={n: sha(final / n) for n in payloads}, prepared_at=time.time())
-            self.cfg.setdefault('packages', {})[str(final)] = record
+                          files={n: sha(final / n) for n in payloads}, prepared_at=time.time(), variant=model)
+            namespace = 'packages' if selected['id'] == DEFAULT_VARIANT else 'variant_packages_v1'
+            self.cfg.setdefault(namespace, {})[str(final)] = record
             self.save()
-            atomic_json(companion / 'records/package.json', record)
+            # Older managers must never discover a future non-default model as
+            # an ordinary latest package through their legacy pointer/settings.
+            if selected['id'] == DEFAULT_VARIANT:
+                atomic_json(companion / 'records/package.json', record)
+            records = self.package_index(index_path)
+            if records is None and index_path.is_file():
+                durable_copy(index_path, index_path.with_name('packages-v1-corrupt-' + job['id'] + '.json'))
+            records = records or []
+            records = [r for r in records if self._package_record(r, game, companion)
+                       and r.get('path') != record['path']]
+            atomic_json(index_path, dict(schema=1, packages=(records + [record])[-256:]))
             for n in NETWORK:
                 (final / n).chmod(0o600)
             return version(record['version']), final, record
@@ -1057,6 +1190,7 @@ class Manager:
                             warning='Recover the interrupted transaction before any new installation.')
             data = self.assess(game)
             rec = self.record(game)
+            package = None
             if data['compatibility'] != 'candidate':
                 raise ValueError('; '.join(data['reasons']))
             if data['dx12_confirmation_needed'] and not dx12_confirmed and action in ('install', 'update'):
@@ -1066,9 +1200,15 @@ class Manager:
             if data['legacy'] and action != 'adopt':
                 raise ValueError('Import existing direct installation first')
             if action in ('install', 'update', 'enable'):
-                package = self.package(game, data['route'])
+                if 'variant' in rec and not valid_variant(rec['variant']):
+                    raise ValueError('Installed model identity needs review; use Update HelixSR with a supported model or remove it')
+                package = self.package(game, data['route'],
+                                       variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
+                                       selection=rec.get('package_selection') if action == 'enable' else None,
+                                       installed=rec if action == 'enable' else None)
                 if not package:
-                    raise ValueError('Prepare HelixSR on this drive first')
+                    raise ValueError('Exact installed package is unavailable; use Update HelixSR and review the change'
+                                     if action == 'enable' else 'Prepare HelixSR on this drive first')
                 if not self._verify_package_payloads(package, data['route']):
                     raise ValueError('Prepared package manifest is incomplete or changed. Rebuild required.')
                 for n, expected in package[2]['files'].items():
@@ -1085,11 +1225,12 @@ class Manager:
                     if not orig.is_file() or orig.is_symlink() or pe_info(orig)['helix'] or not pe_info(orig)['ffx']:
                         raise ValueError('Legacy installation lacks a verified original FidelityFX DLL')
             token = uuid.uuid4().hex
-            fingerprint = self.fingerprint(game, data)
+            fingerprint = self.fingerprint(game, data, package=package)
             self.previews[token] = dict(game=gid, action=action, fingerprint=fingerprint,
+                                       package_selection=package_selection(package[2]) if action in ('install', 'update', 'enable') else None,
                                        expires=time.time()+120, dx12=dx12_confirmed)
             return dict(token=token, action=action, name=game['name'], route=data['route'],
-                        files=self.planned_paths(game, data, action),
+                        files=self.planned_paths(game, data, action, package),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
                         warning=('Close the game. Originals are retained for disable/remove. '
                                  'Owned OptiScaler configuration edits are preserved in installation records; '
@@ -1119,6 +1260,7 @@ class Manager:
             package = self.package(game, data['route'])
         if package and include_package:
             files['package_path'] = str(package[1])
+            files['package_identity'] = package_selection(package[2])
             files['package_files'] = {n: sha(package[1] / n) for n in package[2]['files']}
         return hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
 
@@ -1178,7 +1320,12 @@ class Manager:
             self.rollback(game)
             return {'message': 'Interrupted transaction recovered'}
         data = self.assess(game)
-        package = self.package(game, data['route'])
+        rec = self.record(game)
+        package = None
+        if preview['action'] in ('install', 'update', 'enable'):
+            package = self.package(game, data['route'],
+                                   variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
+                                   selection=preview.get('package_selection'))
         if (data['compatibility'] != 'candidate'
                 or self.fingerprint(game, data, package=package) != preview['fingerprint']):
             raise ValueError('Game changed since preview; refresh and review again')
@@ -1191,7 +1338,13 @@ class Manager:
         if tx.exists():
             raise ValueError('Interrupted transaction exists; recover it first')
         if package is AUTO_PACKAGE:
-            package = self.package(game, data['route'])
+            rec = self.record(game)
+            package = None
+            if action in ('install', 'update', 'enable'):
+                package = self.package(game, data['route'],
+                                       variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
+                                       selection=rec.get('package_selection') if action == 'enable' else None,
+                                       installed=rec if action == 'enable' else None)
         paths = self.planned_paths(game, data, action, package)
         size = sum((root / p).stat().st_size for p in paths if (root / p).is_file())
         if shutil.disk_usage(root).free < size * 3 + (128 << 20):
@@ -1239,6 +1392,14 @@ class Manager:
                         previous['baseline'][str((target.parent / n).relative_to(root))] = None
                 previous['enabled'], previous['version'] = True, 'legacy'
             elif action in ('disable', 'remove'):
+                if action == 'disable' and not previous.get('package_selection'):
+                    # Preserve a legacy enabled installation's exact cache before
+                    # restoring its baseline. Already-disabled ambiguous records
+                    # require an explicit update instead of a guessed upgrade.
+                    with contextlib.suppress(ValueError, OSError, TypeError, KeyError):
+                        installed = self.package(game, data['route'], installed=previous)
+                        if installed:
+                            previous['package_selection'] = package_selection(installed[2])
                 self.retain_configs(game, previous, action)
                 self.restore_baseline(game, previous)
                 previous['enabled'] = False
@@ -1247,6 +1408,12 @@ class Manager:
                     raise ValueError('Prepared package unavailable')
                 self.retain_configs(game, previous, action)
                 previous['enabled'], previous['version'] = True, package[2]['version']
+                if package[2].get('variant'):
+                    previous['variant'] = package[2]['variant']
+                else:
+                    previous.pop('variant', None)
+                previous['package_selection'] = package_selection(package[2])
+                previous['release_sha256'] = package[2].get('release_sha256')
                 # Extend older managed records for newly introduced dependencies.
                 # Their paths were conflict-checked, snapshotted and journaled above.
                 for rel in paths:
@@ -1262,7 +1429,9 @@ class Manager:
             else:
                 atomic_json(self.record_path(game), previous)
             atomic_json(companion / 'records' / ('action-' + uuid.uuid4().hex + '.json'),
-                        dict(action=action, route=data['route'], version=previous['version'], verified=previous['current'], time=time.time()))
+                        dict(action=action, route=data['route'], version=previous['version'],
+                             variant=previous.get('variant'), package_selection=previous.get('package_selection'),
+                             verified=previous['current'], time=time.time()))
             journal.update(state='committed', committed_current=previous['current'],
                            committed_record=None if action == 'remove' else previous)
             atomic_json(tx / 'journal.json', journal)
@@ -1422,7 +1591,8 @@ class Manager:
                 for name in NETWORK:
                     self.copy_atomic(package_path / name, target.parent / name, package_record['files'][name])
                 self.write_managed_json(target.parent / 'helixsr-install.json',
-                            {'route': 'direct', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version')})
+                            {'route': 'direct', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
+                             'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')})
         else:
             target = Path(rec['target'])
             settings_path = package_path / 'optiscaler/OptiScaler.ini'
@@ -1458,4 +1628,5 @@ class Manager:
                 self.copy_atomic(package_path / name, target / 'HelixSR' / AMD_FG, package_record['files'][name])
             self.write_managed(target / 'OptiScaler.ini', configured_source)
             self.write_managed_json(target / 'HelixSR/helixsr-install.json',
-                        {'route': 'optiscaler', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version')})
+                        {'route': 'optiscaler', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
+                         'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')})

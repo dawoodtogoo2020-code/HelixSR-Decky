@@ -8,6 +8,8 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 
 ## Features
 
+* The Decky plugin and desktop app share a **HelixSR model** selector and display the installed model separately from the release and input route. Currently the reviewed choice is **Model E, sourced from NVIDIA DLSS 310.7.0**. DLSS 4 or FSR-derived networks are not selectable yet. Unknown conversion recipes stop before building or changing a game; updating the app can add reviewed model support. See [model support and future variants](MODEL_VARIANTS.md).
+
 * Checks this Decky plugin's own GitHub releases on startup and once a day, with a saved opt-out and manual check. Shows current/latest plugin versions separately from HelixSR. Downloads and verifies the update's SHA256, size, manifests, required modules and complete ZIP before opening Decky's confirmation. Plugin updates wait for game operations to finish; they do not update per-game HelixSR installations.
 * Discovers installed Steam games across library drives, Steam shortcuts with executable paths, Heroic, Legendary and Lutris installation records. **Import Games From → Import Now** rescans a selected launcher and reports found games, new entries and installation candidates without duplicates. Native and Flatpak launcher locations are supported. Import other Windows game folders through the file picker. Native Linux games, emulators and unresolved launcher wrappers remain unsupported or require a folder import.
 * Separates static compatibility candidates, managed file state and recent runtime evidence. HelixSR requires DirectX 12, x64 Windows game binaries through Proton and AMD RDNA 1 or newer. A DLL filename does not prove a game uses a supported renderer.

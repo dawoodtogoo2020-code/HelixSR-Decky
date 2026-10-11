@@ -5,15 +5,15 @@ HelixSR Desktop is a standalone Linux app. Decky Loader is optional. It manages 
 ## Download and open
 
 1. Switch your SteamOS device to Desktop Mode.
-2. Download **HelixSR-Desktop-0.1.4-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.4). Save it in a folder such as `Applications` under your own home folder.
+2. Download **HelixSR-Desktop-0.1.5-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.5). Save it in a folder such as `Applications` under your own home folder.
 3. In your file manager, right-click the AppImage, open **Properties → Permissions**, and enable **Is executable** (wording varies).
 4. Double-click the AppImage. Do not run it with sudo or as administrator.
 
 If your system cannot mount AppImages, open a terminal in its folder and run:
 
 ```sh
-chmod +x HelixSR-Desktop-0.1.4-x86_64.AppImage
-./HelixSR-Desktop-0.1.4-x86_64.AppImage --appimage-extract-and-run
+chmod +x HelixSR-Desktop-0.1.5-x86_64.AppImage
+./HelixSR-Desktop-0.1.5-x86_64.AppImage --appimage-extract-and-run
 ```
 
 This fallback extracts the app temporarily and does not require FUSE or administrator access. [AppImage documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html) explains the options.
@@ -33,6 +33,10 @@ For setup checks, missing DLSS input, shortcuts and configuration retention, fol
 The app distinguishes detected OptiScaler files, configuration and available runtime evidence. Frame generation is reported separately and is preserved. Presence of files does not prove a feature is active in gameplay.
 
 ## Updates and removal
+
+The **HelixSR model** dropdown on the Games tab shows supported networks. Currently **HelixSR Model E**, sourced from NVIDIA DLSS 310.7.0, is the only reviewed choice. The confirmation binds the model and release shown; an upstream change requires another review. DLSS 4 and FSR-derived models will appear only after upstream release and app support. See [model support and future variants](MODEL_VARIANTS.md).
+
+**Enable** uses the recorded package instead of silently choosing a newer cache. For older disabled records whose exact package cannot be proven, use **Update HelixSR** and review the change. Model metadata problems do not prevent restoring owned originals through Disable or Remove. For model support, update both managers to Decky **0.1.9** and desktop **0.1.5** or newer before using them on the same game.
 
 **HelixSR updates** checks the current official upstream release. It downloads fresh release metadata, validates the official archive size and SHA-256, and prepares network files on your device. A changed upstream format or failed integrity check stops installation with an explanation.
 

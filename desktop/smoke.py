@@ -34,8 +34,9 @@ class StressBackend:
                     framegen_summary="No runtime evidence")
 
     def _library(self):
+        from .app import smoke_model_catalog
         return dict(games=[self._game()], jobs=[dict(j) for j in self.job_list],
-                    release={"version": "fixture"}, warnings=[])
+                    release={"version": "fixture"}, warnings=[], model_catalog=smoke_model_catalog())
 
     def library(self):
         self._called()
@@ -49,19 +50,21 @@ class StressBackend:
         self._called()
         return dict(auto_check=False, update_available=False)
 
-    def preview_latest(self, gid, confirmed=False):
+    def preview_latest(self, gid, confirmed=False, variant_id=None):
         self._called()
+        assert variant_id == "helixsr-model-e", variant_id
         return dict(token="fixture", action="install", name="Fixture DX12 game",
-                    route="direct", files=["fixture.dll"])
+                    route="direct", files=["fixture.dll"], model="HelixSR Model E", release_version="fixture")
 
     def preview_action(self, gid, action, confirmed=False):
         self._called()
         return dict(token="fixture", action=action, name="Fixture DX12 game",
                     route="direct", files=["fixture.dll"])
 
-    def accept_license(self, accepted):
+    def accept_license(self, accepted, token=None):
         self._called()
         assert accepted
+        assert token == "fixture", token
 
     def install_latest(self, token):
         self._called()
@@ -170,6 +173,7 @@ class StressDriver(QObject):
                 window.launchers.setCurrentIndex(window.launchers.findData(source))
                 window.import_button.click()
             elif stage in (3, 4, 5):
+                assert window.models.currentData() == "helixsr-model-e"
                 self.preview_accept = stage != 3
                 window.preview_latest()
             elif stage == 6:

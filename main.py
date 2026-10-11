@@ -107,10 +107,10 @@ class Plugin:
     async def check_updates(self, force=True):
         return await asyncio.to_thread(self.manager.check_update, force)
 
-    async def set_license(self, accepted):
+    async def set_license(self, accepted, token=None):
         async with self.api_lock:
             self._allow_game_change()
-            return await asyncio.to_thread(self.manager.accept_license, accepted)
+            return await asyncio.to_thread(self.manager.accept_license, accepted, token)
 
     async def remember_launch_options(self, gid, before, after):
         async with self.api_lock:
@@ -152,9 +152,9 @@ class Plugin:
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.preview, gid, action, dx12_confirmed)
 
-    async def preview_latest(self, gid, dx12_confirmed=False):
+    async def preview_latest(self, gid, dx12_confirmed=False, variant_id=None):
         async with self.api_lock:
-            return await asyncio.to_thread(self.manager.preview_latest, gid, dx12_confirmed)
+            return await asyncio.to_thread(self.manager.preview_latest, gid, dx12_confirmed, variant_id)
 
     async def install_latest(self, token):
         async with self.api_lock:

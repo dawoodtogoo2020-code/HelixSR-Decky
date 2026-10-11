@@ -29,7 +29,9 @@ class FakeBackend:
 
     def library(self):
         return dict(games=[self.game.copy(), dict(id='b', name='Blocked', compatibility='blocked', reasons=['Protected game'])],
-                    release=dict(version='v1'), jobs=self.job_list)
+                    release=dict(version='v1'), jobs=self.job_list,
+                    model_catalog=dict(default='fixture-model', note='Fixture model note',
+                        variants=[dict(id='fixture-model', label='Fixture model', source='Fixture source')]))
 
     def details(self, gid):
         self.calls.append(('details', gid))
@@ -39,11 +41,13 @@ class FakeBackend:
         self.calls.append(('app_check', force))
         return dict(current='0.1.0', latest='0.2.0', update_available=True, auto_check=True)
 
-    def preview_latest(self, gid, dx12_confirmed=False):
+    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None):
+        self.preview_variant = variant_id
         self.calls.append(('preview', gid, dx12_confirmed))
         return dict(token='token', action='latest', name='Game A', route='optiscaler', files=['dxgi.dll'], warning='Close the game')
 
-    def accept_license(self, accepted):
+    def accept_license(self, accepted, token=None):
+        self.license_token = token
         self.calls.append(('license', accepted))
 
     def preview_action(self, gid, action, dx12_confirmed=False):
@@ -244,6 +248,9 @@ class DesktopWidgetTests(unittest.TestCase):
         self.settle()
         calls = [c[0] for c in self.backend.calls]
         self.assertLess(calls.index('license'), calls.index('install'))
+        self.assertEqual(self.backend.preview_variant, 'fixture-model')
+        self.assertEqual(self.backend.license_token, 'token')
+        self.assertFalse(self.window.models.isEnabled())
         self.assertFalse(self.window.install.isEnabled())
         self.assertTrue(self.window.cancel_button.isEnabled())
         self.window.cancel_button.click()

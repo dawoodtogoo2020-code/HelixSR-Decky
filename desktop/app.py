@@ -97,6 +97,8 @@ class PreviewDialog(QDialog):
         body.setReadOnly(True)
         body.setPlainText(
             f"Route: {preview.get('route', 'unknown')}\n"
+            f"Selected model: {preview.get('model', 'existing installation')}\n"
+            f"HelixSR release: {preview.get('release_version', 'existing installation')}\n"
             f"Select in game: {preview.get('select_upscaler', 'see guide')}\n\n"
             f"{preview.get('warning', '')}\n\nChanged files:\n" +
             "\n".join(str(p) for p in preview.get('files', []))[:LIMIT] +
@@ -193,6 +195,15 @@ class MainWindow(QMainWindow):
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.PlainText)
         content.addWidget(self.status)
+        content.addWidget(QLabel("HelixSR model"))
+        self.models = QComboBox()
+        self.models.setObjectName("models")
+        self.models.setMinimumHeight(40)
+        content.addWidget(self.models)
+        self.model_note = QLabel()
+        self.model_note.setWordWrap(True)
+        self.model_note.setTextFormat(Qt.PlainText)
+        content.addWidget(self.model_note)
         self.dx12 = QCheckBox("I have set this game to DirectX 12")
         self.dx12.toggled.connect(self._controls)
         content.addWidget(self.dx12)
@@ -343,7 +354,7 @@ class MainWindow(QMainWindow):
         active = any(j.get("state") in ACTIVE for j in self._jobs)
         free = not (self._task or self._modal or self._closing or active)
         game = self.game or {}
-        for control in (self.games, self.refresh_button, self.launchers, self.import_button, self.folder_button, self.helix_check, self.app_check, self.auto_check, self.diagnostic_button):
+        for control in (self.games, self.models, self.refresh_button, self.launchers, self.import_button, self.folder_button, self.helix_check, self.app_check, self.auto_check, self.diagnostic_button):
             control.setEnabled(free)
         self.dx12.setVisible(bool(game.get("dx12_confirmation_needed")))
         self.dx12.setEnabled(free)
@@ -380,6 +391,11 @@ class MainWindow(QMainWindow):
         self.games.setCurrentIndex(index if index >= 0 else 0)
         self.games.blockSignals(False)
         self.release = value.get("release", {})
+        models = value.get("model_catalog") or {}
+        self.models.clear()
+        for model in models.get("variants", []):
+            self.models.addItem(f"{model['label']} · {model['source']}", model['id'])
+        self.model_note.setText(models.get("note", ""))
         self._jobs_received(value.get("jobs", []))
         self.select_game()
         warnings = [str(warning) for warning in value.get("warnings", [])]
@@ -416,7 +432,9 @@ class MainWindow(QMainWindow):
     def _render_game(self):
         game = self.game or {}
         state = "Enabled" if game.get("enabled") else "Installed, disabled" if game.get("managed") else "Existing unmanaged installation" if game.get("legacy") else "Not installed"
-        self.status.setText(f"HelixSR: {state} · Version: {game.get('installed_version') or 'none'}\n{game.get('folder', '')}")
+        self.status.setText(f"HelixSR: {state} · Version: {game.get('installed_version') or 'none'}\n"
+                            f"Installed model: {game.get('installed_model') or 'not installed'}\n{game.get('folder', '')}")
+        self.models.setCurrentIndex(max(0, self.models.findData(game.get('installed_variant'))))
         self.status.setStyleSheet("color: #82dfaf" if game.get("enabled") or game.get("managed") or game.get("legacy") else "color: #a2a3af")
         opti = game.get("optiscaler") or {}
         text = (f"Route: {game.get('route') or 'none detected'}\n"
@@ -441,8 +459,8 @@ class MainWindow(QMainWindow):
 
     def preview_latest(self):
         if self.game and self.install.isEnabled():
-            gid, confirmed = self.game["id"], self.dx12.isChecked()
-            self._run(lambda: self.backend.preview_latest(gid, confirmed), lambda p: self._preview_received(p, True))
+            gid, confirmed, model = self.game["id"], self.dx12.isChecked(), self.models.currentData()
+            self._run(lambda: self.backend.preview_latest(gid, confirmed, model), lambda p: self._preview_received(p, True))
 
     def preview_action(self, action):
         if self.game and self.actions[action].isEnabled():
@@ -459,7 +477,7 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             def apply():
                 if latest:
-                    self.backend.accept_license(True)
+                    self.backend.accept_license(True, preview["token"])
                     return self.backend.install_latest(preview["token"])
                 return self.backend.apply_action(preview["token"])
             self._run(apply, lambda value: self._action_received(value), allow_modal=True)
@@ -640,10 +658,17 @@ class MainWindow(QMainWindow):
             self.close()
 
 
+def smoke_model_catalog():
+    """Read-only display fixture; this does not prepare or install any model."""
+    return dict(default="helixsr-model-e", variants=[dict(id="helixsr-model-e",
+        label="HelixSR Model E", source="NVIDIA DLSS 310.7.0")],
+        note="Only reviewed models are selectable. Future variants require upstream and app support.")
+
+
 class SmokeBackend:
     """Read-only fixtures. Smoke tests never instantiate the real game manager."""
     def library(self):
-        return {"games": [{"id": "fixture", "name": "Example DX12 game", "folder": "/fixture/game", "source": "Steam", "compatibility": "candidate", "managed": False, "enabled": False, "optiscaler": {"present": False, "runtime": "unknown"}, "framegen_summary": "No runtime evidence"}], "release": {"version": "fixture"}, "jobs": []}
+        return {"games": [{"id": "fixture", "name": "Example DX12 game", "folder": "/fixture/game", "source": "Steam", "compatibility": "candidate", "managed": False, "enabled": False, "optiscaler": {"present": False, "runtime": "unknown"}, "framegen_summary": "No runtime evidence"}], "release": {"version": "fixture"}, "jobs": [], "model_catalog": smoke_model_catalog()}
     def details(self, gid):
         return self.library()["games"][0]
     def check_app_updates(self, force=True):

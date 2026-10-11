@@ -42,31 +42,32 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
   appid?: string;
   reasons: string[]; route: string | null; inputs: string[]; managed: boolean; enabled: boolean;
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
-  main_exe?: string; target?: string;
+  main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
   optiscaler: { present: boolean; involved: boolean; helix_configured?: boolean; runtime: string; dlls: string[];
     setup?: { checks: string[]; backend: string; override: string; overlay_shortcut: string; settings: Record<string, string>; guide: string } };
   framegen: FG[]; framegen_summary: string; helix_runtime: string;
   launch_options: string; logs?: { path: string; modified: number; excerpt: string }[] };
 type Release = { version?: string; error?: string; checked_at?: number; page?: string };
+type ModelCatalog = { variants: { id: string; label: string; source: string }[]; default: string; note: string };
 type Job = { id: string; kind: string; game: string; state: string; message: string; log: string };
 type LauncherImport = { launcher: string; found: number; added: number; candidates: number;
   unavailable: number; game_ids: string[]; warnings: string[] };
 type Library = { games: Game[]; warnings: string[]; release: Release; license_accepted: boolean; jobs: Job[];
-  launcher_import?: LauncherImport };
+  launcher_import?: LauncherImport; model_catalog?: ModelCatalog };
 type Preview = { token: string; name: string; action: string; route: string; files: string[];
-  warning: string; select_upscaler: string };
+  warning: string; select_upscaler: string; model?: string; variant_id?: string; release_version?: string };
 const library = callable<[], Library>("library");
 const details = callable<[string], Game>("game_details");
 const checkUpdates = callable<[boolean], Release>("check_updates");
 const forgetGame = callable<[string], Library>("forget_game");
 const importFolders = callable<[string[]], Library>("import_folders");
 const importLauncher = callable<[string], Library>("import_launcher");
-const setLicense = callable<[boolean], boolean>("set_license");
+const setLicense = callable<[boolean, string?], boolean>("set_license");
 const jobStatus = callable<[], Job[]>("job_status");
 const cancelJob = callable<[string], boolean>("cancel_job");
 const previewAction = callable<[string, string, boolean], Preview>("preview_action");
 const applyAction = callable<[string], { message: string }>("apply_action");
-const previewLatest = callable<[string, boolean], Preview>("preview_latest");
+const previewLatest = callable<[string, boolean, string?], Preview>("preview_latest");
 const installLatest = callable<[string], Job>("install_latest");
 type LaunchIntent = { nonce: string; before: string; after: string; restore: boolean };
 const prepareLaunch = callable<[string, string, string, boolean], LaunchIntent>("prepare_launch_options");
@@ -197,6 +198,7 @@ function Content() {
   const [folders, setFolders] = useState<string[]>(pendingFolders);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dx12, setDx12] = useState(false);
+  const [variant, setVariant] = useState<string>();
   const [diagnostics, setDiagnostics] = useState(false);
   const [discoveryNotes, setDiscoveryNotes] = useState(false);
   const [setupOptions, setSetupOptions] = useState(false);
@@ -263,6 +265,9 @@ function Content() {
     return () => { active = false; };
   }, [selected]);
   useEffect(() => {
+    setVariant(game?.installed_variant || data?.model_catalog?.default);
+  }, [game?.id, game?.installed_variant, data?.model_catalog?.default]);
+  useEffect(() => {
     const changed = (next: Job[], finished: boolean) => { setJobs(next); if (finished) void refresh(); };
     jobListeners.add(changed); setJobs(watchedJobs);
     return () => { jobListeners.delete(changed); };
@@ -305,17 +310,18 @@ function Content() {
     const currentRelease = await run(() => checkUpdates(true));
     if (!currentRelease?.version || currentRelease.error) { setError(currentRelease?.error || "Could not check the latest HelixSR release. Retry Check for updates."); return; }
     setData(d => d ? { ...d, release: currentRelease } : d);
-    const p = await run(() => previewLatest(game.id, dx12));
+    const p = await run(() => previewLatest(game.id, dx12, variant));
     if (!p) return;
     openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`${game.managed || game.legacy ? "Update" : "Install"} HelixSR ${currentRelease.version}`}
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
         <p>{p.name}: {p.warning}</p>
+        <p>Selected model: {p.model}. HelixSR release: {p.release_version}.</p>
         <p>Required downloads and local preparation are automatic. Uses HelixSR freeware and NVIDIA DLSS under their linked licenses. Locally generated network files must stay on this device.</p>
         <p>Files: {p.files.join(", ")}</p>
       </div>}
       strOKButtonText={data?.license_accepted ? "Install / update HelixSR" : "Accept terms and install"}
       onOK={() => { if (!beginReview()) return; void run(async () => {
-        await setLicense(true);
+        await setLicense(true, p.token);
         const job = await installLatest(p.token);
         watchJobs([job]);
         setData(d => d ? { ...d, license_accepted: true } : d);
@@ -431,8 +437,15 @@ function Content() {
         Route: {game.route === "direct" ? "Native FSR 3.1 replacement" : game.route === "optiscaler" ? "OptiScaler proxy" : "None detected"}{"\n"}
         HelixSR: {game.managed ? `${game.enabled ? "enabled" : "disabled"}, ${game.installed_version}` : game.legacy ? "existing unmanaged install" : "unmanaged"}{"\n"}
         Prepared: {game.package_version || "none on this drive"}{"\n"}
+        Installed model: {game.installed_model || "not installed"}{"\n"}
         {game.reasons.join("\n")}
       </div></PanelSectionRow>
+      {!!data?.model_catalog?.variants.length && <>
+        <PanelSectionRow><DropdownItem label="HelixSR model" rgOptions={data.model_catalog.variants.map(v => ({ label: `${v.label} · ${v.source}`, data: v.id }))}
+          selectedOption={variant || data.model_catalog.default} disabled={disabled}
+          onChange={option => setVariant(String(option.data))} /></PanelSectionRow>
+        <PanelSectionRow><div className="helix-muted">{data.model_catalog.note}</div></PanelSectionRow>
+      </>}
       <PanelSectionRow><div className="helix-muted">Downloads, required dependencies and the local network build are handled automatically. Administrator access is not needed for your own game folders.</div></PanelSectionRow>
       {game.managed && <>
         <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate"}

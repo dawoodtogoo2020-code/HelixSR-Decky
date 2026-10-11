@@ -1,5 +1,6 @@
 """Offline regression fixtures. Synthetic bytes do not prove game compatibility."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import stat
@@ -17,6 +18,7 @@ sys.path.insert(0, str(PLUGIN / 'py_modules'))
 import library
 import manager
 import awareness
+import model_variants
 
 
 def pe(ffx=False, dx12=False, helix=False, machine=0x8664):
@@ -128,11 +130,33 @@ class Fixtures(unittest.TestCase):
         if (folder / framegen).is_file():
             names.append(framegen)
         record['files'] = {name: manager.sha(folder / name) for name in names}
+        if record.get('variant'):
+            record['files']['helixsr_setup.json'] = manager.sha(folder / 'helixsr_setup.json')
         return record
+
+    def reviewed_package(self, folder):
+        """Synthetic output identity, without storing NVIDIA weights in tests."""
+        weights = (folder / manager.NETWORK[0]).read_bytes()
+        digest = hashlib.sha256(weights).hexdigest()
+        for key, value in [('WEIGHTS_SIZE', len(weights)), ('WEIGHTS_SHA256', digest),
+                           ('KERNEL_NAMES', (b'synthetic',))]:
+            gate = patch.object(model_variants, key, value)
+            gate.start()
+            self.addCleanup(gate.stop)
+        blob = b'synthetic shader bytes ' * 128
+        write(folder / manager.NETWORK[1], b'HXSRKPAK' + struct.pack('<II', 2, 1)
+              + struct.pack('<32sII', b'synthetic', 56, len(blob)) + blob)
+        write(folder / 'helixsr_setup.json', json.dumps(dict(source_sha256=model_variants.SOURCE_SHA256,
+              ptx_target='sm_89', shaders=1, wave64=False, weights_sha256=digest)))
+        record = self.m.cfg['packages'][str(folder)]
+        record['variant'] = dict(id=model_variants.DEFAULT_VARIANT, adapter=model_variants.ADAPTER,
+                                recipe_sha256=next(iter(model_variants.REVIEWED_RECIPES)))
+        return self.sync_package_record(folder)
 
     def companion_package(self, game=None, release_digest='a' * 64, prepared_at=100):
         game = game or self.game
         source = self.package()
+        self.reviewed_package(source)
         destination = self.m.companion(game) / 'packages/v1.2.3'
         destination.parent.mkdir(parents=True, exist_ok=True)
         source.rename(destination)
@@ -405,7 +429,7 @@ class AssessmentTests(Fixtures):
         with patch.object(self.m, 'check_update', return_value=release):
             self.assertTrue(self.m.accept_license(True))
         self.assertEqual(self.m.cfg['license'],
-                         {'terms': manager.LICENSE_REV, 'version': '1.2.3', 'release_sha256': 'a' * 64})
+                         manager.license_key(release))
         self.assertFalse(self.m.accept_license(False))
 
     def test_changed_release_invalidates_license_and_rejects_job(self):
@@ -444,6 +468,7 @@ class ReleaseTests(Fixtures):
 
     def cached_preparation(self):
         folder = self.package()
+        self.reviewed_package(folder)
         release = dict(version='1.2.3', sha256='a' * 64, size=1234,
                        url=f'https://github.com/{manager.REPO}/releases/download/v1.2.3/HelixSR-1.2.3.zip')
         self.m.cfg['packages'][str(folder)]['release_sha256'] = release['sha256']
@@ -478,7 +503,7 @@ class ReleaseTests(Fixtures):
     def test_identical_semver_package_selection_uses_latest_prepared_at(self):
         first, _ = self.cached_preparation()
         second = self.base / 'other-cache' / 'v1.2.3'
-        for name in manager.PACKAGE_FILES:
+        for name in manager.PACKAGE_FILES + ('helixsr_setup.json',):
             write(second / name, (first / name).read_bytes())
         record = dict(self.m.cfg['packages'][str(first)], path=str(second), prepared_at=200)
         self.m.cfg['packages'][str(second)] = record
@@ -965,6 +990,7 @@ class LatestCoordinatorTests(Fixtures):
     def setUp(self):
         super().setUp()
         self.prepared = self.package()
+        self.reviewed_package(self.prepared)
         release = dict(version='1.2.3', sha256='a' * 64)
         self.m.cfg['packages'][str(self.prepared)]['release_sha256'] = release['sha256']
         self.m.cfg['license'] = manager.license_key(release)

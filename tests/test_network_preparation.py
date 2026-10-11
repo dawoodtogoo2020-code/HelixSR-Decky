@@ -14,6 +14,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'py_modules'))
 import manager
+import model_variants
 from test_backend import Fixtures, pe
 from test_plugin_updates import FakeResponse
 
@@ -34,10 +35,18 @@ exec "$PY" "$PKG/helixsr_install.py" "$TARGET"
 
 # Models the published 1.8 converter's output choice, using only synthetic bytes.
 CONVERTER = '''import sys
+import json, hashlib, struct
 from pathlib import Path
 out = Path(sys.argv[1])
 for name in ('helixsr_weights.bin', 'helixsr_kernels.pak'):
     (out / name).write_bytes(b'fixture model bytes ' * 128)
+blob = b'synthetic shader ' * 128
+(out / 'helixsr_kernels.pak').write_bytes(b'HXSRKPAK' + struct.pack('<II', 2, 1)
+    + struct.pack('<32sII', b'synthetic', 56, len(blob)) + blob)
+(out / 'helixsr_setup.json').write_text(json.dumps(dict(
+    source_sha256='be6e434a94ca32499515eb62ca0e6c274526055d568d0426e4c652dcdfb6ee6e',
+    ptx_target='sm_89', shaders=1, wave64=False,
+    weights_sha256=hashlib.sha256((out / 'helixsr_weights.bin').read_bytes()).hexdigest())))
 target = out / 'amd_fidelityfx_dx12.dll'
 if '--separate-files' not in sys.argv and target.exists():
     target.write_bytes(target.read_bytes() + b'embedded fixture')
@@ -176,8 +185,16 @@ class FreshPreparationTests(Fixtures):
         payload, release = self.archive(converter, setup)
         response = FakeResponse(payload, release['url'])
         job = {'id': 'fresh-output'}
+        for key, value in [('WEIGHTS_SIZE', len(b'fixture model bytes ' * 128)),
+                           ('WEIGHTS_SHA256', hashlib.sha256(b'fixture model bytes ' * 128).hexdigest()),
+                           ('KERNEL_NAMES', (b'synthetic',))]:
+            gate = patch.object(model_variants, key, value)
+            gate.start()
+            self.addCleanup(gate.stop)
         with patch.object(self.m, 'check_update', return_value=release), \
                 patch('manager.https_context', return_value=None), \
+                patch('manager.verify_recipe', return_value=dict(id=model_variants.DEFAULT_VARIANT,
+                    adapter=model_variants.ADAPTER, recipe_sha256=next(iter(model_variants.REVIEWED_RECIPES)))), \
                 patch('manager.urllib.request.urlopen', return_value=response):
             result = self.m.prepare(self.game, job)
         return result, job

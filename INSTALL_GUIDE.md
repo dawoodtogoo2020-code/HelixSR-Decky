@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.8.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
+3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.9.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -38,6 +38,10 @@ If Decky disappears after a SteamOS update, follow Decky's own recovery instruct
 Keep locally generated network files on your device. Do not upload prepared packages, weights or kernels with a bug report.
 
 ## 5. Select the renderer and upscaler
+
+The **HelixSR model** dropdown in the selected game's details shows supported networks. Currently it offers **HelixSR Model E**, sourced from NVIDIA DLSS 310.7.0. This is separate from selecting AMD FSR or DLSS in the game's settings. The confirmation shows the model and HelixSR release being installed. Future DLSS 4 or FSR-derived models require upstream files and reviewed app support before appearing here. See [model support](MODEL_VARIANTS.md).
+
+**Enable** restores the recorded prepared package rather than upgrading to a newer cache. If an older disabled installation has no provable package identity, choose **Update HelixSR** and review the supported model instead. **Disable** and **Remove** still restore owned originals when model metadata needs review. Update both the Decky plugin and desktop app before using new model support on the same game.
 
 1. Launch the game's **DirectX 12** version. Native Linux, Vulkan-only, DirectX 11 and 32-bit games are unsupported by this workflow.
 2. For **Native FSR 3.1 replacement**, choose **AMD FSR** in the game. That selection reaches the replaced native upscaler.

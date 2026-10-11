@@ -112,17 +112,17 @@ class DesktopBackend:
             self._open()
             return self.manager.check_update(bool(force))
 
-    def accept_license(self, accepted):
+    def accept_license(self, accepted, token=None):
         if type(accepted) is not bool:
             raise ValueError('License acceptance requires a boolean')
         with self.lock:
             self._write()
-            return self.manager.accept_license(accepted)
+            return self.manager.accept_license(accepted, token)
 
-    def preview_latest(self, gid, dx12_confirmed=False):
+    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None):
         with self.lock:
             self._open()
-            return self.manager.preview_latest(gid, dx12_confirmed)
+            return self.manager.preview_latest(gid, dx12_confirmed, variant_id)
 
     def install_latest(self, token):
         with self.lock:

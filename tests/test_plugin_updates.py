@@ -191,16 +191,17 @@ class ReleaseValidationTests(PluginUpdateFixtures):
             plugin_updates.validate_zip(path, '0.1.1')
 
     def test_setup_release_requires_its_new_runtime_modules(self):
-        required = ('optiscaler_setup', 'launch_receipts', 'operation_lock', 'host_environment')
-        extra = {f'{plugin_updates.FOLDER}/py_modules/{name}.py': b'# fixture\n' for name in required}
         path = self.root / 'setup-release.zip'
-        path.write_bytes(archive_bytes(self.root, version='0.1.6', extra=extra))
-        plugin_updates.validate_zip(path, '0.1.6')
-        for name in required:
-            path.write_bytes(archive_bytes(self.root, version='0.1.6', extra=extra,
-                             omit=(f'{plugin_updates.FOLDER}/py_modules/{name}.py',)))
-            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'Incomplete'):
-                plugin_updates.validate_zip(path, '0.1.6')
+        base = ('optiscaler_setup', 'launch_receipts', 'operation_lock', 'host_environment')
+        for version, required in (('0.1.6', base), ('0.1.9', base + ('model_variants', 'build_runtime'))):
+            extra = {f'{plugin_updates.FOLDER}/py_modules/{name}.py': b'# fixture\n' for name in required}
+            path.write_bytes(archive_bytes(self.root, version=version, extra=extra))
+            plugin_updates.validate_zip(path, version)
+            for name in required:
+                path.write_bytes(archive_bytes(self.root, version=version, extra=extra,
+                                 omit=(f'{plugin_updates.FOLDER}/py_modules/{name}.py',)))
+                with self.subTest(version=version, name=name), self.assertRaisesRegex(ValueError, 'Incomplete'):
+                    plugin_updates.validate_zip(path, version)
 
 
 class SchedulingAndNetworkTests(PluginUpdateFixtures):
