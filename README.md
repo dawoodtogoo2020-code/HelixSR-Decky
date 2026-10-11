@@ -65,3 +65,7 @@ Custom launcher locations, Heroic sideload apps and shortcut wrappers may need *
 Use the [bug-report form](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml). Reports are assigned to the project owner. Include the game, plugin and HelixSR versions, Proton, renderer, OptiScaler/FG setup and steps to reproduce. A short sanitized log excerpt is optional. GitHub issues are public: omit account information and private paths, and never attach generated weights, kernels or prepared packages. No email address is required.
 
 This is an initial beta. Per-game gameplay compatibility remains dependent on the renderer, Proton and HelixSR version. Installation candidates are not a guarantee of rendering quality or prolonged stability.
+
+## Standalone desktop app
+
+The native Linux AppImage is available separately from Decky. Follow the [desktop guide](DESKTOP_GUIDE.md) for download, installation, launcher imports and updates. It targets x86_64 SteamOS and Linux without administrator access. See the guide for hardware testing limits. Update Decky to 0.1.4 or newer before using both managers on the same game.

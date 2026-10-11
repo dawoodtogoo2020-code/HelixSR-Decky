@@ -4,3 +4,8 @@ release/
 __pycache__/
 *.pyc
 .test-data/
+
+# Native desktop build outputs
+build-desktop/
+release-desktop/
+desktop-*-smoke.png

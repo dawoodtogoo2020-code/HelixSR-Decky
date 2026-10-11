@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=HelixSR Desktop
+Comment=Manage HelixSR in compatible Proton games
+Exec=helixsr-desktop
+Icon=helixsr-desktop
+Categories=Game;Utility;
+Terminal=false
+StartupWMClass=helixsr-desktop

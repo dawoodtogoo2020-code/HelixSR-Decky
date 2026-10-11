@@ -22,6 +22,8 @@ import ssl
 from functools import lru_cache
 from library import discover, discover_launcher, safe_root, scan_tree, text
 from awareness import awareness, active_processes, text_tail
+from operation_lock import operation_lock, game_locked
+from host_environment import host_environment
 
 REPO = 'lonewolf0622/HelixSR'
 API = f'https://api.github.com/repos/{REPO}/releases/latest'
@@ -606,7 +608,9 @@ class Manager:
             self.jobs[job['id']] = job
 
             def run():
+                operation = contextlib.ExitStack()
                 try:
+                    operation.enter_context(operation_lock(self.companion(game)))
                     self.prepare(game, job)
                     if kind == 'install_latest':
                         if self.cancel.is_set():
@@ -629,8 +633,11 @@ class Manager:
                     job['message'] = str(e)
                 finally:
                     job['ended_at'] = time.time()
-                    atomic_json(self.companion(game) / 'records' / ('job-' + job['id'] + '.json'), job)
-                    self.process = None
+                    try:
+                        atomic_json(self.companion(game) / 'records' / ('job-' + job['id'] + '.json'), job)
+                    finally:
+                        self.process = None
+                        operation.close()
             self.worker = threading.Thread(target=run, daemon=True)
             self.worker.start()
             return dict(job)
@@ -642,9 +649,11 @@ class Manager:
         self.cancel.set()
         if self.process and self.process.poll() is None:
             import signal
-            os.killpg(self.process.pid, signal.SIGTERM)
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.process.pid, signal.SIGTERM)
         return True
 
+    @game_locked
     def prepare(self, game, job):
         if os.name == 'posix' and os.geteuid() == 0:
             raise ValueError('Refusing preparation as root')
@@ -700,15 +709,7 @@ class Manager:
             env = dict(os.environ, XDG_DATA_HOME=str(companion / 'dependencies'),
                        TMPDIR=str(work / 'tmp'), PIP_CACHE_DIR=str(companion / 'dependencies/pip'),
                        HELIXSR_FORCE_PORTABLE='1', PYTHONUNBUFFERED='1')
-            # PyInstaller's private OpenSSL must not be inherited by system curl/Wine.
-            original_ld = env.pop('LD_LIBRARY_PATH_ORIG', '')
-            if original_ld:
-                env['LD_LIBRARY_PATH'] = original_ld
-            else:
-                env.pop('LD_LIBRARY_PATH', None)
-            env.pop('LD_PRELOAD', None)
-            env.pop('PYTHONHOME', None)
-            env.pop('PYTHONPATH', None)
+            env = host_environment(env)
             Path(env['TMPDIR']).mkdir()
             logfile = companion / 'records' / ('build-' + job['id'] + '.log')
             logfile.parent.mkdir(parents=True, exist_ok=True)
@@ -722,11 +723,13 @@ class Manager:
                     job['log'] = text_tail(logfile, 8000)
                     if self.cancel.is_set() or time.monotonic() > deadline:
                         import signal
-                        os.killpg(self.process.pid, signal.SIGTERM)
+                        with contextlib.suppress(ProcessLookupError):
+                            os.killpg(self.process.pid, signal.SIGTERM)
                         try:
                             self.process.wait(timeout=10)
                         except subprocess.TimeoutExpired:
-                            os.killpg(self.process.pid, signal.SIGKILL)
+                            with contextlib.suppress(ProcessLookupError):
+                                os.killpg(self.process.pid, signal.SIGKILL)
                             self.process.wait()
                         raise ValueError('Cancelled' if self.cancel.is_set() else 'Build timed out')
                     time.sleep(0.5)
@@ -877,21 +880,26 @@ class Manager:
             if not preview or time.time() > preview['expires']:
                 raise ValueError('Preview expired; preview the action again')
             game = self.get_game(preview['game'])
-            if active_processes(game['folder'], game.get('appid', '')):
-                raise ValueError('Game is running')
-            if preview['action'] == 'recover':
-                if game.get('manifest'):
-                    from library import vdf
-                    state = int(vdf(text(game['manifest'])).get('AppState', {}).get('StateFlags', 0))
-                    if state != 4:
-                        raise ValueError('Wait for Steam download/update completion before recovery')
-                self.rollback(game)
-                return {'message': 'Interrupted transaction recovered'}
-            data = self.assess(game)
-            if data['compatibility'] != 'candidate' or self.fingerprint(game, data) != preview['fingerprint']:
-                raise ValueError('Game changed since preview; refresh and review again')
-            return self.mutate(game, data, preview['action'])
+            with operation_lock(self.companion(game)):
+                return self._execute_reviewed(game, preview)
 
+    def _execute_reviewed(self, game, preview):
+        if active_processes(game['folder'], game.get('appid', '')):
+            raise ValueError('Game is running')
+        if preview['action'] == 'recover':
+            if game.get('manifest'):
+                from library import vdf
+                state = int(vdf(text(game['manifest'])).get('AppState', {}).get('StateFlags', 0))
+                if state != 4:
+                    raise ValueError('Wait for Steam download/update completion before recovery')
+            self.rollback(game)
+            return {'message': 'Interrupted transaction recovered'}
+        data = self.assess(game)
+        if data['compatibility'] != 'candidate' or self.fingerprint(game, data) != preview['fingerprint']:
+            raise ValueError('Game changed since preview; refresh and review again')
+        return self.mutate(game, data, preview['action'])
+
+    @game_locked
     def mutate(self, game, data, action):
         root, companion = Path(game['folder']), self.companion(game)
         tx = companion / 'transaction'
@@ -1029,6 +1037,7 @@ class Manager:
                     raise ValueError('Original file hash mismatch: ' + rel)
                 self.copy_atomic(src, p)
 
+    @game_locked
     def rollback(self, game):
         root, tx = Path(game['folder']), self.companion(game) / 'transaction'
         journal = load_json(tx / 'journal.json')
