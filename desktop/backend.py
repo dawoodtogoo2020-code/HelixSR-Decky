@@ -102,10 +102,10 @@ class DesktopBackend:
             result['warnings'] = self.warnings + result.get('warnings', [])
             return result
 
-    def details(self, gid):
+    def details(self, gid, executable=None):
         with self.lock:
             self._open()
-            return self.manager.assess_safe(self.manager.get_game(gid))
+            return self.manager.assess_safe(self.manager.get_game(gid), executable=executable)
 
     def check_helix_updates(self, force=True):
         with self.lock:
@@ -119,20 +119,20 @@ class DesktopBackend:
             self._write()
             return self.manager.accept_license(accepted, token)
 
-    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None):
+    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None):
         with self.lock:
             self._open()
-            return self.manager.preview_latest(gid, dx12_confirmed, variant_id)
+            return self.manager.preview_latest(gid, dx12_confirmed, variant_id, executable)
 
     def install_latest(self, token):
         with self.lock:
             self._write()
             return self.manager.execute_latest(token)
 
-    def preview_action(self, gid, action, dx12_confirmed=False):
+    def preview_action(self, gid, action, dx12_confirmed=False, executable=None):
         with self.lock:
             self._open()
-            return self.manager.preview(gid, action, dx12_confirmed)
+            return self.manager.preview(gid, action, dx12_confirmed, executable)
 
     def apply_action(self, token):
         with self.lock:

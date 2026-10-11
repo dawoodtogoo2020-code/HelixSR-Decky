@@ -33,16 +33,23 @@ class FakeBackend:
                     model_catalog=dict(default='fixture-model', note='Fixture model note',
                         variants=[dict(id='fixture-model', label='Fixture model', source='Fixture source')]))
 
-    def details(self, gid):
+    def details(self, gid, executable=None):
         self.calls.append(('details', gid))
-        return self.game.copy()
+        value = self.game.copy()
+        if executable:
+            value['selected_executable'] = executable
+            value['dx12_confirmation_needed'] = not next(e['dx12'] for e in value['executable_choices'] if e['path'] == executable)
+            if value.get('executable_selection_needed'):
+                value.update(compatibility='candidate', executable_selection_needed=False)
+        return value
 
     def check_app_updates(self, force=True):
         self.calls.append(('app_check', force))
         return dict(current='0.1.0', latest='0.2.0', update_available=True, auto_check=True)
 
-    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None):
+    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None):
         self.preview_variant = variant_id
+        self.preview_executable = executable
         self.calls.append(('preview', gid, dx12_confirmed))
         return dict(token='token', action='latest', name='Game A', route='optiscaler', files=['dxgi.dll'], warning='Close the game')
 
@@ -50,7 +57,7 @@ class FakeBackend:
         self.license_token = token
         self.calls.append(('license', accepted))
 
-    def preview_action(self, gid, action, dx12_confirmed=False):
+    def preview_action(self, gid, action, dx12_confirmed=False, executable=None):
         self.calls.append(('preview_action', action))
         return dict(token='cleanup-token', action=action, name='Game A', files=['dxgi.dll'])
 
@@ -133,6 +140,42 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertIn('OptiScaler installed: yes', self.window.evidence.toPlainText())
         self.assertIn('OptiScaler runtime: unknown', self.window.evidence.toPlainText())
         self.assertIn('Frame generation:', self.window.evidence.toPlainText())
+
+    def test_executable_choice_refreshes_details_and_reaches_review(self):
+        self.backend.game.update(executable_choices=[dict(path='bin/x64/game.exe', dx12=False),
+                                  dict(path='bin/x64_dx12/game.exe', dx12=True)],
+                                 selected_executable='bin/x64/game.exe', dx12_confirmation_needed=True)
+        self.window._library_received(self.backend.library())
+        self.settle()
+        self.assertTrue(self.window.executables.isVisible())
+        self.window.dx12.setChecked(True)
+        self.window.executables.setCurrentIndex(1)
+        self.settle()
+        self.assertFalse(self.window.dx12.isChecked())
+        self.assertEqual(self.window.game['selected_executable'], 'bin/x64_dx12/game.exe')
+        self.assertTrue(self.window.install.isEnabled())
+        with mock.patch.object(self.window, '_preview_received'):
+            self.window.preview_latest()
+            self.settle()
+        self.assertEqual(self.backend.preview_executable, 'bin/x64_dx12/game.exe')
+        self.assertFalse(any(c[0] in ('install', 'license') for c in self.backend.calls))
+        self.window.game['managed'] = True
+        self.window._render_game()
+        self.assertFalse(self.window.executables.isVisible())
+
+    def test_single_x64_alternative_is_available_for_invalid_default(self):
+        self.backend.game.update(compatibility='blocked', executable_selection_needed=True,
+                                 executable_choices=[dict(path='DX12/game.exe', dx12=True)],
+                                 selected_executable='Game32.exe', dx12_confirmation_needed=True)
+        self.window._library_received(self.backend.library())
+        self.settle()
+        self.assertEqual(self.window.games.count(), 1)
+        self.assertTrue(self.window.executables.isVisible())
+        self.assertFalse(self.window.install.isEnabled())
+        self.window.executables.setCurrentIndex(0)
+        self.settle()
+        self.assertEqual(self.window.game['selected_executable'], 'DX12/game.exe')
+        self.assertTrue(self.window.install.isEnabled())
 
     def test_launch_guidance_matches_detected_route_and_preserves_options(self):
         self.window.game['launch_options'] = 'CUSTOM=1 %command%'

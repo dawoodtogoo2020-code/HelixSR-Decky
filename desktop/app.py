@@ -99,6 +99,7 @@ class PreviewDialog(QDialog):
             f"Route: {preview.get('route', 'unknown')}\n"
             f"Selected model: {preview.get('model', 'existing installation')}\n"
             f"HelixSR release: {preview.get('release_version', 'existing installation')}\n"
+            f"Game executable: {preview.get('selected_executable') or 'recorded installation folder'}\n"
             f"Select in game: {preview.get('select_upscaler', 'see guide')}\n\n"
             f"{preview.get('warning', '')}\n\nChanged files:\n" +
             "\n".join(str(p) for p in preview.get('files', []))[:LIMIT] +
@@ -195,6 +196,16 @@ class MainWindow(QMainWindow):
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.PlainText)
         content.addWidget(self.status)
+        self.executable_label = QLabel("Game executable")
+        content.addWidget(self.executable_label)
+        self.executables = QComboBox()
+        self.executables.setObjectName("executables")
+        self.executables.setMinimumHeight(40)
+        self.executables.currentIndexChanged.connect(self.select_executable)
+        content.addWidget(self.executables)
+        self.executable_note = QLabel("Choose the DX12 executable you actually launch. HelixSR will be installed beside it. Remove an existing installation before choosing another executable.")
+        self.executable_note.setWordWrap(True)
+        content.addWidget(self.executable_note)
         content.addWidget(QLabel("HelixSR model"))
         self.models = QComboBox()
         self.models.setObjectName("models")
@@ -354,8 +365,12 @@ class MainWindow(QMainWindow):
         active = any(j.get("state") in ACTIVE for j in self._jobs)
         free = not (self._task or self._modal or self._closing or active)
         game = self.game or {}
-        for control in (self.games, self.models, self.refresh_button, self.launchers, self.import_button, self.folder_button, self.helix_check, self.app_check, self.auto_check, self.diagnostic_button):
+        for control in (self.games, self.executables, self.models, self.refresh_button, self.launchers, self.import_button, self.folder_button, self.helix_check, self.app_check, self.auto_check, self.diagnostic_button):
             control.setEnabled(free)
+        choices = game.get("executable_choices", [])
+        show_executable = not game.get("managed") and game.get("route") == "optiscaler" and bool(choices) and (len(choices) > 1 or not any(e['path'] == game.get('selected_executable') for e in choices))
+        for control in (self.executable_label, self.executables, self.executable_note):
+            control.setVisible(show_executable)
         self.dx12.setVisible(bool(game.get("dx12_confirmation_needed")))
         self.dx12.setEnabled(free)
         confirmed = not game.get("dx12_confirmation_needed") or self.dx12.isChecked()
@@ -381,10 +396,10 @@ class MainWindow(QMainWindow):
         self.games.clear()
         self.unavailable.clear()
         for game in self._games.values():
-            if game.get("compatibility") == "candidate" or game.get("managed") or game.get("recovery_available"):
-                state = "Enabled" if game.get("enabled") else "Installed" if game.get("managed") or game.get("legacy") else "Not installed"
+            if game.get("compatibility") == "candidate" or game.get("managed") or game.get("recovery_available") or game.get("executable_selection_needed"):
+                state = "Choose executable" if game.get("executable_selection_needed") else "Enabled" if game.get("enabled") else "Installed" if game.get("managed") or game.get("legacy") else "Not installed"
                 self.games.addItem(f"{game.get('name', game['id'])} · {state}", game["id"])
-                self.games.setItemData(self.games.count() - 1, QColor("#82dfaf" if state != "Not installed" else "#a2a3af"), Qt.ForegroundRole)
+                self.games.setItemData(self.games.count() - 1, QColor("#82dfaf" if game.get('enabled') or game.get('managed') or game.get('legacy') else "#a2a3af"), Qt.ForegroundRole)
             else:
                 self.unavailable.addItem(f"{game.get('name', '')}: {'; '.join(game.get('reasons', [])) or game.get('compatibility', 'unknown')}")
         index = self.games.findData(previous)
@@ -422,19 +437,36 @@ class MainWindow(QMainWindow):
             gid = self.game["id"]
             self._run(lambda: self.backend.details(gid), lambda value: self._details_received(gid, value))
 
-    def _details_received(self, gid, value):
+    def select_executable(self, *_):
+        if not self.game or self.game.get("managed") or self.game.get("route") != "optiscaler":
+            return
+        gid, executable = self.game["id"], self.executables.currentData()
+        if not executable or executable == self.game.get("selected_executable"):
+            return
+        self.dx12.setChecked(False)
+        self._run(lambda: self.backend.details(gid, executable), lambda value: self._details_received(gid, value, reset_model=False))
+
+    def _details_received(self, gid, value, reset_model=True):
         if self.games.currentData() == gid:
             self.game = value
-            self._render_game()
+            self._render_game(reset_model=reset_model)
         if not self.app_update:
             QTimer.singleShot(0, lambda: self.check_app(False))
 
-    def _render_game(self):
+    def _render_game(self, reset_model=True):
         game = self.game or {}
+        self.executables.blockSignals(True)
+        self.executables.clear()
+        for executable in game.get("executable_choices", []):
+            renderer = "DX12 detected" if executable.get("dx12") else "Confirm DX12"
+            self.executables.addItem(f"{executable['path']} · {renderer}", executable['path'])
+        self.executables.setCurrentIndex(self.executables.findData(game.get("selected_executable")))
+        self.executables.blockSignals(False)
         state = "Enabled" if game.get("enabled") else "Installed, disabled" if game.get("managed") else "Existing unmanaged installation" if game.get("legacy") else "Not installed"
         self.status.setText(f"HelixSR: {state} · Version: {game.get('installed_version') or 'none'}\n"
                             f"Installed model: {game.get('installed_model') or 'not installed'}\n{game.get('folder', '')}")
-        self.models.setCurrentIndex(max(0, self.models.findData(game.get('installed_variant'))))
+        if reset_model:
+            self.models.setCurrentIndex(max(0, self.models.findData(game.get('installed_variant'))))
         self.status.setStyleSheet("color: #82dfaf" if game.get("enabled") or game.get("managed") or game.get("legacy") else "color: #a2a3af")
         opti = game.get("optiscaler") or {}
         text = (f"Route: {game.get('route') or 'none detected'}\n"
@@ -460,12 +492,14 @@ class MainWindow(QMainWindow):
     def preview_latest(self):
         if self.game and self.install.isEnabled():
             gid, confirmed, model = self.game["id"], self.dx12.isChecked(), self.models.currentData()
-            self._run(lambda: self.backend.preview_latest(gid, confirmed, model), lambda p: self._preview_received(p, True))
+            executable = self.game.get("selected_executable") if not self.game.get("managed") and self.game.get("route") == "optiscaler" else None
+            self._run(lambda: self.backend.preview_latest(gid, confirmed, model, executable), lambda p: self._preview_received(p, True))
 
     def preview_action(self, action):
         if self.game and self.actions[action].isEnabled():
             gid, confirmed = self.game["id"], self.dx12.isChecked()
-            self._run(lambda: self.backend.preview_action(gid, action, confirmed), lambda p: self._preview_received(p, False))
+            executable = self.game.get("selected_executable") if not self.game.get("managed") and self.game.get("route") == "optiscaler" else None
+            self._run(lambda: self.backend.preview_action(gid, action, confirmed, executable), lambda p: self._preview_received(p, False))
 
     def _preview_received(self, preview, latest):
         if self._modal or self._closing:
@@ -668,8 +702,8 @@ def smoke_model_catalog():
 class SmokeBackend:
     """Read-only fixtures. Smoke tests never instantiate the real game manager."""
     def library(self):
-        return {"games": [{"id": "fixture", "name": "Example DX12 game", "folder": "/fixture/game", "source": "Steam", "compatibility": "candidate", "managed": False, "enabled": False, "optiscaler": {"present": False, "runtime": "unknown"}, "framegen_summary": "No runtime evidence"}], "release": {"version": "fixture"}, "jobs": [], "model_catalog": smoke_model_catalog()}
-    def details(self, gid):
+        return {"games": [{"id": "fixture", "name": "Example DX12 game", "folder": "/fixture/game", "source": "Steam", "compatibility": "candidate", "managed": False, "enabled": False, "route": "optiscaler", "selected_executable": "DX12/Game.exe", "executable_choices": [{"path": "DX11/Game.exe", "dx12": False}, {"path": "DX12/Game.exe", "dx12": True}], "optiscaler": {"present": False, "runtime": "unknown"}, "framegen_summary": "No runtime evidence"}], "release": {"version": "fixture"}, "jobs": [], "model_catalog": smoke_model_catalog()}
+    def details(self, gid, executable=None):
         return self.library()["games"][0]
     def check_app_updates(self, force=True):
         return {"current": VERSION, "latest": VERSION, "auto_check": False, "update_available": False}

@@ -84,8 +84,8 @@ def shortcut(name, exe, start=''):
 
 class Fixtures(unittest.TestCase):
     def setUp(self):
-        work = PLUGIN.parent.parent / 'work'
-        work.mkdir(exist_ok=True)
+        work = Path(os.environ.get('HELIXSR_TEST_TMP', str(PLUGIN.parent.parent / 'work')))
+        work.mkdir(parents=True, exist_ok=True)
         self.tmp = tempfile.TemporaryDirectory(prefix='backend-tests-', dir=work)
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
@@ -170,6 +170,14 @@ class Fixtures(unittest.TestCase):
     def action(self, name):
         token = self.m.preview(self.game['id'], name)['token']
         return self.m.execute(token)
+
+    def dual_executables(self):
+        self.native.unlink()
+        (self.root / 'Example.exe').unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        write(self.root / 'DX11/Game.exe', pe() + b'larger DX11 binary' * 1024)
+        write(self.root / 'DX12/Game.exe', pe(dx12=True))
+        return 'DX12/Game.exe'
 
     def steam(self, appid='42', build='100', lib=None):
         lib = lib or self.home / '.local/share/Steam'
@@ -1085,6 +1093,32 @@ class LatestCoordinatorTests(Fixtures):
         with self.assertRaises(ValueError):
             self.m.execute_latest(token)
 
+    def test_latest_preserves_explicit_executable_and_target(self):
+        choice = self.dual_executables()
+        preview = self.m.preview_latest(self.game['id'], executable=choice)
+        self.assertEqual(preview['selected_executable'], choice)
+        job = self.m.execute_latest(preview['token'])
+        self.join_worker()
+        self.assertEqual(self.m.jobs[job['id']]['state'], 'completed', self.m.jobs[job['id']]['message'])
+        self.assertTrue((self.root / 'DX12/dxgi.dll').is_file())
+        self.assertFalse((self.root / 'DX11/dxgi.dll').exists())
+
+    def test_latest_rejects_executable_byte_change_before_mutation(self):
+        choice = self.dual_executables()
+        preview = self.m.preview_latest(self.game['id'], executable=choice)
+        original_prepare = self.m.prepare
+        def changed_prepare(*args):
+            prepared = original_prepare(*args)
+            with (self.root / choice).open('ab') as stream:
+                stream.write(b'changed after review')
+            return prepared
+        with patch.object(self.m, 'prepare', side_effect=changed_prepare):
+            job = self.m.execute_latest(preview['token'])
+            self.join_worker()
+        self.assertEqual(self.m.jobs[job['id']]['state'], 'failed')
+        self.assertFalse((self.root / 'DX12/dxgi.dll').exists())
+        self.assertFalse(self.m.record(self.game))
+
     def test_latest_adopts_legacy_then_installs_prepared_version(self):
         write(self.native, pe(ffx=True, helix=True))
         write(self.native.with_name(self.native.stem + '.original.dll'), self.original)
@@ -1104,6 +1138,108 @@ class TransactionTests(Fixtures):
         data = self.m.assess(self.game)
         self.assertEqual(Path(data['main_exe']).name, 'Game.exe')
         self.assertTrue(data['dx12_confirmation_needed'])
+
+    def test_unused_dx12_is_not_automatically_selected_without_example(self):
+        self.native.unlink()
+        (self.root / 'Example.exe').unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        write(self.root / 'Game.exe', pe() + b'largest DX11 binary' * 1024)
+        write(self.root / 'UnusedDX12.exe', pe(dx12=True))
+        data = self.m.assess(self.game)
+        self.assertEqual(data['selected_executable'], 'Game.exe')
+        self.assertTrue(data['dx12_confirmation_needed'])
+        self.assertEqual({x['path'] for x in data['executable_choices']}, {'Game.exe', 'UnusedDX12.exe'})
+
+    def test_dual_folder_choice_survives_install_update_disable_remove(self):
+        choice = self.dual_executables()
+        self.package()
+        default = self.m.assess(self.game)
+        self.assertEqual(default['selected_executable'], 'DX11/Game.exe')
+        self.assertTrue(default['dx12_confirmation_needed'])
+        data = self.m.assess(self.game, executable=choice)
+        self.assertEqual(Path(data['target']), self.root / 'DX12')
+        self.assertFalse(data['dx12_confirmation_needed'])
+        preview = self.m.preview(self.game['id'], 'install', executable=choice)
+        self.assertEqual(preview['selected_executable'], choice)
+        self.m.execute(preview['token'])
+        receipt = self.m.record(self.game)
+        self.assertEqual(receipt['selected_executable'], choice)
+        self.assertFalse(self.m.assess(self.game)['executable_choices'])
+        self.assertFalse((self.root / 'DX11/dxgi.dll').exists())
+        self.action('update')
+        self.assertEqual(self.m.record(self.game)['baseline'], receipt['baseline'])
+        self.assertEqual(self.m.record(self.game)['target'], receipt['target'])
+        self.action('disable')
+        self.assertFalse((self.root / 'DX12/dxgi.dll').exists())
+        self.action('remove')
+        self.assertFalse(self.m.record(self.game))
+
+    def test_prepared_choice_rejects_executable_byte_change(self):
+        choice = self.dual_executables()
+        self.package()
+        token = self.m.preview(self.game['id'], 'install', executable=choice)['token']
+        with (self.root / choice).open('ab') as stream:
+            stream.write(b'changed after review')
+        with self.assertRaisesRegex(ValueError, 'changed since preview'):
+            self.m.execute(token)
+        self.assertFalse((self.root / 'DX12/dxgi.dll').exists())
+
+    def test_invalid_executable_choices_are_rejected(self):
+        self.dual_executables()
+        write(self.root / 'Launcher.exe', pe(dx12=True))
+        write(self.root / 'Small32.exe', pe(machine=0x14c))
+        for choice in ('../outside.exe', str(self.root / 'DX12/Game.exe'),
+                       'Launcher.exe', 'Small32.exe', 'missing.exe', '', 12):
+            with self.subTest(choice=choice), self.assertRaises(ValueError):
+                self.m.assess(self.game, executable=choice)
+
+    def test_invalid_default_exposes_alternative_without_bypassing_other_blocks(self):
+        self.native.unlink()
+        (self.root / 'Example.exe').unlink()
+        write(self.root / 'Game32.exe', pe(machine=0x14c) + b'large default' * 1024)
+        write(self.root / 'DX12/Game.exe', pe(dx12=True))
+        write(self.root / 'DX12/nvngx_dlss.dll', pe())
+        default = self.m.assess(self.game)
+        self.assertEqual(default['compatibility'], 'blocked')
+        self.assertTrue(default['executable_selection_needed'])
+        selected = self.m.assess(self.game, executable='DX12/Game.exe')
+        self.assertEqual(selected['compatibility'], 'candidate')
+        write(self.root / 'easyanticheat.dll', b'protected')
+        self.assertFalse(self.m.assess(self.game)['executable_selection_needed'])
+        self.assertEqual(self.m.assess(self.game, executable='DX12/Game.exe')['compatibility'], 'blocked')
+
+    def test_symlink_executable_choice_is_rejected(self):
+        choice = self.dual_executables()
+        self.link(self.root / 'Alias.exe', self.root / choice)
+        with self.assertRaises(ValueError):
+            self.m.assess(self.game, executable='Alias.exe')
+
+    def test_direct_and_managed_executable_overrides_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'unmanaged OptiScaler'):
+            self.m.assess(self.game, executable='Example.exe')
+        choice = self.dual_executables()
+        self.package()
+        self.m.execute(self.m.preview(self.game['id'], 'install', executable=choice)['token'])
+        with self.assertRaisesRegex(ValueError, 'unmanaged OptiScaler'):
+            self.m.assess(self.game, executable=choice)
+
+    def test_missing_executable_does_not_block_cleanup_or_migrate_old_record(self):
+        choice = self.dual_executables()
+        self.package()
+        self.m.execute(self.m.preview(self.game['id'], 'install', executable=choice)['token'])
+        (self.root / choice).unlink()
+        with self.assertRaisesRegex(ValueError, 'executable is missing'):
+            self.m.preview(self.game['id'], 'update', True)
+        self.action('disable')
+        self.action('remove')
+        self.m.execute(self.m.preview(self.game['id'], 'install', True)['token'])
+        receipt = self.m.record(self.game)
+        receipt.pop('selected_executable')
+        manager.atomic_json(self.m.record_path(self.game), receipt)
+        (self.root / 'DX11/Game.exe').unlink()
+        self.action('disable')
+        self.assertNotIn('selected_executable', self.m.record(self.game))
+        self.action('remove')
 
     def install_overlay_fixture(self):
         self.native.unlink()

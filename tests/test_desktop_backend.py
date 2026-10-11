@@ -94,7 +94,7 @@ class DesktopBackendTests(unittest.TestCase):
         backend = self.service()
         with patch.object(backend.manager, 'preview', return_value={'token': 'x'}) as preview:
             self.assertEqual(backend.preview_action('game', 'disable'), {'token': 'x'})
-            preview.assert_called_once_with('game', 'disable', False)
+            preview.assert_called_once_with('game', 'disable', False, None)
         with patch('desktop.backend.os.geteuid', return_value=1000, create=True), \
                 patch.object(backend.manager, 'execute', return_value={'message': 'disabled'}) as execute:
             self.assertEqual(backend.apply_action('x')['message'], 'disabled')

@@ -43,6 +43,7 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
   reasons: string[]; route: string | null; inputs: string[]; managed: boolean; enabled: boolean;
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
   main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
+  executable_choices?: { path: string; dx12: boolean }[]; selected_executable?: string; executable_selection_needed?: boolean;
   optiscaler: { present: boolean; involved: boolean; helix_configured?: boolean; runtime: string; dlls: string[];
     setup?: { checks: string[]; backend: string; override: string; overlay_shortcut: string; settings: Record<string, string>; guide: string } };
   framegen: FG[]; framegen_summary: string; helix_runtime: string;
@@ -55,9 +56,9 @@ type LauncherImport = { launcher: string; found: number; added: number; candidat
 type Library = { games: Game[]; warnings: string[]; release: Release; license_accepted: boolean; jobs: Job[];
   launcher_import?: LauncherImport; model_catalog?: ModelCatalog };
 type Preview = { token: string; name: string; action: string; route: string; files: string[];
-  warning: string; select_upscaler: string; model?: string; variant_id?: string; release_version?: string };
+  warning: string; select_upscaler: string; model?: string; variant_id?: string; release_version?: string; selected_executable?: string };
 const library = callable<[], Library>("library");
-const details = callable<[string], Game>("game_details");
+const details = callable<[string, string?], Game>("game_details");
 const checkUpdates = callable<[boolean], Release>("check_updates");
 const forgetGame = callable<[string], Library>("forget_game");
 const importFolders = callable<[string[]], Library>("import_folders");
@@ -65,9 +66,9 @@ const importLauncher = callable<[string], Library>("import_launcher");
 const setLicense = callable<[boolean, string?], boolean>("set_license");
 const jobStatus = callable<[], Job[]>("job_status");
 const cancelJob = callable<[string], boolean>("cancel_job");
-const previewAction = callable<[string, string, boolean], Preview>("preview_action");
+const previewAction = callable<[string, string, boolean, string?], Preview>("preview_action");
 const applyAction = callable<[string], { message: string }>("apply_action");
-const previewLatest = callable<[string, boolean, string?], Preview>("preview_latest");
+const previewLatest = callable<[string, boolean, string?, string?], Preview>("preview_latest");
 const installLatest = callable<[string], Job>("install_latest");
 type LaunchIntent = { nonce: string; before: string; after: string; restore: boolean };
 const prepareLaunch = callable<[string, string, string, boolean], LaunchIntent>("prepare_launch_options");
@@ -210,6 +211,7 @@ function Content() {
   const [pluginUpdate, setPluginUpdate] = useState(latestPluginStatus);
   const [pluginInstallMessage, setPluginInstallMessage] = useState(pluginInstaller.message);
   const selectedRef = useRef(selected);
+  const executableRef = useRef<string | undefined>(undefined);
   selectedRef.current = selected;
 
   useEffect(() => {
@@ -225,7 +227,7 @@ function Content() {
     return () => { interactionListeners.delete(changed); };
   }, []);
   useEffect(() => {
-    const changed = (id: string) => { selectedRef.current = id; select(id); };
+    const changed = (id: string) => { if (selectedRef.current !== id) executableRef.current = undefined; selectedRef.current = id; select(id); };
     selectionListeners.add(changed); changed(lastSelected);
     return () => { selectionListeners.delete(changed); };
   }, []);
@@ -250,12 +252,17 @@ function Content() {
     if (result) {
       setData(result); watchJobs(result.jobs);
       if (!selectedRef.current || !result.games.some(g => g.id === selectedRef.current)) {
-        const first = result.games.find(g => g.recovery_available) || result.games.find(g => g.compatibility === "candidate" && g.managed) || result.games.find(g => g.compatibility === "candidate");
+        const first = result.games.find(g => g.recovery_available) || result.games.find(g => g.compatibility === "candidate" && g.managed) || result.games.find(g => g.compatibility === "candidate" || g.executable_selection_needed);
         if (first) chooseGame(first.id);
       }
     }
     const id = selectedRef.current;
-    if (id) { const g = await run(() => details(id)); if (g && selectedRef.current === id) setGame(g); }
+    if (id) {
+      const current = result?.games.find(g => g.id === id);
+      if (current?.managed || current?.route !== "optiscaler") executableRef.current = undefined;
+      const g = await run(() => details(id, executableRef.current));
+      if (g && selectedRef.current === id) setGame(g);
+    }
   }
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
@@ -272,6 +279,17 @@ function Content() {
     jobListeners.add(changed); setJobs(watchedJobs);
     return () => { jobListeners.delete(changed); };
   }, []);
+
+  async function chooseExecutable(path: string) {
+    if (!game || game.managed || game.route !== "optiscaler") return;
+    const id = game.id;
+    executableRef.current = path;
+    setDx12(false);
+    const updated = await run(() => details(id, path));
+    if (selectedRef.current !== id || executableRef.current !== path) return;
+    if (updated) setGame(updated);
+    else { executableRef.current = undefined; setGame(undefined); }
+  }
 
   async function importFromLauncher() {
     const source = selectedLauncher;
@@ -299,7 +317,8 @@ function Content() {
       setGame(undefined);
     } else {
       const id = selectedRef.current;
-      const updated = await run(() => details(id));
+      if (current.managed || current.route !== "optiscaler") executableRef.current = undefined;
+      const updated = await run(() => details(id, executableRef.current));
       if (selectedRef.current === id) setGame(updated);
     }
     toaster.toast({ title: report.warnings.length ? "Game import finished with warnings" : "Game import complete", body: `${label}: ${message}`, duration: 6000 });
@@ -310,12 +329,14 @@ function Content() {
     const currentRelease = await run(() => checkUpdates(true));
     if (!currentRelease?.version || currentRelease.error) { setError(currentRelease?.error || "Could not check the latest HelixSR release. Retry Check for updates."); return; }
     setData(d => d ? { ...d, release: currentRelease } : d);
-    const p = await run(() => previewLatest(game.id, dx12, variant));
+    const executable = !game.managed && game.route === "optiscaler" ? game.selected_executable : undefined;
+    const p = await run(() => previewLatest(game.id, dx12, variant, executable));
     if (!p) return;
     openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`${game.managed || game.legacy ? "Update" : "Install"} HelixSR ${currentRelease.version}`}
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
         <p>{p.name}: {p.warning}</p>
         <p>Selected model: {p.model}. HelixSR release: {p.release_version}.</p>
+        {p.selected_executable && <p>Game executable: {p.selected_executable}</p>}
         <p>Required downloads and local preparation are automatic. Uses HelixSR freeware and NVIDIA DLSS under their linked licenses. Locally generated network files must stay on this device.</p>
         <p>Files: {p.files.join(", ")}</p>
       </div>}
@@ -330,11 +351,13 @@ function Content() {
 
   async function action(name: string) {
     if (!game) return;
-    const p = await run(() => previewAction(game.id, name, dx12));
+    const executable = !game.managed && game.route === "optiscaler" ? game.selected_executable : undefined;
+    const p = await run(() => previewAction(game.id, name, dx12, executable));
     if (!p) return;
     openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`${name.toUpperCase()}: ${p.name}`}
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
         <p>{p.warning}</p><p>Route: {p.route}. In game: select {p.select_upscaler}.</p>
+        {p.selected_executable && <p>Game executable: {p.selected_executable}</p>}
         <p>Files: {p.files.join(", ")}</p>
       </div>} strOKButtonText="Apply reviewed change" strCancelButtonText="Cancel"
       onOK={() => { if (!beginReview()) return; void run(() => applyAction(p.token)).then(async result => {
@@ -396,7 +419,7 @@ function Content() {
   }
   const running = jobs.some(x => x.state === "running");
   const disabled = busy || running || modalOpen || !!pluginUpdate?.pending;
-  const games = (data?.games || []).filter(g => g.compatibility === "candidate" || g.recovery_available || g.managed);
+  const games = (data?.games || []).filter(g => g.compatibility === "candidate" || g.recovery_available || g.managed || g.executable_selection_needed);
   const unavailable = (data?.games || []).filter(g => !games.includes(g));
   const infoStyle = { fontSize: "13px", lineHeight: "1.45", overflowWrap: "anywhere" as const, whiteSpace: "pre-wrap" as const };
 
@@ -416,11 +439,18 @@ function Content() {
       <div className={`${game?.enabled || game?.legacy ? "helix-installed" : ""} helix-selected`}><PanelSectionRow>
         <DropdownItem layout="below" label="Game" menuLabel="Detected games" selectedOption={selected}
           strDefaultLabel={games.length ? "Select a game" : "No compatible games detected"} disabled={busy || modalOpen || !games.length}
-          rgOptions={games.map(g => ({ data: g.id, label: <span style={{ borderLeft: `3px solid ${g.enabled || g.legacy ? "#55cd92" : "#8b8297"}`, paddingLeft: 8 }}>{g.name} · {g.recovery_available ? "Recovery needed" : g.compatibility !== "candidate" ? "Needs review" : g.managed ? g.enabled ? "Enabled" : "Disabled" : g.legacy ? "Existing HelixSR" : "Not installed"}</span> }))}
+          rgOptions={games.map(g => ({ data: g.id, label: <span style={{ borderLeft: `3px solid ${g.enabled || g.legacy ? "#55cd92" : "#8b8297"}`, paddingLeft: 8 }}>{g.name} · {g.executable_selection_needed ? "Choose executable" : g.recovery_available ? "Recovery needed" : g.compatibility !== "candidate" ? "Needs review" : g.managed ? g.enabled ? "Enabled" : "Disabled" : g.legacy ? "Existing HelixSR" : "Not installed"}</span> }))}
           onChange={option => chooseGame(String(option.data))} />
       </PanelSectionRow></div>
       {game && <>
         <PanelSectionRow><div className="helix-muted" style={{ color: game.enabled ? "#8ee8bc" : "#c5d1df" }}>{game.enabled ? `HelixSR enabled · ${game.installed_version}` : game.legacy ? "Existing HelixSR installation" : "HelixSR is not enabled"}</div></PanelSectionRow>
+        {!game.managed && game.route === "optiscaler" && !!game.executable_choices?.length && (game.executable_choices.length > 1 || !game.executable_choices.some(choice => choice.path === game.selected_executable)) && <>
+          <PanelSectionRow><DropdownItem layout="below" label="Game executable" menuLabel="Choose the executable you launch"
+            selectedOption={game.selected_executable} strDefaultLabel="Choose a game executable" disabled={disabled}
+            rgOptions={game.executable_choices!.map(choice => ({ data: choice.path, label: `${choice.path} · ${choice.dx12 ? "DX12 detected" : "Confirm DX12"}` }))}
+            onChange={option => void chooseExecutable(String(option.data))} /></PanelSectionRow>
+          <PanelSectionRow><div className="helix-muted">Choose the DX12 executable you actually launch. HelixSR will be installed beside it. Existing installs keep their recorded folder; remove them before choosing another executable.</div></PanelSectionRow>
+        </>}
         {game.dx12_confirmation_needed && <PanelSectionRow><ToggleField label="Game is set to DirectX 12"
           description="Confirm the renderer selected in the game." checked={dx12} onChange={setDx12} disabled={disabled} /></PanelSectionRow>}
         <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate"}

@@ -692,12 +692,13 @@ class Manager:
         except (OSError, ValueError):
             return False
 
-    def assess_safe(self, game, detailed=True):
+    def assess_safe(self, game, detailed=True, executable=None):
         try:
-            return self.assess(game, detailed=detailed)
+            return self.assess(game, detailed=detailed, executable=executable)
         except (OSError, ValueError) as e:
             return dict(**game, compatibility='blocked', reasons=[str(e)], route=None,
                         managed=False, enabled=False, inputs=[],
+                        executable_choices=[], selected_executable=None, executable_selection_needed=False,
                         recovery_available=self.recovery_available(game),
                         optiscaler={'present': False, 'involved': False, 'helix_configured': False,
                                     'runtime': 'unknown', 'dlls': []},
@@ -711,7 +712,7 @@ class Manager:
             raise ValueError('Game disappeared. Refresh library.')
         return self.entries[gid]
 
-    def assess(self, game, detailed=True):
+    def assess(self, game, detailed=True, executable=None):
         root = safe_root(game['folder'])
         tree = scan_tree(root)
         names = [(d / n, n.lower()) for d, ns in tree for n in ns]
@@ -730,6 +731,29 @@ class Manager:
         native_api = bool(targets) and all(pe_info(p)['ffx'] for p in targets)
         route = rec.get('route') or ('direct' if native_api else 'optiscaler' if inputs and main else
                                     'direct' if targets else None)
+        # Native API discovery uses the original heuristic independently of an
+        # OptiScaler executable choice. An existing receipt owns its target.
+        eligible = []
+        if not rec and route == 'optiscaler':
+            for candidate in exes:
+                checked_path(root, str(candidate.relative_to(root)))
+                info = pe_info(candidate)
+                if info['arch'] == 'x64':
+                    eligible.append(dict(path=candidate.relative_to(root).as_posix(), dx12=info['dx12']))
+        if executable is not None:
+            if rec or route != 'optiscaler':
+                raise ValueError('Executable selection is only available for unmanaged OptiScaler games')
+            if not isinstance(executable, str) or not executable:
+                raise ValueError('Select an eligible game executable')
+            chosen = checked_path(root, executable)
+            relative = chosen.relative_to(root).as_posix()
+            if relative not in {choice['path'] for choice in eligible}:
+                raise ValueError('Selected executable is not an eligible scanned x64 game executable')
+            main = chosen
+        elif rec and rec.get('route') == 'optiscaler' and rec.get('selected_executable'):
+            main = checked_path(root, rec['selected_executable'])
+            if not main.is_file():
+                main = None
         target = Path(rec['target']) if rec else main.parent if main else None
         reasons, blocked = [], []
         if platform.machine().lower() not in ('x86_64', 'amd64'):
@@ -743,7 +767,7 @@ class Manager:
                 info = pe_info(p)
                 if info['arch'] != 'x64' or not info['ffx']:
                     blocked.append(f'{p.name}: expected x64 FidelityFX API not found')
-        if main and pe_info(main)['arch'] != 'x64':
+        if main and pe_info(main)['arch'] != 'x64' and not rec:
             blocked.append('Main executable is not x64 Windows PE (32-bit, native Linux or unknown architecture)')
         if route == 'optiscaler' and not (main and pe_info(main)['dx12']):
             reasons.append('DX12 is not confirmed by executable imports; confirm the game runs DX12 before installation')
@@ -804,6 +828,11 @@ class Manager:
         data = dict(game, compatibility='blocked' if blocked else 'candidate' if route else 'unsupported',
                     reasons=blocked + reasons, route=route, inputs=inputs, target=str(target) if target else None,
                     targets=[str(p) for p in targets], main_exe=str(main) if main else None,
+                    executable_choices=eligible,
+                    executable_selection_needed=bool(eligible and not rec and blocked == [
+                        'Main executable is not x64 Windows PE (32-bit, native Linux or unknown architecture)']),
+                    selected_executable=(main.relative_to(root).as_posix() if main else
+                                         rec.get('selected_executable')) if route == 'optiscaler' else None,
                     managed=bool(rec), enabled=rec.get('enabled', False), installed_version=rec.get('version') or
                     next((pe_info(p).get('helix_version') for p in targets if pe_info(p)['helix']), None),
                     legacy=legacy, package_version=package[2]['version'] if package else None,
@@ -925,16 +954,17 @@ class Manager:
         atomic_json(self.settings / 'release.json', old)
         return old
 
-    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None):
+    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None):
         with self.lock:
             selected = select_variant(variant_id)
             release = self.check_update()
             if release.get('error') or not release.get('version'):
                 raise ValueError(release.get('error') or 'Check upstream updates first')
             game = self.get_game(gid)
-            data = self.assess(game)
+            data = self.assess(game, executable=executable)
             if data['compatibility'] != 'candidate':
                 raise ValueError('; '.join(data['reasons']))
+            self.validate_install_executable(data)
             if data['dx12_confirmation_needed'] and not dx12_confirmed:
                 raise ValueError('Confirm the game uses DirectX 12')
             if data['legacy']:
@@ -943,8 +973,12 @@ class Manager:
             token = uuid.uuid4().hex
             self.previews[token] = dict(game=gid, action='latest', expires=time.time()+120,
                                        release=dict(release), variant_id=selected['id'],
+                                       executable=data['selected_executable'] if not data['managed'] and data['route'] == 'optiscaler' else None,
+                                       selected_executable=data['selected_executable'],
+                                       dx12=dx12_confirmed,
                                        fingerprint=self.fingerprint(game, data, include_package=False))
             return dict(token=token, name=game['name'], action='latest', route=data['route'],
+                        selected_executable=data['selected_executable'],
                         model=selected['label'], variant_id=selected['id'], release_version=release['version'],
                         files=self.planned_paths(game, data, 'latest'),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
@@ -987,7 +1021,7 @@ class Manager:
                         if self.cancel.is_set():
                             raise ValueError('Cancelled before installation')
                         with self.lock:
-                            data = self.assess(game)
+                            data = self.assess(game, executable=preview.get('executable'))
                             if data['compatibility'] != 'candidate' or self.fingerprint(game, data, include_package=False) != preview['fingerprint']:
                                 raise ValueError('Game changed during preparation or is running. Close it and review again.')
                             job['message'] = 'Installing HelixSR and verifying game files'
@@ -1170,7 +1204,7 @@ class Manager:
             # Work is exclusively owned by this job. Logs and successful package remain.
             shutil.rmtree(work, ignore_errors=True)
 
-    def preview(self, gid, action, dx12_confirmed=False):
+    def preview(self, gid, action, dx12_confirmed=False, executable=None):
         with self.lock:
             game = self.get_game(gid)
             if action not in ('install', 'update', 'enable', 'disable', 'remove', 'adopt', 'recover'):
@@ -1188,11 +1222,13 @@ class Manager:
                             files=list(saved.get('before', {})),
                             select_upscaler='previous configuration',
                             warning='Recover the interrupted transaction before any new installation.')
-            data = self.assess(game)
+            data = self.assess(game, executable=executable)
             rec = self.record(game)
             package = None
             if data['compatibility'] != 'candidate':
                 raise ValueError('; '.join(data['reasons']))
+            if action in ('install', 'update', 'enable'):
+                self.validate_install_executable(data)
             if data['dx12_confirmation_needed'] and not dx12_confirmed and action in ('install', 'update'):
                 raise ValueError('Confirm that this game is set to DirectX 12')
             if action == 'adopt' and not data['legacy']:
@@ -1228,8 +1264,11 @@ class Manager:
             fingerprint = self.fingerprint(game, data, package=package)
             self.previews[token] = dict(game=gid, action=action, fingerprint=fingerprint,
                                        package_selection=package_selection(package[2]) if action in ('install', 'update', 'enable') else None,
+                                       executable=data['selected_executable'] if not data['managed'] and data['route'] == 'optiscaler' else None,
+                                       selected_executable=data['selected_executable'],
                                        expires=time.time()+120, dx12=dx12_confirmed)
             return dict(token=token, action=action, name=game['name'], route=data['route'],
+                        selected_executable=data['selected_executable'],
                         files=self.planned_paths(game, data, action, package),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
                         warning=('Close the game. Originals are retained for disable/remove. '
@@ -1241,6 +1280,11 @@ class Manager:
                                  'Game settings and frame generation are not changed.'),
                         expires_at=time.time()+120)
 
+    def validate_install_executable(self, data):
+        if data['route'] == 'optiscaler' and (not data.get('main_exe')
+                or pe_info(Path(data['main_exe']))['arch'] != 'x64'):
+            raise ValueError('Reviewed OptiScaler executable is missing or is not x64 Windows PE; disable/remove remain available')
+
     def fingerprint(self, game, data, include_package=True, package=AUTO_PACKAGE):
         # Observe game drift separately from an install's conflict checks.
         # Potential new dependencies must be stable before/after preparation.
@@ -1251,6 +1295,11 @@ class Manager:
             if fg not in paths:
                 paths.append(fg)
         files = {}
+        files['route'] = data['route']
+        files['target'] = data.get('target')
+        files['selected_executable'] = data.get('selected_executable')
+        executable = data.get('main_exe')
+        files['executable_sha256'] = sha(executable) if executable and Path(executable).is_file() else None
         files['installation_record'] = rec
         for rel in paths:
             p = checked_path(Path(game['folder']), rel)
@@ -1319,7 +1368,7 @@ class Manager:
                     raise ValueError('Wait for Steam download/update completion before recovery')
             self.rollback(game)
             return {'message': 'Interrupted transaction recovered'}
-        data = self.assess(game)
+        data = self.assess(game, executable=preview.get('executable'))
         rec = self.record(game)
         package = None
         if preview['action'] in ('install', 'update', 'enable'):
@@ -1379,6 +1428,8 @@ class Manager:
                         durable_copy(p, dst, before[rel])
                 previous = dict(route=data['route'], target=data['target'], targets=data['targets'],
                                 baseline=baseline, enabled=False, version=None)
+                if data['route'] == 'optiscaler':
+                    previous['selected_executable'] = data['selected_executable']
             if action == 'adopt':
                 # Baseline restores native DLL and removes only identified Helix payload.
                 for target in map(Path, data['targets']):

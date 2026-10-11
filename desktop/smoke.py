@@ -42,7 +42,7 @@ class StressBackend:
         self._called()
         return self._library()
 
-    def details(self, gid):
+    def details(self, gid, executable=None):
         self._called()
         return self._game()
 
@@ -50,13 +50,13 @@ class StressBackend:
         self._called()
         return dict(auto_check=False, update_available=False)
 
-    def preview_latest(self, gid, confirmed=False, variant_id=None):
+    def preview_latest(self, gid, confirmed=False, variant_id=None, executable=None):
         self._called()
         assert variant_id == "helixsr-model-e", variant_id
         return dict(token="fixture", action="install", name="Fixture DX12 game",
                     route="direct", files=["fixture.dll"], model="HelixSR Model E", release_version="fixture")
 
-    def preview_action(self, gid, action, confirmed=False):
+    def preview_action(self, gid, action, confirmed=False, executable=None):
         self._called()
         return dict(token="fixture", action=action, name="Fixture DX12 game",
                     route="direct", files=["fixture.dll"])

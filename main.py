@@ -80,9 +80,9 @@ class Plugin:
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.refresh)
 
-    async def game_details(self, gid):
+    async def game_details(self, gid, executable=None):
         async with self.api_lock:
-            return await asyncio.to_thread(self.manager.assess_safe, self.manager.get_game(gid))
+            return await asyncio.to_thread(self.manager.assess_safe, self.manager.get_game(gid), executable=executable)
 
     async def import_game(self, folder, name):
         async with self.api_lock:
@@ -148,13 +148,13 @@ class Plugin:
     async def cancel_job(self, jid):
         return self.manager.cancel_job(jid)
 
-    async def preview_action(self, gid, action, dx12_confirmed=False):
+    async def preview_action(self, gid, action, dx12_confirmed=False, executable=None):
         async with self.api_lock:
-            return await asyncio.to_thread(self.manager.preview, gid, action, dx12_confirmed)
+            return await asyncio.to_thread(self.manager.preview, gid, action, dx12_confirmed, executable)
 
-    async def preview_latest(self, gid, dx12_confirmed=False, variant_id=None):
+    async def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None):
         async with self.api_lock:
-            return await asyncio.to_thread(self.manager.preview_latest, gid, dx12_confirmed, variant_id)
+            return await asyncio.to_thread(self.manager.preview_latest, gid, dx12_confirmed, variant_id, executable)
 
     async def install_latest(self, token):
         async with self.api_lock:
