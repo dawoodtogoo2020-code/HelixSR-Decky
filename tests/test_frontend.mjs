@@ -3,7 +3,19 @@ import test from "node:test";
 
 import { proxyOptions } from "../src/launchOptions.ts";
 import { PluginInstaller } from "../src/pluginInstaller.ts";
-import { gameStatus } from "../src/gameStatus.ts";
+import { canRestore, gameStatus } from "../src/gameStatus.ts";
+
+test("unsupported renderer explains the limitation and permits only verified restoration", () => {
+  const game = {compatibility: "unsupported", managed: true, enabled: true, legacy: false,
+    installation_status: {state: "unsupported", label: "Unsupported", running: false,
+      summary: "God of War (2018) uses DirectX 11 only. HelixSR requires DirectX 12.",
+      selectable: true, can_modify: false, can_restore: true, issues: []}};
+  assert.match(gameStatus(game).summary, /Unsupported:.*DirectX 11.*DirectX 12/);
+  assert.equal(gameStatus(game).installed, false);
+  assert.equal(canRestore(game), true);
+  assert.equal(canRestore({...game, installation_status: {...game.installation_status, can_restore: false}}), false);
+  assert.equal(canRestore({compatibility: "blocked", managed: true, enabled: true, legacy: false}), false);
+});
 
 test("changed managed files cannot appear as a healthy enabled install", () => {
   const enabled = {compatibility: "candidate", managed: true, enabled: true, legacy: false, installed_version: "1.8.1"};

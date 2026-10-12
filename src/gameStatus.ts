@@ -3,10 +3,15 @@ type GameState = {
   recovery_available?: boolean; executable_selection_needed?: boolean; installed_version?: string;
   installation_status?: {
     state: "ready" | "running" | "review" | "unsupported" | "recovery";
-    label: string; summary: string; running: boolean; selectable: boolean; can_modify: boolean;
+    label: string; summary: string; running: boolean; selectable: boolean; can_modify: boolean; can_restore?: boolean;
     issues: {code: string; title: string; reason: string; steps: string[]; blocking: boolean}[];
   };
 };
+
+export function canRestore(game: GameState) {
+  return game.installation_status?.can_restore ??
+    (game.compatibility === "candidate" && game.managed && game.installation_status?.can_modify !== false);
+}
 
 export function gameStatus(game: GameState) {
   if (game.installation_status) {

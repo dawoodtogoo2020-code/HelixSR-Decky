@@ -44,6 +44,8 @@ PACKAGE_FILES = NETWORK + (DLL, 'optiscaler/OptiScaler.dll',
 INPUTS = {'nvngx_dlss.dll': 'DLSS', 'libxess.dll': 'XeSS',
           'ffx_fsr2_api_x64.dll': 'FSR 2', 'ffx_fsr2_api_dx12_x64.dll': 'FSR 2'}
 ANTI = ('easyanticheat', 'battleye', 'beclient', 'equ8', 'faceit', 'vanguard')
+# Official Steam requirements: https://store.steampowered.com/app/1593500/
+DX11_ONLY_STEAM_APPS = {'1593500': 'God of War (2018)'}
 LICENSE_REV = 'helixsr-local-nvidia-network-2026-10'
 RELEASE_POLICY = 2
 AUTO_PACKAGE = object()
@@ -794,6 +796,9 @@ class Manager:
                 main = None
         target = Path(rec['target']) if rec else main.parent if main else None
         reasons, blocked = [], []
+        dx11_title = DX11_ONLY_STEAM_APPS.get(str(game.get('appid', ''))) if game.get('source') == 'Steam' else None
+        if dx11_title:
+            reasons.append(f'{dx11_title} uses DirectX 11 only. HelixSR requires DirectX 12, and OptiScaler cannot change the game\'s renderer.')
         if platform.machine().lower() not in ('x86_64', 'amd64'):
             blocked.append('HelixSR requires an x86_64 host')
         if os.name == 'posix' and os.geteuid() == 0:
@@ -807,7 +812,7 @@ class Manager:
                     blocked.append(f'{p.name}: expected x64 FidelityFX API not found')
         if main and pe_info(main)['arch'] != 'x64' and not rec:
             blocked.append('Main executable is not x64 Windows PE (32-bit, native Linux or unknown architecture)')
-        if route == 'optiscaler' and not (main and pe_info(main)['dx12']):
+        if not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']):
             reasons.append('DX12 is not confirmed by executable imports; confirm the game runs DX12 before installation')
         directory_names = [str(d.relative_to(root)).lower() for d, _ in tree]
         if any(any(a in n for a in ANTI) for _, n in names) or any(any(a in n for a in ANTI) for n in directory_names):
@@ -881,11 +886,11 @@ class Manager:
             checked_path(root, str(p.relative_to(root)))
         aware = awareness(dict(game, managed=bool(rec), enabled=rec.get('enabled', False)), tree, self.home, route, target)
         package = self.package(game, route)
-        data = dict(game, compatibility='blocked' if blocked else 'candidate' if route else 'unsupported',
+        data = dict(game, compatibility='blocked' if blocked else 'unsupported' if dx11_title else 'candidate' if route else 'unsupported',
                     reasons=blocked + reasons, route=route, inputs=inputs, target=str(target) if target else None,
                     targets=[str(p) for p in targets], main_exe=str(main) if main else None,
-                    executable_choices=eligible,
-                    executable_selection_needed=bool(eligible and not rec and blocked == [
+                    renderer_unsupported=bool(dx11_title), executable_choices=[] if dx11_title else eligible,
+                    executable_selection_needed=bool(not dx11_title and eligible and not rec and blocked == [
                         'Main executable is not x64 Windows PE (32-bit, native Linux or unknown architecture)']),
                     selected_executable=(main.relative_to(root).as_posix() if main else
                                          rec.get('selected_executable')) if route == 'optiscaler' else None,
@@ -895,7 +900,7 @@ class Manager:
                     installed_model=variant_label(rec.get('variant')) if rec or legacy else None,
                     installed_variant=rec.get('variant', {}).get('id') if valid_variant(rec.get('variant')) else None,
                     recovery_available=self.recovery_available(game), steam_build_review=steam_build_review,
-                    dx12_confirmation_needed=route == 'optiscaler' and not (main and pe_info(main)['dx12']),
+                    dx12_confirmation_needed=not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']),
                     **aware)
         if not detailed:
             data.pop('logs', None)
@@ -1316,6 +1321,14 @@ class Manager:
             # Work is exclusively owned by this job. Logs and successful package remain.
             shutil.rmtree(work, ignore_errors=True)
 
+    @staticmethod
+    def action_compatible(data, action):
+        # An unsupported renderer can still restore owned originals. Any other
+        # assessment blocker (build, hashes, process, staging) remains decisive.
+        return (data['compatibility'] == 'candidate' or
+                action in ('disable', 'remove') and data['compatibility'] == 'unsupported'
+                and data.get('renderer_unsupported') and data.get('managed'))
+
     def preview(self, gid, action, dx12_confirmed=False, executable=None):
         with self.lock:
             game = self.get_game(gid)
@@ -1337,7 +1350,7 @@ class Manager:
             data = self.assess(game, executable=executable)
             rec = self.record(game)
             package = None
-            if data['compatibility'] != 'candidate':
+            if not self.action_compatible(data, action):
                 raise ValueError('; '.join(data['reasons']))
             if action in ('install', 'update', 'enable'):
                 self.validate_install_executable(data)
@@ -1487,7 +1500,7 @@ class Manager:
             package = self.package(game, data['route'],
                                    variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
                                    selection=preview.get('package_selection'))
-        if (data['compatibility'] != 'candidate'
+        if (not self.action_compatible(data, preview['action'])
                 or self.fingerprint(game, data, package=package) != preview['fingerprint']):
             raise ValueError('Game changed since preview; refresh and review again')
         return self.mutate(game, data, preview['action'], package)

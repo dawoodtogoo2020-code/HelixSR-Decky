@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky beta release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.15.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin.
+3. Open the [HelixSR Decky release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.16.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin. It is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -43,7 +43,7 @@ The **HelixSR model** dropdown in the selected game's details shows supported ne
 
 **Enable** restores the recorded prepared package rather than upgrading to a newer cache. If an older disabled installation has no provable package identity, choose **Update HelixSR** and review the supported model instead. **Disable** and **Remove** still restore owned originals when model metadata needs review. Update both the Decky plugin and desktop app before using new model support on the same game.
 
-1. Launch the game's **DirectX 12** version. Native Linux, Vulkan-only, DirectX 11 and 32-bit games are unsupported by this workflow.
+1. Launch the game's **DirectX 12** version. Native Linux, Vulkan-only, DirectX 11 and 32-bit games are unsupported by this workflow. **God of War (2018) is DirectX 11 only**, so HelixSR cannot run in it. Having DLSS files does not change its renderer, and neither OptiScaler nor a DX12 launch option adds DirectX 12 support. Use the game's built-in upscaling instead. If an earlier plugin installed HelixSR, Disable or Remove can restore recorded originals after the normal file, Steam build and running-game checks pass. [Official game requirements](https://store.steampowered.com/app/1593500/).
 2. For **Native FSR 3.1 replacement**, choose **AMD FSR** in the game. That selection reaches the replaced native upscaler.
 3. For **OptiScaler proxy**, select the supported input shown for that game, commonly **DLSS**, or a supported XeSS/FSR input. OptiScaler forwards that input into HelixSR. The DLSS option is the game input; HelixSR executes DLSS Model E through its own shaders rather than NVIDIA's native runtime.
 4. For a Steam OptiScaler game, use **Review Proton proxy launch option** if required. Review the proposed `WINEDLLOVERRIDES="dxgi=n,b"` change and confirm it once. The plugin preserves your other launch options and verifies the saved change. For Heroic or Lutris, apply the shown override in that launcher's settings instead.

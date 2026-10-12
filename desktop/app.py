@@ -422,7 +422,8 @@ class MainWindow(QMainWindow):
             visible = (action == "recover" and game.get("recovery_available")) or (action == "adopt" and game.get("legacy")) or (action in ("enable", "disable", "remove") and game.get("managed"))
             button.setVisible(bool(visible))
             recovery_safe = not report.get('running') and not any(i.get('code') == 'steam_update' for i in report.get('issues', []))
-            button.setEnabled(free and bool(visible) and (recovery_safe if action == "recover" else candidate))
+            allowed = report.get('can_restore', candidate) if action in ('disable', 'remove') else candidate
+            button.setEnabled(free and bool(visible) and (recovery_safe if action == "recover" else allowed))
         self.forget.setEnabled(free and game.get("source") == "Imported" and not game.get("managed"))
         self.launch.setEnabled(free and bool(game))
         self.app_download.setEnabled(free and bool(self.app_update.get("update_available")) and not self.app_update.get("error"))

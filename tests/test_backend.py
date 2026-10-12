@@ -1421,6 +1421,74 @@ class TransactionTests(Fixtures):
                     self.assertEqual(nested.read_bytes(), self.original)
         self.assertFalse(self.m.record(self.game))
 
+    def test_god_of_war_2018_is_unsupported_even_with_dlss_and_dx12_confirmation(self):
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        self.game.update(source='Steam', appid='1593500', name='God of War')
+        before = {p.name: p.read_bytes() for p in self.root.iterdir()}
+        data = self.m.assess(self.game)
+        self.assertEqual(data['compatibility'], 'unsupported')
+        self.assertFalse(data['dx12_confirmation_needed'])
+        self.assertFalse(data['executable_choices'])
+        status = data['installation_status']
+        self.assertEqual(status['label'], 'Unsupported')
+        self.assertIn('DirectX 11', status['summary'])
+        self.assertIn('OptiScaler cannot', status['summary'])
+        self.assertIn('built-in upscaling', status['issues'][0]['steps'][0])
+        self.assertFalse(status['can_modify'])
+        self.assertFalse(status['can_restore'])
+        for action in ('install', 'update', 'enable', 'adopt'):
+            with self.subTest(action=action), self.assertRaisesRegex(ValueError, 'DirectX 11'):
+                self.m.preview(self.game['id'], action, dx12_confirmed=True)
+        with patch.object(self.m, 'check_update', return_value=dict(version='1.8.1')):
+            with self.assertRaisesRegex(ValueError, 'DirectX 11'):
+                self.m.preview_latest(self.game['id'], dx12_confirmed=True)
+        self.assertFalse(self.m.previews)
+        self.assertFalse(self.m.record(self.game))
+        self.assertEqual(before, {p.name: p.read_bytes() for p in self.root.iterdir()})
+
+    def test_god_of_war_2018_can_restore_owned_install_but_never_reenable(self):
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        self.package()
+        self.action('install')
+        self.game.update(source='Steam', appid='1593500', name='God of War')
+        data = self.m.assess(self.game)
+        self.assertEqual(data['compatibility'], 'unsupported')
+        self.assertTrue(data['installation_status']['selectable'])
+        self.assertTrue(data['installation_status']['can_restore'])
+        for action in ('update', 'enable'):
+            with self.assertRaisesRegex(ValueError, 'DirectX 11'):
+                self.m.preview(self.game['id'], action, dx12_confirmed=True)
+        self.action('disable')
+        self.assertFalse((self.root / 'dxgi.dll').exists())
+        with self.assertRaisesRegex(ValueError, 'DirectX 11'):
+            self.m.preview(self.game['id'], 'enable', dx12_confirmed=True)
+        self.action('remove')
+        self.assertFalse(self.m.record(self.game))
+        self.assertTrue((self.root / 'nvngx_dlss.dll').is_file())
+
+    def test_unsupported_renderer_does_not_bypass_restore_hash_or_running_guards(self):
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        self.package()
+        self.action('install')
+        self.game.update(source='Steam', appid='1593500', name='God of War')
+        preview = self.m.preview(self.game['id'], 'remove')
+        with patch('manager.active_processes', return_value=[{'pid': 42}]):
+            data = self.m.assess(self.game)
+            self.assertEqual(data['compatibility'], 'blocked')
+            self.assertFalse(data['installation_status']['can_restore'])
+            with self.assertRaises(ValueError):
+                self.m.execute(preview['token'])
+        write(self.root / 'dxgi.dll', b'changed by another mod')
+        for action in ('disable', 'remove'):
+            with self.assertRaisesRegex(ValueError, 'Managed files changed'):
+                self.m.preview(self.game['id'], action)
+        self.assertFalse(self.m.assess(self.game)['installation_status']['can_restore'])
+        self.assertEqual((self.root / 'dxgi.dll').read_bytes(), b'changed by another mod')
+        self.assertTrue(self.m.record(self.game))
+
     def test_selected_executable_requires_own_dx12_evidence(self):
         self.native.unlink()
         write(self.root / 'nvngx_dlss.dll', pe())

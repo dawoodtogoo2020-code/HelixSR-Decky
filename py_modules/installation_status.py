@@ -47,6 +47,11 @@ def _steam_build_steps(game):
 def _issue(reason, game=None):
     """Classify a manager diagnostic without altering its original wording."""
     lower = reason.lower()
+    if 'uses directx 11 only' in lower:
+        steps = ['Use the game\'s built-in upscaling instead. A plugin setting or DX12 launch option cannot add a renderer the game does not have.']
+        if (game or {}).get('managed'):
+            steps.append('Close the game, then use Disable HelixSR or Remove and restore originals. Existing file, Steam build and download checks must still pass.')
+        return ('unsupported_renderer', 'DirectX 11 is unsupported', steps)
     if reason == RUNNING_REASON:
         return ('game_running', 'Game running',
                 ['Close the game normally before changing its files, then refresh.'])
@@ -110,7 +115,7 @@ def installation_status(game):
     for reason in reasons:
         code, title, steps = _issue(reason, game)
         issues.append(dict(code=code, title=title, reason=reason, steps=steps,
-                           blocking=(material or running) and code not in ADVISORY_CODES))
+                           blocking=(material or running or code == 'unsupported_renderer') and code not in ADVISORY_CODES))
     if recovery:
         issues.insert(0, dict(code='recovery_needed', title='Recovery needed',
                               reason='An interrupted HelixSR transaction needs recovery.',
@@ -147,5 +152,7 @@ def installation_status(game):
 
     selectable = (compatibility == 'candidate' or state == 'running' or bool(game.get('managed'))
                   or recovery or bool(game.get('executable_selection_needed')))
+    can_restore = bool(game.get('managed')) and (state == 'ready' or
+        compatibility == 'unsupported' and game.get('renderer_unsupported') and not running and not recovery)
     return dict(state=state, label=label, summary=summary, running=running,
-                selectable=selectable, can_modify=state == 'ready', issues=issues)
+                selectable=selectable, can_modify=state == 'ready', can_restore=can_restore, issues=issues)

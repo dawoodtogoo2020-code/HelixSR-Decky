@@ -340,6 +340,27 @@ class DesktopWidgetTests(unittest.TestCase):
         self.settle()
         self.assertIn('Cached desktop network error', self.window.notice.text())
 
+    def test_unsupported_renderer_shows_reason_and_keeps_only_restoration_available(self):
+        from installation_status import installation_status
+        game = self.backend.game
+        game.update(name='God of War (2018)', compatibility='unsupported', managed=True,
+                    enabled=True, renderer_unsupported=True,
+                    reasons=['God of War (2018) uses DirectX 11 only. HelixSR requires DirectX 12, and OptiScaler cannot change the game\'s renderer.'])
+        game['installation_status'] = installation_status(game)
+        self.window._details_received('a', game)
+        self.assertIn('DirectX 11', self.window.blockers.text())
+        self.assertIn('built-in upscaling', self.window.blockers.text())
+        self.assertTrue(self.window.dx12.isHidden())
+        self.assertFalse(self.window.install.isEnabled())
+        self.assertFalse(self.window.actions['enable'].isEnabled())
+        self.assertTrue(self.window.actions['disable'].isEnabled())
+        self.assertTrue(self.window.actions['remove'].isEnabled())
+        game.update(compatibility='blocked', reasons=game['reasons'] + ['Managed files changed; ownership needs review before further changes: dxgi.dll'])
+        game['installation_status'] = installation_status(game)
+        self.window._details_received('a', game)
+        self.assertFalse(self.window.actions['disable'].isEnabled())
+        self.assertFalse(self.window.actions['remove'].isEnabled())
+
     def test_dx12_confirmation_required_only_when_needed(self):
         self.backend.game['dx12_confirmation_needed'] = True
         self.window._details_received('a', self.backend.game)

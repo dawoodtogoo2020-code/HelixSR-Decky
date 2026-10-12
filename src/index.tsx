@@ -5,7 +5,7 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 import { FaAdjust } from "react-icons/fa";
 import { proxyOptions } from "./launchOptions";
 import { PluginInstaller, PluginArtifact } from "./pluginInstaller";
-import { gameStatus } from "./gameStatus";
+import { canRestore, gameStatus } from "./gameStatus";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -41,7 +41,7 @@ function pollPluginStatus() {
 type FG = { source: string; key: string; value: string; enabled: boolean | null; meaning: string; path: string };
 type Game = { id: string; name: string; folder: string; source: string; compatibility: string;
   installation_status?: { state: "ready" | "running" | "review" | "unsupported" | "recovery"; label: string; summary: string;
-    running: boolean; selectable: boolean; can_modify: boolean; issues: {code: string; title: string; reason: string; steps: string[]; blocking: boolean}[] };
+    running: boolean; selectable: boolean; can_modify: boolean; can_restore?: boolean; issues: {code: string; title: string; reason: string; steps: string[]; blocking: boolean}[] };
   appid?: string;
   reasons: string[]; route: string | null; inputs: string[]; managed: boolean; enabled: boolean;
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
@@ -542,9 +542,9 @@ function Content() {
       </>}
       <PanelSectionRow><div className="helix-muted">Downloads, required dependencies and the local network build are handled automatically. Administrator access is not needed for your own game folders.</div></PanelSectionRow>
       {game.managed && <>
-        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
+        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || (game.enabled ? !canRestore(game) : game.compatibility !== "candidate" || game.installation_status?.can_modify === false)}
           onClick={() => void interact(() => action(game.enabled ? "disable" : "enable"))}>{game.enabled ? "Disable HelixSR" : "Enable HelixSR"}</ButtonItem></PanelSectionRow>
-        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false} onClick={() => void interact(() => action("remove"))}>Remove and restore originals</ButtonItem></PanelSectionRow>
+        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)} onClick={() => void interact(() => action("remove"))}>Remove and restore originals</ButtonItem></PanelSectionRow>
       </>}
       {game.recovery_available && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running} onClick={() => void interact(() => action("recover"))}>Recover interrupted file transaction</ButtonItem></PanelSectionRow>}
       {game.source === "Imported" && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.managed}
