@@ -7,15 +7,15 @@ Game detection and local diagnostics work offline. Existing installations can be
 ## Download and open
 
 1. Switch your SteamOS device to Desktop Mode.
-2. Download **HelixSR-Desktop-0.1.14-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.14). Save it in a folder such as `Applications` under your own home folder.
+2. Download **HelixSR-Desktop-0.1.15-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.15). Save it in a folder such as `Applications` under your own home folder.
 3. In your file manager, right-click the AppImage, open **Properties → Permissions**, and enable **Is executable** (wording varies).
 4. Double-click the AppImage. Do not run it with sudo or as administrator.
 
 If your system cannot mount AppImages, open a terminal in its folder and run:
 
 ```sh
-chmod +x HelixSR-Desktop-0.1.14-x86_64.AppImage
-./HelixSR-Desktop-0.1.14-x86_64.AppImage --appimage-extract-and-run
+chmod +x HelixSR-Desktop-0.1.15-x86_64.AppImage
+./HelixSR-Desktop-0.1.15-x86_64.AppImage --appimage-extract-and-run
 ```
 
 This fallback extracts the app temporarily and does not require FUSE or administrator access. [AppImage documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html) explains the options.
@@ -28,7 +28,7 @@ This fallback extracts the app temporarily and does not require FUSE or administ
 4. For an unlisted game, use **Import game folders → Add folder**. Add each game's install folder to the list, then choose **Import listed folders**. You can remove a mistaken entry before importing. Select each game's install folder, not an entire drive or Wine prefix.
 5. Close the game. Click **Install HelixSR for this game** or **Update this game's HelixSR**, review the files and terms, and confirm. Only confirm DirectX 12 when your game's selected renderer uses it.
    For a new OptiScaler installation with more than one executable, use **Game executable** to choose the DX12 executable you actually launch before installing. Games labelled **Choose executable** need an eligible x64 selection first. The file review binds that selection. Existing installations keep their recorded folder; remove them through the manager before changing it. See the [OptiScaler guide](OPTISCALER_GUIDE.md).
-6. Wait for **HelixSR enabled**. Downloads, dependencies and local network preparation happen automatically. Keep at least 3 GiB free on the game's drive while preparing.
+6. Wait for the installation job to complete in **Progress**. Downloads, dependencies and local network preparation happen automatically. Keep at least 3 GiB free on the game's drive while preparing.
 7. Follow the displayed launch-option guidance. For native FSR replacement, select AMD FSR in the game's settings. For an OptiScaler route, follow the displayed input and Proton override instructions. The desktop app displays these instructions and does not change Steam launch options for you.
 
 For setup checks, missing DLSS input, shortcuts and configuration retention, follow the [OptiScaler guide](OPTISCALER_GUIDE.md).
@@ -84,3 +84,9 @@ You can also comment on the [HelixSR video](https://www.youtube.com/watch?v=atLk
 ## Run from source
 
 Use Python 3.11 or newer and a user-owned virtual environment. Install `PySide6-Essentials==6.11.2` and `shiboken6==6.11.2`, then run `python -m desktop.app` from the repository. The [source](https://github.com/dawoodtogoo2020-code/HelixSR-Decky) includes the desktop backend, native UI, regression tests and build scripts.
+
+## Follow the next step
+
+**Not installed** means a game was detected but HelixSR has not been installed into it. Read **Next step** in the Games tab. Confirm DX12 only when the game actually uses it; a disabled Install button explains what is missing. After OptiScaler installation, **Copy Proton launch setup** is beside the installation controls. Merge that guidance in your launcher; this app does not edit Steam launch options. Installed files and correct launch options do not prove neural output during gameplay.
+
+Dragon's Dogma 2 gets an extra setup note only for its OptiScaler route. Follow the linked [DD2 guide](https://github.com/optiscaler/OptiScaler/wiki/Dragons-Dogma-2), including the REFramework requirement and Linux loader notes. The desktop app does not install or verify REFramework. Its presence alone does not establish working Steam Deck gameplay. A native FSR replacement remains a separate route.

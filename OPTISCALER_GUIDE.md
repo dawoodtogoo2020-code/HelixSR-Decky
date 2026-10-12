@@ -56,3 +56,9 @@ Disable/Enable retains your owned configurations. Remove restores originals and 
 Official references: [HelixSR troubleshooting](https://github.com/lonewolf0622/HelixSR#troubleshooting), [OptiScaler manual installation](https://github.com/optiscaler/OptiScaler/wiki/Manual-Installation), [Control Ultimate Edition notes](https://github.com/optiscaler/OptiScaler/wiki/Control-Ultimate-Edition). Upstream Control testing on Windows does not establish behavior on every SteamOS device.
 
 For an existing OptiScaler install, remove it using the installer that owns it before installing through HelixSR. The manager detects OptiScaler under its supported alternate proxy names as well as `dxgi.dll`, and stops rather than adding a second proxy. It leaves those external files untouched.
+
+## Dragon's Dogma 2: extra setup
+
+The official [DD2 instructions](https://github.com/optiscaler/OptiScaler/wiki/Dragons-Dogma-2) require REFramework for the OptiScaler route. Use the matching DD2 build and read the linked Linux loader troubleshooting; the wiki's Windows test is not proof of Steam Deck compatibility. Our installers do not add or verify REFramework, and finding `dinput8.dll` cannot establish its identity or version. Existing mods and their launch overrides must be reviewed together. Do not combine generic commands without checking them.
+
+This note applies only when our detected route is OptiScaler. It does not apply to a verified native FSR replacement. **Not installed** is an installation status, not an error. Follow **Next step**, install with the game closed, then complete launch setup and check fresh runtime evidence. For a failed install, send the exact error, app/plugin version, selected executable and detected route.

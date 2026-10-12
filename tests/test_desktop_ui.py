@@ -162,6 +162,46 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertFalse(any(c[0] in ('install', 'preview', 'license') for c in self.backend.calls))
         self.assertIn('OptiScaler installed: yes', self.window.evidence.toPlainText())
 
+    def test_next_step_surfaces_install_dx12_and_game_specific_requirements(self):
+        self.backend.game.update(appid='2054970', name="Dragon's Dogma 2", dx12_confirmation_needed=True)
+        self.window._details_received('a', self.backend.game.copy())
+        self.assertIn('not installed', self.window.next_step.text())
+        self.assertIn('REFramework', self.window.next_step.text())
+        self.assertIn('Dragons-Dogma-2', self.window.game_guide.text())
+        self.assertFalse(self.window.install.isEnabled())
+        self.assertIn('DirectX 12', self.window.install.toolTip())
+        self.window.dx12.setChecked(True)
+        self.assertTrue(self.window.install.isEnabled())
+        self.assertFalse(any(c[0] in ('install', 'preview') for c in self.backend.calls))
+
+    def test_installed_proxy_puts_launch_setup_next_to_install_controls(self):
+        self.backend.game.update(managed=True, enabled=True, optiscaler={'setup': {'override': 'missing'}})
+        self.window._details_received('a', self.backend.game.copy())
+        self.assertIn('Finish Proton launch setup', self.window.next_step.text())
+        self.assertTrue(self.window.launch_setup.isVisible())
+        self.assertFalse(self.window.actions['enable'].isVisible())
+        self.assertTrue(self.window.actions['disable'].isVisible())
+        self.backend.game.update(route='direct')
+        self.window._details_received('a', self.backend.game.copy())
+        self.assertFalse(self.window.launch_setup.isVisible())
+        self.assertIn('Select AMD FSR', self.window.next_step.text())
+
+    def test_compact_games_tab_scrolls_instead_of_clipping_controls(self):
+        self.window.resize(680, 480)
+        self.app.processEvents()
+        self.assertGreater(self.window.games_scroll.verticalScrollBar().maximum(), 0)
+        self.assertGreaterEqual(self.window.status.height(), self.window.status.minimumSizeHint().height())
+        self.window.games_scroll.ensureWidgetVisible(self.window.install)
+        self.app.processEvents()
+        position = self.window.install.mapTo(self.window.games_scroll.viewport(), self.window.install.rect().center())
+        self.assertTrue(self.window.games_scroll.viewport().rect().contains(position))
+
+    def test_deferred_details_cannot_enable_install_after_a_details_failure(self):
+        self.backend.game.update(awareness_deferred=True)
+        self.window._details_received('a', self.backend.game.copy())
+        self.assertFalse(self.window.install.isEnabled())
+        self.assertIn('finish loading', self.window.next_step.text())
+
     def test_empty_and_unavailable_libraries_have_distinct_explanations(self):
         payload = self.backend.library()
         payload['games'] = []

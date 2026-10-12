@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import shutil
@@ -15,7 +16,7 @@ from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QThread, QTimer
 from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QGroupBox, QHBoxLayout, QLabel, QListWidget, QMainWindow,
+    QGroupBox, QHBoxLayout, QLabel, QLayout, QListWidget, QMainWindow,
     QPushButton, QScrollArea, QTabWidget, QTextEdit,
     QVBoxLayout, QWidget,
 )
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 from .version import VERSION
 from .system import system_environment
 from .folder_dialog import FolderDialog
+from py_modules.game_guidance import setup_guidance
 
 PROJECT = "https://github.com/dawoodtogoo2020-code/HelixSR-Decky"
 GUIDE = PROJECT + "/blob/main/DESKTOP_GUIDE.md"
@@ -209,6 +211,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(host)
         page = QWidget()
         content = QVBoxLayout(page)
+        content.setSizeConstraint(QLayout.SetMinimumSize)
         self.library_summary = QLabel("Detecting installed games…")
         self.library_summary.setWordWrap(True)
         self.library_summary.setTextFormat(Qt.PlainText)
@@ -223,6 +226,13 @@ class MainWindow(QMainWindow):
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.PlainText)
         content.addWidget(self.status)
+        self.next_step = QLabel()
+        self.next_step.setWordWrap(True)
+        self.next_step.setTextFormat(Qt.PlainText)
+        content.addWidget(self.next_step)
+        self.game_guide = link_label('', self._notify)
+        self.game_guide.setWordWrap(True)
+        content.addWidget(self.game_guide)
         self.executable_label = QLabel("Game executable")
         content.addWidget(self.executable_label)
         self.executables = QComboBox()
@@ -250,6 +260,9 @@ class MainWindow(QMainWindow):
         self.install.setObjectName("primary")
         self.refresh_button = self._button("Refresh games", self.refresh, row)
         content.addLayout(row)
+        self.launch_setup = QPushButton('Copy Proton launch setup')
+        self.launch_setup.clicked.connect(self.copy_launch)
+        content.addWidget(self.launch_setup)
         row = QHBoxLayout()
         self.actions = {}
         for action in ("enable", "disable", "remove", "adopt", "recover"):
@@ -273,6 +286,8 @@ class MainWindow(QMainWindow):
         content.addWidget(self.runtime_status)
         self.evidence = QTextEdit()
         self.evidence.setReadOnly(True)
+        self.evidence.setMinimumHeight(100)
+        self.evidence.setMaximumHeight(180)
         content.addWidget(self.evidence, 1)
         self.launch = QPushButton("Copy manual launch guidance")
         self.launch.clicked.connect(self.copy_launch)
@@ -281,7 +296,10 @@ class MainWindow(QMainWindow):
         self.unavailable.setMaximumHeight(110)
         content.addWidget(QLabel("Unavailable games and detected reasons"))
         content.addWidget(self.unavailable)
-        self.tabs.addTab(page, "Games")
+        self.games_scroll = QScrollArea()
+        self.games_scroll.setWidgetResizable(True)
+        self.games_scroll.setWidget(page)
+        self.tabs.addTab(self.games_scroll, "Games")
         page = QWidget()
         content = QVBoxLayout(page)
         row = QHBoxLayout()
@@ -423,10 +441,23 @@ class MainWindow(QMainWindow):
         report = game.get('installation_status') or {}
         if report:
             candidate = bool(report.get('can_modify')) and not game.get('recovery_available')
+        candidate = candidate and not game.get('awareness_deferred')
         self.install.setText("Update this game's HelixSR" if game.get("managed") else "Install HelixSR for this game")
         self.install.setEnabled(free and candidate and confirmed and not game.get("legacy"))
+        guidance = game.get('setup_guidance') or setup_guidance(game)
+        message = 'Next step: ' + guidance['headline'] + '\n' + '\n\n'.join(guidance['steps'] + guidance['notes'])
+        if game.get('dx12_confirmation_needed') and not confirmed:
+            message += '\nConfirm DirectX 12 below before installing.'
+        if active:
+            current = next(j for j in self._jobs if j.get('state') in ACTIVE)
+            message = f"{current.get('game', 'Game')}: {current.get('message') or 'Installing / preparing HelixSR…'}\nOpen Progress for details. Wait until it finishes before changing game files."
+        self.next_step.setText(message if game or active else 'Select a game to see the installation steps.')
+        self.game_guide.setText(' · '.join(f'<a href="{html.escape(link["url"], quote=True)}">{html.escape(link["label"])}</a>' for link in guidance['links']))
+        self.game_guide.setVisible(bool(guidance['links']))
+        self.launch_setup.setVisible(bool(game.get('managed') and game.get('enabled') and game.get('route') == 'optiscaler'))
+        self.launch_setup.setEnabled(free and not game.get('awareness_deferred'))
         for action, button in self.actions.items():
-            visible = (action == "recover" and game.get("recovery_available")) or (action == "adopt" and game.get("legacy")) or (action in ("enable", "disable", "remove") and game.get("managed"))
+            visible = (action == "recover" and game.get("recovery_available")) or (action == "adopt" and game.get("legacy")) or (game.get("managed") and (action == "remove" or action == ("disable" if game.get("enabled") else "enable")))
             button.setVisible(bool(visible))
             recovery_safe = not report.get('running') and not any(i.get('code') == 'steam_update' for i in report.get('issues', []))
             allowed = report.get('can_restore', candidate) if action in ('disable', 'remove') else candidate
@@ -436,7 +467,7 @@ class MainWindow(QMainWindow):
         self.app_download.setEnabled(free and bool(self.app_update.get("update_available")) and not self.app_update.get("error"))
         self.cancel_button.setEnabled(active and not self._task and not self._modal and not self._closing)
         self.overlay_toggle.setEnabled(bool(game) and not self._task and not self._modal and not self._closing)
-        reason = self.blockers.text() or 'Review this game before changing files.'
+        reason = ('Confirm DirectX 12 before installing.' if not confirmed else self.blockers.text()) or 'Review this game before changing files.'
         for button in (self.install, *self.actions.values()):
             button.setToolTip('' if button.isEnabled() else reason)
 

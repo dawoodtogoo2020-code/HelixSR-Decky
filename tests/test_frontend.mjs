@@ -3,8 +3,36 @@ import test from "node:test";
 
 import { proxyOptions } from "../src/launchOptions.ts";
 import { PluginInstaller } from "../src/pluginInstaller.ts";
-import { canRestore, gameStatus } from "../src/gameStatus.ts";
+import { canRestore, gameStatus, installReadiness, nextStep } from "../src/gameStatus.ts";
 import { librarySelectable, libraryStatus } from "../src/libraryStatus.ts";
+
+test("active installation replaces stale install instructions then accepts refreshed launch steps", () => {
+  const before = {headline: "Not installed", steps: ["Choose Install"], notes: [], links: []};
+  assert.equal(nextStep(before).headline, "Not installed");
+  const active = nextStep(before, {game: "Game A", message: "Building local model"});
+  assert.match(active.headline, /Installing/);
+  assert.doesNotMatch(active.steps.join(" "), /Choose Install/);
+  assert.match(active.steps.join(" "), /Building local model/);
+  const after = { ...before, headline: "Finish Proton launch setup", steps: ["Review launch options"]};
+  assert.equal(nextStep(after).headline, "Finish Proton launch setup");
+});
+
+test("fresh install status says not installed with and without structured status", () => {
+  const game = {compatibility: "candidate", managed: false, enabled: false, legacy: false};
+  assert.match(gameStatus(game).summary, /not installed for this game/);
+  assert.match(gameStatus({...game, installation_status: {state: "ready", label: "Not installed", can_modify: true}}).summary, /not installed for this game/);
+  assert.doesNotMatch(gameStatus(game).summary, /not enabled/);
+});
+
+test("DX12 prerequisites disable install without relaxing review and loading guards", () => {
+  const game = {compatibility: "candidate", managed: false, enabled: false, legacy: false, dx12_confirmation_needed: true};
+  assert.equal(installReadiness(game, false).allowed, false);
+  assert.match(installReadiness(game, false).reason, /Confirm DirectX 12/);
+  assert.equal(installReadiness(game, true).allowed, true);
+  assert.equal(installReadiness({...game, compatibility: "blocked"}, true).allowed, false);
+  assert.equal(installReadiness({...game, awareness_deferred: true}, true).allowed, false);
+  assert.equal(installReadiness({...game, installation_status: {can_modify: false, summary: "Close the game"}}, true).reason, "Close the game");
+});
 
 test("library status distinguishes failed, empty and discovered-but-unavailable scans", () => {
   const blocked = {compatibility: "blocked", installation_status: {selectable: false}};

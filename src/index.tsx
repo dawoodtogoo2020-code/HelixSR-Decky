@@ -5,7 +5,7 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 import { FaAdjust } from "react-icons/fa";
 import { proxyOptions } from "./launchOptions";
 import { PluginInstaller, PluginArtifact } from "./pluginInstaller";
-import { canRestore, gameStatus } from "./gameStatus";
+import { canRestore, gameStatus, installReadiness, nextStep } from "./gameStatus";
 import { librarySelectable, libraryStatus } from "./libraryStatus";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
@@ -49,6 +49,8 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
   main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
   executable_choices?: { path: string; dx12: boolean }[]; selected_executable?: string; executable_selection_needed?: boolean;
   awareness_warnings?: string[];
+  awareness_deferred?: boolean;
+  setup_guidance?: {action: string; headline: string; steps: string[]; notes: string[]; links: {label: string; url: string}[]};
   optiscaler: { present: boolean | null; involved: boolean; helix_configured?: boolean | null; runtime: string; dlls: string[];
     setup?: { checks: string[]; backend: string; override: string; overlay_shortcut: string; settings: Record<string, string>; guide: string } };
   framegen: FG[]; framegen_summary: string; helix_runtime: string;
@@ -211,8 +213,8 @@ function watchJobs(next: Job[]) {
     if (j.state === "running" || notifiedJobs.has(j.id)) return;
     notifiedJobs.add(j.id);
     if (!watchedJobs.some(old => old.id === j.id && old.state === "running")) return;
-    toaster.toast({ title: j.state === "completed" ? j.kind === "install_latest" ? "HelixSR enabled" : "HelixSR preparation complete" : j.state === "cancelled" ? "HelixSR operation cancelled" : "HelixSR operation failed",
-      body: `${j.game}: ${j.message}`, duration: 6000 });
+    toaster.toast({ title: j.state === "completed" ? j.kind === "install_latest" ? "HelixSR files installed" : "HelixSR preparation complete" : j.state === "cancelled" ? "HelixSR operation cancelled" : "HelixSR operation failed",
+      body: `${j.game}: ${j.message}${j.state === "completed" && j.kind === "install_latest" ? " Open the game's Next step to finish launch setup and check runtime status." : ""}`, duration: 8000 });
   });
   watchedJobs = next;
   jobListeners.forEach(listener => listener(next, finished));
@@ -483,6 +485,8 @@ function Content() {
   const unavailable = libraryGames.filter(g => !games.includes(g));
   const libraryView = libraryStatus(data ? libraryGames : undefined, libraryLoading, !!libraryError);
   const selectedStatus = game ? gameStatus(game) : undefined;
+  const installState = game ? installReadiness(game, dx12) : undefined;
+  const guidance = nextStep(game?.setup_guidance, jobs.find(job => job.state === "running"));
   const infoStyle = { fontSize: "13px", lineHeight: "1.45", overflowWrap: "anywhere" as const, whiteSpace: "pre-wrap" as const };
 
   return <div className="helixsr-decky">
@@ -511,6 +515,13 @@ function Content() {
       </PanelSectionRow></div>
       {game && <>
         <PanelSectionRow><div className="helix-muted" style={{ color: selectedStatus?.color }}>{selectedStatus?.summary}</div></PanelSectionRow>
+        {guidance && <PanelSectionRow><div className="helix-card" style={infoStyle}>
+          <strong>Next step: {guidance.headline}</strong>{"\n"}
+          {guidance.steps.join("\n\n")}
+          {guidance.notes.map((note, index) => <p key={index}>{note}</p>)}
+        </div></PanelSectionRow>}
+        {guidance?.links.map(link => <PanelSectionRow key={link.url}><ButtonItem layout="below" disabled={modalOpen}
+          onClick={() => SteamClient.System.OpenInSystemBrowser(link.url)}>{link.label}</ButtonItem></PanelSectionRow>)}
         {game.installation_status?.issues.map((issue, index) => <PanelSectionRow key={`${issue.code}-${index}`}><div className="helix-card" style={{ ...infoStyle, borderLeftColor: issue.blocking ? "#f1ca7e" : "#53c5d0" }}>
           <strong>{issue.title}</strong>{"\n"}{issue.reason}{"\n"}Next: {issue.steps.join(" ")}
         </div></PanelSectionRow>)}
@@ -523,9 +534,22 @@ function Content() {
         </>}
         {game.dx12_confirmation_needed && <PanelSectionRow><ToggleField label="Game is set to DirectX 12"
           description="Confirm the renderer selected in the game." checked={dx12} onChange={setDx12} disabled={disabled} /></PanelSectionRow>}
-        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
+        {installState?.reason && <PanelSectionRow><div role="status" style={infoStyle}>{installState.reason}</div></PanelSectionRow>}
+        {!!pluginUpdate?.pending && <PanelSectionRow><div style={infoStyle}>Finish or cancel the downloaded plugin update in Plugin updates before installing game files.</div></PanelSectionRow>}
+        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || !installState?.allowed}
           onClick={() => void interact(installOrUpdate)}>{game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
+        {game.managed && !game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
+          onClick={() => void interact(() => action("enable"))}>Enable HelixSR</ButtonItem></PanelSectionRow>}
+        {game.managed && game.enabled && game.route === "optiscaler" && game.appid && <PanelSectionRow><ButtonItem layout="below" disabled={disabled}
+          onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>}
       </>}
+      {jobs.slice().reverse().map(job => <PanelSectionRow key={job.id}><div className="helix-card" style={infoStyle} role="status">
+        <strong>{job.game}: {job.state === "running" ? "Installing / preparing HelixSR…" : job.state}</strong>{"\n"}{job.message}
+        {job.state === "running" && <ButtonItem layout="below" disabled={busy || modalOpen} onClick={() => void interact(async () => openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle="Cancel preparation?"
+          strDescription="No game files are changed during preparation. Temporary build files will be removed."
+          onOK={() => void run(() => cancelJob(job.id))} />))}>Cancel preparation</ButtonItem>}
+        {diagnostics && <pre style={{ ...infoStyle, fontSize: "11px" }}>{job.log}</pre>}
+      </div></PanelSectionRow>)}
       <PanelSectionRow><ButtonItem layout="below" onClick={() => void refresh()} disabled={busy || modalOpen}>Refresh library and status</ButtonItem></PanelSectionRow>
       {!!unavailable.length && <PanelSectionRow><ButtonItem layout="below" onClick={() => setUnavailableGames(!unavailableGames)}>{unavailableGames ? "Hide unavailable games" : `Unavailable games (${unavailable.length})`}</ButtonItem></PanelSectionRow>}
       {unavailableGames && unavailable.map(g => <PanelSectionRow key={g.id}><div className="helix-card helix-muted">{g.name}{"\n"}{g.installation_status?.issues.map(i => `${i.title}: ${i.reason}\nNext: ${i.steps.join(" ")}`).join("\n\n") || g.reasons.join("\n") || "No supported upscaler detected"}</div></PanelSectionRow>)}
@@ -559,8 +583,8 @@ function Content() {
       </>}
       <PanelSectionRow><div className="helix-muted">Downloads, required dependencies and the local network build are handled automatically. Administrator access is not needed for your own game folders.</div></PanelSectionRow>
       {game.managed && <>
-        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || (game.enabled ? !canRestore(game) : game.compatibility !== "candidate" || game.installation_status?.can_modify === false)}
-          onClick={() => void interact(() => action(game.enabled ? "disable" : "enable"))}>{game.enabled ? "Disable HelixSR" : "Enable HelixSR"}</ButtonItem></PanelSectionRow>
+        {game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)}
+          onClick={() => void interact(() => action("disable"))}>Disable HelixSR</ButtonItem></PanelSectionRow>}
         <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)} onClick={() => void interact(() => action("remove"))}>Remove and restore originals</ButtonItem></PanelSectionRow>
       </>}
       {game.recovery_available && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running} onClick={() => void interact(() => action("recover"))}>Recover interrupted file transaction</ButtonItem></PanelSectionRow>}
@@ -582,7 +606,7 @@ function Content() {
         {(game.optiscaler.setup?.checks || []).join("\n\n")}
       </div></PanelSectionRow>}
       {game.route === "optiscaler" && game.appid && <>
-        <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>
+        {!(game.managed && game.enabled) && <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>}
         <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void interact(() => launchChange(true))}>Restore plugin launch-option change</ButtonItem></PanelSectionRow>
       </>}
       <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiagnostics(!diagnostics)}>{diagnostics ? "Hide diagnostics" : "Show diagnostics and logs"}</ButtonItem></PanelSectionRow>
@@ -638,13 +662,6 @@ function Content() {
       <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/lonewolf0622/HelixSR/blob/main/LICENSE")}>Read HelixSR license</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/NVIDIA/DLSS/blob/v310.7.0/LICENSE.txt")}>Read NVIDIA DLSS license</ButtonItem></PanelSectionRow>
       </>}
-      {jobs.map(job => <PanelSectionRow key={job.id}><div style={infoStyle}>
-        {job.game}: {job.state}{"\n"}{job.message}
-        {job.state === "running" && <ButtonItem layout="below" disabled={busy || modalOpen} onClick={() => void interact(async () => openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle="Cancel preparation?"
-          strDescription="No game files are changed during preparation. Temporary build files will be removed."
-          onOK={() => void run(() => cancelJob(job.id))} />))}>Cancel preparation</ButtonItem>}
-        {diagnostics && <pre style={{ ...infoStyle, fontSize: "11px" }}>{job.log}</pre>}
-      </div></PanelSectionRow>)}
     </PanelSection>
     <PanelSection title="Import games">
       <PanelSectionRow><DropdownItem layout="below" label="Import Games From" menuLabel="Import Games From"

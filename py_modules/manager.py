@@ -24,6 +24,7 @@ from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from library import discover, discover_launcher, safe_root, scan_tree, text
 from awareness import awareness, active_processes, text_tail, optiscaler_proxy
+from game_guidance import setup_guidance
 from operation_lock import operation_lock, game_locked
 from host_environment import host_environment
 from installation_status import installation_status
@@ -737,6 +738,7 @@ class Manager:
                         framegen=[], framegen_summary='No supported per-game evidence',
                         helix_runtime='unknown', launch_options=game.get('launch_options', ''))
             data['installation_status'] = installation_status(data)
+            data['setup_guidance'] = setup_guidance(data)
             return data
 
     def get_game(self, gid):
@@ -925,6 +927,7 @@ class Manager:
         if not detailed:
             data.pop('logs', None)
         data['installation_status'] = installation_status(data)
+        data['setup_guidance'] = setup_guidance(data)
         return data
 
     def import_folder(self, folder, name=''):

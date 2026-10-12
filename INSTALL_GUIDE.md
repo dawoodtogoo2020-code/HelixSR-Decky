@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.18.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin. It is distributed through GitHub and is currently not listed in the Decky Store.
+3. Open the [HelixSR Decky release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.19.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin. It is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -27,6 +27,8 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 If Decky disappears after a SteamOS update, follow Decky's own recovery instructions before troubleshooting this plugin.
 
 ## 4. Install HelixSR for one game
+
+**Not installed** means the plugin found the game but has not installed HelixSR into it. Selecting a game does not install anything. Follow **Next step** beside the game. If Install is disabled, its explanation tells you whether to confirm DX12, close the game, resolve a review reason, or finish another operation.
 
 1. Open the **Game** dropdown at the top. Select your installed game. Choose **Refresh library and status** if you recently installed it. Steam, supported Steam shortcuts, Heroic, Legendary and Lutris records are detected automatically.
 2. Read its status and route. **Needs review** or an unavailable game has a reason shown in the panel. Do not bypass a block. If asked, enable **Game is set to DirectX 12** only after confirming that renderer in the game's launch selection or settings.
@@ -120,3 +122,9 @@ Use [GitHub Issues](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues
 Reports are assigned to the project owner. The owner can choose **Watch → All Activity**. GitHub inbox and email delivery follow the owner's [notification preferences](https://docs.github.com/en/subscriptions-and-notifications/concepts/about-notifications).
 
 For exact OptiScaler setup, missing DLSS input, overlay shortcuts and settings retention, see the [OptiScaler guide](OPTISCALER_GUIDE.md).
+
+## Dragon's Dogma 2
+
+Read the **Detected route** first. For an **OptiScaler proxy** route, [OptiScaler's DD2 guide](https://github.com/optiscaler/OptiScaler/wiki/Dragons-Dogma-2) requires the matching DD2 build of REFramework (`dinput8.dll`) and links separate Linux loader troubleshooting. HelixSR Decky installs its own OptiScaler payload, but does not install or verify REFramework. An existing DLL with that name does not prove correct setup. Do not overwrite another mod or copy an old launch command blindly. Follow the game guide and preserve your existing launcher settings. A verified native FSR replacement is a different route and does not need these OptiScaler instructions.
+
+This is setup guidance, not a verified Dragon's Dogma 2 Steam Deck compatibility claim. If installation stops, report your plugin version, displayed route, exact error or disabled-button explanation, and whether the unmodified game launches.
