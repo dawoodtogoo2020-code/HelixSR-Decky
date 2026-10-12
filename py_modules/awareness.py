@@ -38,11 +38,19 @@ def evidence(source, key, value, path, meaning='configured'):
     return dict(source=source, key=key, value=str(value), enabled=flag(value), path=str(path), meaning=meaning)
 
 
-def profile_records(source):
+def profile_records(source, warnings=None, label='Frame-generation profile data'):
+    """Return only schema-safe TOML profile mappings from optional local files."""
+    warnings = warnings if warnings is not None else []
+    if not source.strip():
+        return []
     try:
         import tomllib
-        return tomllib.loads(source).get('profile', [])
-    except (ImportError, ValueError):
+        parsed = tomllib.loads(source)
+    except ValueError:
+        warnings.append(f'{label} is malformed; configuration is unknown')
+        return []
+    except ImportError:
+        warnings.append(f'{label}: using limited profile parsing because TOML support is unavailable')
         records = []
         for block in re.split(r'(?m)^\[\[profile\]\]', source)[1:]:
             record = {}
@@ -53,22 +61,52 @@ def profile_records(source):
                 except ValueError:
                     record[key] = value.strip("'\"")
             records.append(record)
-        return records
+    else:
+        records = parsed.get('profile', []) if isinstance(parsed, dict) else []
+    if not isinstance(records, list):
+        warnings.append(f'{label} has an invalid profile list')
+        return []
+    clean = []
+    for record in records:
+        if not isinstance(record, dict):
+            warnings.append(f'{label} has a non-mapping profile entry')
+            continue
+        record = dict(record)
+        if 'name' in record and not isinstance(record['name'], str):
+            warnings.append(f'{label} profile name must be text')
+            record.pop('name')
+        clean.append(record)
+    return clean
 
 
-def launch_options(home, appid):
+def launch_options(home, appid, warnings=None):
+    """Read a Steam launch option only from the expected mapping structure."""
+    warnings = warnings if warnings is not None else []
     if not appid:
         return ''
     for root in steam_roots(home):
-        for p in (root / 'userdata').glob('*/config/localconfig.vdf'):
-            try:
-                d = vdf(text(p))
-                for k in ['UserLocalConfigStore', 'Software', 'Valve', 'Steam', 'apps', str(appid)]:
-                    d = d.get(k, {})
-                if isinstance(d, dict) and d.get('LaunchOptions'):
-                    return str(d['LaunchOptions'])
-            except ValueError:
-                pass
+        try:
+            configs = (root / 'userdata').glob('*/config/localconfig.vdf')
+            for p in configs:
+                try:
+                    d = vdf(text(p))
+                    for k in ['UserLocalConfigStore', 'Software', 'Valve', 'Steam', 'apps', str(appid)]:
+                        if not isinstance(d, dict):
+                            warnings.append(f'Steam launch options have an invalid VDF structure: {p}')
+                            d = None
+                            break
+                        d = d.get(k, {})
+                    if d is not None and not isinstance(d, dict):
+                        warnings.append(f'Steam launch options have an invalid VDF structure: {p}')
+                    elif isinstance(d, dict) and d.get('LaunchOptions'):
+                        if isinstance(d['LaunchOptions'], str):
+                            return d['LaunchOptions']
+                        warnings.append(f'Steam launch options must be text: {p}')
+                except ValueError:
+                    warnings.append(f'Steam launch options are malformed: {p}')
+        except OSError:
+            warnings.append(f'Steam launch options cannot be read: {root}')
+            continue
     return ''
 
 
@@ -113,7 +151,7 @@ def active_processes(folder, appid=''):
 
 
 def awareness(game, tree, home, route, target=None):
-    fg, opti_files, configs, logs = [], [], [], []
+    fg, opti_files, configs, logs, awareness_warnings = [], [], [], [], []
     for d, names in tree:
         for name in names:
             lower = name.lower()
@@ -140,7 +178,7 @@ def awareness(game, tree, home, route, target=None):
             if str(lp) not in [x['path'] for x in logs] and safe_log(lp, game['folder']):
                 logs.append(dict(path=str(lp), modified=lp.stat().st_mtime,
                                  excerpt=text_tail(lp)))
-    options = game.get('launch_options') or launch_options(home, game.get('appid'))
+    options = game.get('launch_options') or launch_options(home, game.get('appid'), awareness_warnings)
     if options:
         for feature, pattern in [('MAKO', r'mako'), ('LSFG-VK', r'lsfg|lossless'), ('OptiScaler proxy override', r'WINEDLLOVERRIDES')]:
             if re.search(pattern, options, re.I):
@@ -177,13 +215,13 @@ def awareness(game, tree, home, route, target=None):
                 if e['enabled'] is not None:
                     e['enabled'] = not e['enabled']
                 fg.append(e)
-    for profile in profile_records(text(mako)):
+    for profile in profile_records(text(mako), awareness_warnings, 'MAKO profile data'):
         if profile.get('name') in associated:
             for key in ('frame_generation_enabled', 'frame_generation_provisioned', 'multiplier'):
                 if key in profile:
                     fg.append(evidence('MAKO', key, profile[key], mako))
     lsfg = h / '.config/lsfg-vk/conf.toml'
-    for profile in profile_records(text(lsfg)):
+    for profile in profile_records(text(lsfg), awareness_warnings, 'LSFG-VK profile data'):
         active = profile.get('active_in', [profile.get('exe', '')])
         if not isinstance(active, list):
             active = []
@@ -217,7 +255,14 @@ def awareness(game, tree, home, route, target=None):
     return dict(optiscaler=dict(present=bool(opti_files or configs), dlls=opti_files,
                                configs=[str(p) for p in configs], involved=route == 'optiscaler' or configured_helix,
                                helix_configured=configured_helix, runtime=opti_runtime, setup=setup),
-                framegen=fg, framegen_summary='No supported per-game evidence' if not fg else 'See source-specific evidence below',
+                framegen=fg,
+                framegen_summary=('Frame-generation configuration unavailable; state unknown'
+                                  if awareness_warnings and not fg else
+                                  'See source-specific evidence below; some metadata is invalid'
+                                  if awareness_warnings else
+                                  'No supported per-game evidence' if not fg else
+                                  'See source-specific evidence below'),
+                awareness_warnings=list(dict.fromkeys(awareness_warnings)),
                 helix_runtime=evidence_state, processes=processes, logs=logs,
                 launch_options=options, observed_at=time.time())
 

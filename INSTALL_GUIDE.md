@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.17.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin. It is distributed through GitHub and is currently not listed in the Decky Store.
+3. Open the [HelixSR Decky release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.18.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin. It is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -38,6 +38,18 @@ If Decky disappears after a SteamOS update, follow Decky's own recovery instruct
 Keep locally generated network files on your device. Do not upload prepared packages, weights or kernels with a bug report.
 
 **Offline use:** game detection, local diagnostics, Disable, Remove, and Enable with the exact verified prepared package work without GitHub access. HelixSR itself does not need an internet connection during gameplay. Installing a new release, updating game installations and checking available releases require internet access. **Check latest HelixSR version** checks the release metadata; **Update this game's HelixSR** applies it to the selected game.
+
+### If no games appear
+
+Check the summary at the top before importing anything:
+
+- **Library scan failed** means the scan did not finish. Read the error there and refresh after resolving it. A previous successful scan stays visible.
+- **0 games found** means no installed game directories were discovered. Open **Discovery notes** beside the game selector. Confirm Steam can see the installed games, and that the SD card or external library is mounted. Open Steam once after moving a library, then refresh. Use **Import Games From** for supported launchers, or import the individual game folder from a custom location.
+- **Games found, but none selectable** means discovery worked. **Unavailable games** opens automatically when every entry is blocked; read each game's reason. Adding a folder or confirming DX12 cannot make an unsupported renderer compatible.
+
+Version 0.1.18 isolates malformed Steam manifests, optional profile metadata and individual game assessment failures so one bad entry cannot discard healthy entries. Missing libraries and unreadable metadata have discovery notes. Detailed log, launch-option and frame-generation inspection runs when selecting a game. Directory scans remain bounded, and installation safety checks still run before any file changes.
+
+The scan covers installed local games, not every title owned by your Steam account. If a large library still hangs or crashes, report the plugin version, device, installed game count, drive type and the summary/Discovery notes. Remove usernames and private paths first. A 6,000-manifest regression fixture is not a physical-device crash test.
 
 ## 5. Select the renderer and upscaler
 

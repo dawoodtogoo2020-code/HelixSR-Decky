@@ -209,6 +209,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(host)
         page = QWidget()
         content = QVBoxLayout(page)
+        self.library_summary = QLabel("Detecting installed games…")
+        self.library_summary.setWordWrap(True)
+        self.library_summary.setTextFormat(Qt.PlainText)
+        content.addWidget(self.library_summary)
         self.games = QComboBox()
         self.games.setObjectName("games")
         self.games.setMinimumHeight(48)
@@ -390,6 +394,9 @@ class MainWindow(QMainWindow):
         value, error, done = result
         if error:
             self._notify(error, True)
+            if done == self._library_received:
+                previous = f"Showing the previous scan ({len(self._games)} games). " if self._library_loaded else ""
+                self.library_summary.setText("Library scan failed. " + previous + "Fix the error above, then refresh the library.")
         elif not self._closing:
             try:
                 done(value)
@@ -425,7 +432,7 @@ class MainWindow(QMainWindow):
             allowed = report.get('can_restore', candidate) if action in ('disable', 'remove') else candidate
             button.setEnabled(free and bool(visible) and (recovery_safe if action == "recover" else allowed))
         self.forget.setEnabled(free and game.get("source") == "Imported" and not game.get("managed"))
-        self.launch.setEnabled(free and bool(game))
+        self.launch.setEnabled(free and bool(game) and not game.get('awareness_deferred'))
         self.app_download.setEnabled(free and bool(self.app_update.get("update_available")) and not self.app_update.get("error"))
         self.cancel_button.setEnabled(active and not self._task and not self._modal and not self._closing)
         self.overlay_toggle.setEnabled(bool(game) and not self._task and not self._modal and not self._closing)
@@ -434,7 +441,8 @@ class MainWindow(QMainWindow):
             button.setToolTip('' if button.isEnabled() else reason)
 
     def refresh(self):
-        self._run(self.backend.library, self._library_received)
+        if self._run(self.backend.library, self._library_received):
+            self.library_summary.setText("Refreshing library…")
 
     def _library_received(self, value):
         previous = self.games.currentData()
@@ -452,6 +460,16 @@ class MainWindow(QMainWindow):
                 self.unavailable.addItem(f"{game.get('name', '')}: {'; '.join(game.get('reasons', [])) or game.get('compatibility', 'unknown')}")
                 self.unavailable.item(self.unavailable.count() - 1).setToolTip('\n\n'.join(
                     i.get('reason', '') + '\nNext: ' + ' '.join(i.get('steps', [])) for i in report.get('issues', [])))
+        count = len(self._games)
+        candidates = sum(g.get('compatibility') == 'candidate' for g in self._games.values())
+        summary = f"{count} games found · {candidates} installation candidates · {self.unavailable.count()} unavailable"
+        if not count:
+            summary += "\nNo installed game folders were found. Check Diagnostics for discovery notes. Open Steam, check that your library drive is mounted, then refresh. Use the Import tab for other launchers or individual game folders."
+        elif not self.games.count():
+            summary += "\nYour games were found, but none can be selected for installation yet. See Unavailable games below for the reasons."
+        if value.get('warnings'):
+            summary += "\nDiscovery notes are available in Diagnostics."
+        self.library_summary.setText(summary)
         index = self.games.findData(previous)
         self.games.setCurrentIndex(index if index >= 0 else 0)
         self.games.blockSignals(False)
@@ -550,8 +568,8 @@ class MainWindow(QMainWindow):
         route_label = 'Recorded route' if game.get('managed') else 'Detected route'
         text = (f"{route_label}: {game.get('route') or 'none detected'}\n"
                 f"Target executable: {game.get('main_exe') or 'unknown'}\n"
-                f"OptiScaler installed: {'yes' if opti.get('present') else 'no detected files'}\n"
-                f"OptiScaler HelixSR route configured: {'yes' if opti.get('helix_configured') else 'no'}\n"
+                f"OptiScaler installed: {'not inspected' if opti.get('present') is None else 'yes' if opti.get('present') else 'no detected files'}\n"
+                f"OptiScaler HelixSR route configured: {'not inspected' if opti.get('helix_configured') is None else 'yes' if opti.get('helix_configured') else 'no'}\n"
                 f"OptiScaler runtime: {opti.get('runtime', 'unknown')}\n"
                 f"HelixSR runtime: {game.get('helix_runtime', 'unknown')}\n\n"
                 f"Frame generation: {game.get('framegen_summary', 'unknown')}\n"
@@ -562,6 +580,7 @@ class MainWindow(QMainWindow):
         for row in game.get("framegen", []):
             text += f"{row.get('source')}: {row.get('key')}={row.get('value')} · {row.get('meaning', '')}\n"
         text += "\nDetected reasons:\n" + "\n".join(game.get("reasons", []))
+        text += "\nEvidence warnings:\n" + "\n".join(game.get("awareness_warnings", []))
         for log in game.get("logs", []):
             text += f"\n\n{log.get('path', '')}\n{str(log.get('excerpt', ''))[:5000]}"
         self.evidence.setPlainText(text[:LIMIT])
@@ -745,6 +764,9 @@ class MainWindow(QMainWindow):
 
     def copy_launch(self):
         game = self.game or {}
+        if game.get('awareness_deferred'):
+            self._notify('Refresh and inspect this game before copying its launch guidance.', True)
+            return
         before = game.get("launch_options", "")
         if game.get("route") == "direct":
             guidance = ("Select AMD FSR in the game's upscaling settings. This native replacement does not require an additional proxy launch override. "

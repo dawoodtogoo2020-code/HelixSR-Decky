@@ -6,6 +6,7 @@ import { FaAdjust } from "react-icons/fa";
 import { proxyOptions } from "./launchOptions";
 import { PluginInstaller, PluginArtifact } from "./pluginInstaller";
 import { canRestore, gameStatus } from "./gameStatus";
+import { librarySelectable, libraryStatus } from "./libraryStatus";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -47,7 +48,8 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
   main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
   executable_choices?: { path: string; dx12: boolean }[]; selected_executable?: string; executable_selection_needed?: boolean;
-  optiscaler: { present: boolean; involved: boolean; helix_configured?: boolean; runtime: string; dlls: string[];
+  awareness_warnings?: string[];
+  optiscaler: { present: boolean | null; involved: boolean; helix_configured?: boolean | null; runtime: string; dlls: string[];
     setup?: { checks: string[]; backend: string; override: string; overlay_shortcut: string; settings: Record<string, string>; guide: string } };
   framegen: FG[]; framegen_summary: string; helix_runtime: string;
   launch_options: string; logs?: { path: string; modified: number; excerpt: string }[] };
@@ -228,6 +230,8 @@ function watchJobs(next: Job[]) {
 function Content() {
   const [overlay, setOverlay] = useState(latestOverlayStatus);
   const [data, setData] = useState<Library>();
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [libraryError, setLibraryError] = useState("");
   const [selected, select] = useState(lastSelected);
   const [game, setGame] = useState<Game>();
   const [busy, setBusy] = useState(false);
@@ -291,7 +295,12 @@ function Content() {
     finally { setBusy(false); }
   }
   async function refresh() {
-    const result = await run(library);
+    setLibraryLoading(true); setLibraryError("");
+    const result = await run(async () => {
+      try { return await library(); }
+      catch (e) { setLibraryError(e instanceof Error ? e.message : String(e)); throw e; }
+      finally { setLibraryLoading(false); }
+    });
     if (result) {
       setData(result); watchJobs(result.jobs);
       if (!selectedRef.current || !result.games.some(g => g.id === selectedRef.current)) {
@@ -301,6 +310,13 @@ function Content() {
     }
   }
   useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    if (!data) return;
+    setLibraryError("");
+    if (!data.games.some(librarySelectable)) {
+      setUnavailableGames(true); setDiscoveryNotes(true);
+    }
+  }, [data?.games]);
   useEffect(() => {
     let active = true;
     setGame(undefined); setDx12(false); setDiagnostics(false);
@@ -463,8 +479,9 @@ function Content() {
   const running = jobs.some(x => x.state === "running");
   const disabled = busy || running || modalOpen || !!pluginUpdate?.pending;
   const libraryGames = (data?.games || []).map(g => game?.id === g.id ? game : g);
-  const games = libraryGames.filter(g => g.installation_status?.selectable ?? (g.compatibility === "candidate" || !!g.recovery_available || g.managed || !!g.executable_selection_needed));
+  const games = libraryGames.filter(librarySelectable);
   const unavailable = libraryGames.filter(g => !games.includes(g));
+  const libraryView = libraryStatus(data ? libraryGames : undefined, libraryLoading, !!libraryError);
   const selectedStatus = game ? gameStatus(game) : undefined;
   const infoStyle = { fontSize: "13px", lineHeight: "1.45", overflowWrap: "anywhere" as const, whiteSpace: "pre-wrap" as const };
 
@@ -480,10 +497,15 @@ function Content() {
       .helixsr-decky .helix-muted{color:#c5d1df;font-size:12px}
       .helixsr-decky .helix-status{color:#8ee8bc}`}</style>
     <PanelSection title="Games">
-      <PanelSectionRow><div className="helix-card helix-muted">{busy && !data ? "Detecting installed games…" : `${data?.games.length || 0} detected · ${games.filter(g => g.compatibility === "candidate").length} installation candidates`}</div></PanelSectionRow>
+      <PanelSectionRow><div className="helix-card helix-muted">{libraryView.summary}</div></PanelSectionRow>
+      {libraryView.hint && <PanelSectionRow><div className="helix-muted">{libraryView.hint}</div></PanelSectionRow>}
+      {!!libraryError && <PanelSectionRow><div style={infoStyle}>{libraryError}</div></PanelSectionRow>}
+      {(data?.warnings || []).length > 0 && <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiscoveryNotes(!discoveryNotes)}>
+        {discoveryNotes ? "Hide discovery notes" : `Show discovery notes (${data!.warnings.length})`}</ButtonItem></PanelSectionRow>}
+      {discoveryNotes && !!data?.warnings.length && <PanelSectionRow><div style={infoStyle}>{data.warnings.join("\n")}</div></PanelSectionRow>}
       <div className={`${selectedStatus?.installed ? "helix-installed" : ""} helix-selected`}><PanelSectionRow>
         <DropdownItem layout="below" label="Game" menuLabel="Detected games" selectedOption={selected}
-          strDefaultLabel={games.length ? "Select a game" : "No compatible games detected"} disabled={busy || modalOpen || !games.length}
+          strDefaultLabel={games.length ? "Select a game" : libraryGames.length ? "See unavailable games below" : "No games available to select"} disabled={busy || modalOpen || !games.length}
           rgOptions={games.map(g => ({ data: g.id, label: <span style={{ borderLeft: `3px solid ${gameStatus(g).color}`, paddingLeft: 8 }}>{g.name} · {gameStatus(g).label}</span> }))}
           onChange={option => chooseGame(String(option.data))} />
       </PanelSectionRow></div>
@@ -547,7 +569,7 @@ function Content() {
     </PanelSection>}
     {game && <PanelSection title="OptiScaler and frame generation">
       <PanelSectionRow><div style={infoStyle}>
-        OptiScaler installed: {game.optiscaler.present ? "yes" : "no detected files"}{"\n"}
+        OptiScaler installed: {game.optiscaler.present === null ? "not inspected" : game.optiscaler.present ? "yes" : "no detected files"}{"\n"}
         OptiScaler HelixSR route configured: {game.optiscaler.helix_configured ? "yes" : "no"}{"\n"}
         OptiScaler runtime: {game.optiscaler.runtime}{"\n"}
         HelixSR runtime: {game.helix_runtime}{"\n"}
@@ -566,6 +588,7 @@ function Content() {
       <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiagnostics(!diagnostics)}>{diagnostics ? "Hide diagnostics" : "Show diagnostics and logs"}</ButtonItem></PanelSectionRow>
       {diagnostics && <PanelSectionRow><div style={infoStyle}>
         Folder: {game.folder}{"\n"}Launch options: {game.launch_options || "none detected"}{"\n"}
+        {(game.awareness_warnings || []).join("\n")}{"\n"}
         {Object.entries(game.optiscaler.setup?.settings || {}).map(([key, value]) => `${key}=${value}`).join("\n")}{"\n"}
         {(game.logs || []).map(l => `${l.path}\n${new Date(l.modified * 1000).toLocaleString()}\n${l.excerpt}`).join("\n\n") || "No supported logs found"}
       </div></PanelSectionRow>}
@@ -649,9 +672,6 @@ function Content() {
         if (result) { setData(result); queueFolders([]); }
       })}>Import selected folders ({folders.length})</ButtonItem></PanelSectionRow>
       </>}
-      {(data?.warnings || []).length > 0 && <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiscoveryNotes(!discoveryNotes)}>
-        {discoveryNotes ? "Hide discovery notes" : `Show discovery notes (${data!.warnings.length})`}</ButtonItem></PanelSectionRow>}
-      {discoveryNotes && <PanelSectionRow><div style={infoStyle}>{data?.warnings.join("\n")}</div></PanelSectionRow>}
     </PanelSection>
   </div>;
 }

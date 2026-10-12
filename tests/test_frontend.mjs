@@ -4,6 +4,22 @@ import test from "node:test";
 import { proxyOptions } from "../src/launchOptions.ts";
 import { PluginInstaller } from "../src/pluginInstaller.ts";
 import { canRestore, gameStatus } from "../src/gameStatus.ts";
+import { librarySelectable, libraryStatus } from "../src/libraryStatus.ts";
+
+test("library status distinguishes failed, empty and discovered-but-unavailable scans", () => {
+  const blocked = {compatibility: "blocked", installation_status: {selectable: false}};
+  assert.match(libraryStatus(undefined, true).summary, /Detecting/);
+  assert.match(libraryStatus(undefined, false, true).summary, /failed/);
+  assert.doesNotMatch(libraryStatus(undefined, false, true).summary, /0 games/);
+  assert.match(libraryStatus([]).hint, /No installed game folders.*Discovery notes/);
+  assert.match(libraryStatus([blocked]).summary, /1 games found.*0 installation candidates.*1 unavailable/);
+  assert.match(libraryStatus([blocked]).hint, /Your games were found/);
+  assert.equal(librarySelectable(blocked), false);
+  assert.equal(librarySelectable({...blocked, managed: true}), false);
+  assert.equal(librarySelectable({...blocked, installation_status: {selectable: true}}), true);
+  assert.match(libraryStatus([blocked], false, true).hint, /previous scan \(1 games\)/);
+  assert.equal(libraryStatus([{compatibility: "candidate"}]).hint, "");
+});
 
 test("unsupported renderer explains the limitation and permits only verified restoration", () => {
   const game = {compatibility: "unsupported", managed: true, enabled: true, legacy: false,

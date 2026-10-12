@@ -722,8 +722,13 @@ class Manager:
     def assess_safe(self, game, detailed=True, executable=None):
         try:
             return self.assess(game, detailed=detailed, executable=executable)
-        except (OSError, ValueError) as e:
-            data = dict(**game, compatibility='blocked', reasons=[str(e)], route=None,
+        except (OSError, ValueError, TypeError, AttributeError, KeyError) as e:
+            # A malformed receipt or other per-game metadata must block this
+            # entry, not discard the entire library. Actions still reassess.
+            reason = str(e)
+            if isinstance(e, (TypeError, AttributeError, KeyError)):
+                reason = 'Game metadata has an unexpected format; review diagnostics before changing files: ' + type(e).__name__ + ': ' + reason
+            data = dict(game, compatibility='blocked', reasons=[reason], route=None,
                         managed=False, enabled=False, inputs=[],
                         executable_choices=[], selected_executable=None, executable_selection_needed=False,
                         recovery_available=self.recovery_available(game),
@@ -884,7 +889,19 @@ class Manager:
         # Symlink candidates may hide API files and must never be mutated.
         for p in targets + ([main] if main else []):
             checked_path(root, str(p.relative_to(root)))
-        aware = awareness(dict(game, managed=bool(rec), enabled=rec.get('enabled', False)), tree, self.home, route, target)
+        if detailed:
+            aware = awareness(dict(game, managed=bool(rec), enabled=rec.get('enabled', False)), tree, self.home, route, target)
+        else:
+            # Library rows only need the compatibility assessment. Read logs,
+            # shared launcher/FG settings and runtime evidence when a game is
+            # inspected, never once per entry in a large installed library.
+            # Process and transaction safety checks above remain fresh.
+            aware = dict(awareness_deferred=True,
+                         optiscaler=dict(present=None, involved=route == 'optiscaler',
+                                         helix_configured=None, runtime='not inspected', dlls=[]),
+                         framegen=[], framegen_summary='Select this game to inspect frame-generation evidence',
+                         helix_runtime='not inspected', processes=[],
+                         launch_options=game.get('launch_options', ''))
         # A library row needs compatibility and recorded installation state,
         # not a cross-library search and rehash of every prepared model. Details
         # and every mutation retain the full, fresh package verification.

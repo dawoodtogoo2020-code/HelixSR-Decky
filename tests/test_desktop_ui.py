@@ -161,6 +161,44 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertIn('Protected game', self.window.unavailable.item(0).text())
         self.assertFalse(any(c[0] in ('install', 'preview', 'license') for c in self.backend.calls))
         self.assertIn('OptiScaler installed: yes', self.window.evidence.toPlainText())
+
+    def test_empty_and_unavailable_libraries_have_distinct_explanations(self):
+        payload = self.backend.library()
+        payload['games'] = []
+        payload['warnings'] = ['Steam library drive is unavailable']
+        self.window._library_received(payload)
+        self.settle()
+        self.assertIn('0 games found', self.window.library_summary.text())
+        self.assertIn('drive is mounted', self.window.library_summary.text())
+        self.assertIn('Steam library drive is unavailable', self.window.library_warning_view.toPlainText())
+        payload['games'] = [dict(id='blocked', name='Blocked game', compatibility='unsupported', reasons=['DirectX 11'])]
+        self.window._library_received(payload)
+        self.settle()
+        self.assertIn('1 games found', self.window.library_summary.text())
+        self.assertIn('Your games were found', self.window.library_summary.text())
+        self.assertEqual(self.window.games.count(), 0)
+        self.assertEqual(self.window.unavailable.count(), 1)
+        self.assertFalse(self.window.install.isEnabled())
+
+    def test_failed_library_refresh_keeps_prior_games_and_reports_failure(self):
+        def fail():
+            raise PermissionError('Cannot read Steam library metadata')
+        self.backend.library = fail
+        self.window.refresh()
+        self.settle()
+        self.assertIn('Library scan failed', self.window.library_summary.text())
+        self.assertIn('previous scan (2 games)', self.window.library_summary.text())
+        self.assertEqual(self.window.games.count(), 1)
+        self.assertIn('Cannot read Steam library metadata', self.window.notice.text())
+
+    def test_deferred_details_cannot_copy_uninspected_launch_options(self):
+        self.window.game['awareness_deferred'] = True
+        self.window._controls()
+        self.assertFalse(self.window.launch.isEnabled())
+        before = QApplication.clipboard().text()
+        self.window.copy_launch()
+        self.assertEqual(QApplication.clipboard().text(), before)
+        self.assertIn('inspect this game', self.window.notice.text())
         self.assertIn('OptiScaler runtime: unknown', self.window.evidence.toPlainText())
         self.assertIn('Frame generation:', self.window.evidence.toPlainText())
 

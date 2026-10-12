@@ -1435,12 +1435,18 @@ class TransactionTests(Fixtures):
         self.package()
         with patch('manager.discover', return_value=([self.game], [])), \
                 patch.object(self.m, 'package', wraps=self.m.package) as packages, \
+                patch('manager.awareness', wraps=awareness.awareness) as evidence_scan, \
                 patch('manager.urllib.request.urlopen', side_effect=OSError('offline')):
             library_data = self.m.refresh()['games'][0]
             self.assertEqual(library_data['compatibility'], 'candidate')
             self.assertIsNone(library_data['package_version'])
             packages.assert_not_called()
+            evidence_scan.assert_not_called()
+            self.assertTrue(library_data['awareness_deferred'])
+            self.assertIsNone(library_data['optiscaler']['present'])
+            self.assertEqual(library_data['framegen'], [])
             details = self.m.assess(self.game)
+            evidence_scan.assert_called_once()
             self.assertEqual(details['package_version'], '1.2.3')
             self.assertEqual(details['compatibility'], library_data['compatibility'])
             packages.assert_called_once()
@@ -1466,6 +1472,29 @@ class TransactionTests(Fixtures):
             self.assertEqual(data['compatibility'], 'blocked')
             self.assertTrue(any('Managed files changed' in reason for reason in data['reasons']))
             self.assertFalse(data['installation_status']['can_restore'])
+
+    def test_failed_shortcut_scan_does_not_abort_other_library_entries(self):
+        broken = dict(self.game, id='shortcut:broken', source='Steam shortcut', launch_options='%command%')
+        original_assess = self.m.assess
+        def assess(game, **kwargs):
+            if game['id'] == broken['id']:
+                raise ValueError('Game scan file limit exceeded')
+            return original_assess(game, **kwargs)
+        with patch('manager.discover', return_value=([broken, self.game], [])), patch.object(self.m, 'assess', side_effect=assess):
+            rows = self.m.refresh()['games']
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]['compatibility'], 'blocked')
+        self.assertEqual(rows[0]['launch_options'], '%command%')
+        self.assertIn('Game scan file limit exceeded', rows[0]['reasons'])
+        self.assertEqual(rows[1]['compatibility'], 'candidate')
+
+    def test_invalid_receipt_shapes_block_game_instead_of_aborting_library(self):
+        for invalid in (['invalid'], {'route': 'direct'}, {'route': 'optiscaler', 'target': {}}):
+            with self.subTest(receipt=invalid), patch.object(self.m, 'record', return_value=invalid):
+                data = self.m.assess_safe(self.game, detailed=False)
+                self.assertEqual(data['compatibility'], 'blocked')
+                self.assertFalse(data['installation_status']['can_modify'])
+                self.assertTrue(data['reasons'])
 
     def test_god_of_war_2018_is_unsupported_even_with_dlss_and_dx12_confirmation(self):
         self.native.unlink()

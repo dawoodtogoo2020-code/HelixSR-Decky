@@ -30,6 +30,66 @@ def text(path, limit=2 << 20):
         return ''
 
 
+def steam_text(path, limit=2 << 20):
+    """Read one Steam VDF file without turning a failed read into empty metadata."""
+    path = Path(path)
+    try:
+        with path.open('rb') as f:
+            data = f.read(limit + 1)
+    except FileNotFoundError:
+        return None, 'missing'
+    except OSError:
+        return None, 'unreadable'
+    if len(data) > limit:
+        return None, 'too large'
+    try:
+        return data.decode('utf-8'), None
+    except UnicodeDecodeError:
+        return None, 'not UTF-8'
+
+
+def steam_vdf(path, label, warnings, warn_missing=True):
+    """Parse bounded Steam metadata and retain a reason users can act on."""
+    source, error = steam_text(path)
+    if error:
+        if error == 'missing' and not warn_missing:
+            return None
+        warnings.append(f'Steam: {label} {error}: {path}')
+        return None
+    try:
+        return vdf(source)
+    except ValueError:
+        warnings.append(f'Steam: {label} is malformed: {path}')
+        return None
+
+
+def steam_library(path, warnings):
+    """Accept only usable absolute local library roots from Steam metadata."""
+    if not isinstance(path, (str, os.PathLike)):
+        warnings.append('Steam: library path is not text')
+        return None
+    value = os.fspath(path)
+    if not isinstance(value, str):
+        warnings.append('Steam: library path is not text')
+        return None
+    if not value or '\x00' in value:
+        warnings.append('Steam: library path is empty or invalid')
+        return None
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        warnings.append(f'Steam: library path is not absolute: {value}')
+        return None
+    try:
+        candidate = candidate.resolve()
+        if not candidate.is_dir():
+            warnings.append(f'Steam: library is unavailable or not mounted: {candidate}')
+            return None
+    except OSError:
+        warnings.append(f'Steam: library cannot be read: {candidate}')
+        return None
+    return candidate
+
+
 def vdf(source):
     tokens = re.findall(r'"((?:\\.|[^"\\])*)"|([{}])', re.sub(r'(?m)^\s*//.*$', '', source))
     stack, root, key = [], {}, None
@@ -220,30 +280,71 @@ def discover(home, imported=(), sources=None):
         gid = metadata.pop('id', ident(source, p))
         entries[gid] = dict(id=gid, name=str(name), folder=key, source=source, **metadata)
 
+    steam_root_seen, steam_root_found, steam_manifest_found = set(), False, False
     for root in steam_roots(home) if enabled & {'steam', 'steam-shortcuts'} else ():
         if not root.is_dir():
             continue
+        try:
+            root = root.resolve()
+        except OSError:
+            warnings.append(f'Steam: library root cannot be read: {root}')
+            continue
+        if str(root) in steam_root_seen:
+            continue
+        steam_root_seen.add(str(root))
+        steam_root_found = True
         if 'steam' in enabled:
             paths = [root]
-            try:
-                records = vdf(text(root / 'steamapps/libraryfolders.vdf')).get('libraryfolders', {})
-                for value in records.values():
-                    if isinstance(value, dict) and value.get('path'):
-                        paths.append(Path(value['path']))
-                    elif isinstance(value, str) and Path(value).is_absolute():
-                        paths.append(Path(value))
-            except ValueError:
-                warnings.append(f'Cannot parse {root}/steamapps/libraryfolders.vdf')
+            metadata_path = root / 'steamapps/libraryfolders.vdf'
+            metadata = steam_vdf(metadata_path, 'library metadata', warnings, warn_missing=False)
+            records = metadata.get('libraryfolders') if isinstance(metadata, dict) else None
+            if metadata is not None and not isinstance(records, dict):
+                warnings.append(f'Steam: library metadata has an invalid shape: {metadata_path}')
+            for key, value in records.items() if isinstance(records, dict) else ():
+                # Legacy files also contain non-library statistics fields.
+                if not key.isdigit():
+                    continue
+                if isinstance(value, dict):
+                    value = value.get('path')
+                library_path = steam_library(value, warnings)
+                if library_path is not None:
+                    paths.append(library_path)
             for lib in paths:
-                lib = lib.resolve()
+                try:
+                    lib = lib.resolve()
+                except OSError:
+                    warnings.append(f'Steam: library cannot be read: {lib}')
+                    continue
                 if str(lib) in libraries:
                     continue
                 libraries[str(lib)] = True
-                for manifest in sorted((lib / 'steamapps').glob('appmanifest_*.acf')):
+                steamapps = lib / 'steamapps'
+                try:
+                    manifests = sorted(steamapps.glob('appmanifest_*.acf'))
+                except OSError:
+                    warnings.append(f'Steam: cannot list manifests: {steamapps}')
+                    continue
+                for manifest in manifests:
+                    steam_manifest_found = True
                     try:
-                        app = vdf(text(manifest)).get('AppState', {})
+                        match = re.fullmatch(r'appmanifest_(\d+)\.acf', manifest.name)
+                        if not match:
+                            continue
+                        data = steam_vdf(manifest, 'game manifest', warnings)
+                        if data is None:
+                            continue
+                        app = data.get('AppState', {}) if isinstance(data, dict) else {}
+                        if not isinstance(app, dict) or any(not isinstance(app.get(key, ''), str)
+                                for key in ('appid', 'installdir', 'name', 'StateFlags', 'buildid',
+                                            'BytesToDownload', 'BytesDownloaded')):
+                            warnings.append(f'Steam: invalid game manifest structure: {manifest.name}')
+                            continue
                         appid, directory = app.get('appid', ''), app.get('installdir', '')
-                        if not appid.isdigit() or not directory or '/' in directory or '\\' in directory:
+                        if (not isinstance(appid, str) or appid != match.group(1) or not appid.isdigit()
+                                or not isinstance(directory, str) or not directory or directory in ('.', '..')
+                                or '\x00' in directory or '/' in directory or '\\' in directory
+                                or Path(directory).name != directory):
+                            warnings.append(f'Steam: invalid game manifest entry: {manifest.name}')
                             continue
                         # Installed Steam compatibility tools are not game-library entries.
                         if re.match(r'^(?:Proton(?: |$)|SteamLinuxRuntime|Steam Linux Runtime|Steamworks Shared|SteamVR)', directory):
@@ -254,7 +355,7 @@ def discover(home, imported=(), sources=None):
                             library=str(lib), bytes_to_download=app.get('BytesToDownload', '0'),
                             bytes_downloaded=app.get('BytesDownloaded', '0'))
                     except (ValueError, OSError):
-                        warnings.append(f'Cannot read {manifest.name}')
+                        warnings.append(f'Steam: cannot read game manifest: {manifest.name}')
         for shortcuts in (root / 'userdata').glob('*/config/shortcuts.vdf') if 'steam-shortcuts' in enabled else ():
             if str(shortcuts.resolve()) in shortcuts_seen:
                 continue
@@ -264,6 +365,8 @@ def discover(home, imported=(), sources=None):
                 if len(data) > 8 << 20:
                     raise ValueError('Shortcut file size limit')
                 records = binary_vdf(data).get('shortcuts', {})
+                if not isinstance(records, dict):
+                    raise ValueError('Invalid shortcuts metadata structure')
                 for s in records.values():
                     if not isinstance(s, dict):
                         continue
@@ -366,6 +469,11 @@ def discover(home, imported=(), sources=None):
     for record in imported if 'imported' in enabled else ():
         if isinstance(record, dict) and record.get('folder'):
             add('Imported', record['folder'], record.get('name', Path(record['folder']).name))
+    if 'steam' in enabled and not entries:
+        if not steam_root_found:
+            warnings.append('Steam: no supported Steam library root found for this user')
+        elif not steam_manifest_found:
+            warnings.append('Steam: no installed game manifests were found; check Steam library mounts')
     return sorted(entries.values(), key=lambda x: x['name'].lower()), list(dict.fromkeys(warnings))
 
 
@@ -378,9 +486,11 @@ def discover_launcher(home, key):
     return discover(home, sources=sources)
 
 
-def scan_tree(folder, depth=9, max_files=50000):
+def scan_tree(folder, depth=9, max_files=50000, max_dirs=10000):
     root, result, count = Path(folder).resolve(), [], 0
     for directory, dirs, files in os.walk(root, followlinks=False):
+        if len(result) >= max_dirs:
+            raise ValueError('Game scan directory limit exceeded')
         p = Path(directory)
         level = len(p.relative_to(root).parts)
         dirs[:] = [d for d in dirs if d.lower() not in ('helixsr', '.git', 'node_modules')

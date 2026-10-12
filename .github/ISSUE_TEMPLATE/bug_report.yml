@@ -21,8 +21,9 @@ body:
   - type: input
     id: plugin_version
     attributes:
-      label: HelixSR Decky plugin version
-      placeholder: 0.1.0
+      label: HelixSR plugin or desktop app version
+      description: Include Decky or Desktop and the Current version shown in its update panel.
+      placeholder: Decky 0.1.18
     validations:
       required: true
   - type: input
@@ -93,6 +94,14 @@ body:
         Actual:
     validations:
       required: true
+  - type: textarea
+    id: discovery
+    attributes:
+      label: Missing games or library scan details (optional)
+      description: For detection problems, copy the Games summary and Discovery notes. Include your device, launcher, internal drive or SD card, and roughly how many games are installed on this device (not how many you own). Remove usernames and private paths.
+      placeholder: "Steam Deck; Steam; SD card; 12 installed. Summary: 0 games found. Discovery notes: ..."
+    validations:
+      required: false
   - type: textarea
     id: logs
     attributes:
