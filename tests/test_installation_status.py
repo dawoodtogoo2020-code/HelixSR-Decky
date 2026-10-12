@@ -74,6 +74,13 @@ class InstallationStatusTests(unittest.TestCase):
         self.assertFalse(any('delete' in step.lower() or 'chmod' in step.lower()
                              for step in status['issues'][0]['steps']))
 
+    def test_missing_owned_file_explanation_does_not_suggest_admin_access(self):
+        reason = 'Managed files changed; ownership needs review before further changes: dxgi.dll (current state: missing)'
+        status = installation_status(self.game(compatibility='blocked', managed=True, enabled=True, reasons=[reason]))
+        self.assertEqual(status['issues'][0]['title'], 'Installed file missing')
+        self.assertFalse(status['can_modify'])
+        self.assertIn('not a game ownership or administrator check', status['issues'][0]['steps'][0])
+
     def test_steam_build_review_shows_ids_and_relative_file_states_without_unblocking(self):
         reason = 'Steam build changed; installation needs review'
         report = dict(recorded_build='123456', current_build='789012', files=[

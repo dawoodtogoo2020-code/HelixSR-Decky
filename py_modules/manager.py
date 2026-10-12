@@ -430,8 +430,9 @@ class Manager:
         return load_json(self.record_path(game))
 
     def mutable_config_paths(self, game, rec):
-        # Only configurations this installation created are mutable. Legacy records
-        # use the same baseline/current ownership proof, without a schema migration.
+        # Configurations tracked by this installation are editable. Older installs
+        # could capture an existing fakenvapi.ini: prove its saved original before
+        # accepting edits, so removal can still restore the exact prior file.
         if rec.get('route') != 'optiscaler':
             return []
         root = Path(game['folder'])
@@ -440,8 +441,17 @@ class Manager:
             raise ValueError('Invalid configuration ownership record')
         paths = [str((target / name).relative_to(root))
                  for name in ('OptiScaler.ini', 'fakenvapi.ini')]
-        return [rel for rel in paths if rel in rec.get('current', {})
-                and rel in rec.get('baseline', {}) and rec['baseline'][rel] is None]
+        mutable = []
+        for rel in paths:
+            if rel not in rec['current'] or rel not in rec['baseline']:
+                continue
+            original = rec['baseline'][rel]
+            if original is not None:
+                backup = checked_path(self.companion(game), str(Path('originals') / rel))
+                if not backup.is_file() or sha(backup) != original:
+                    raise ValueError('Original configuration backup missing or changed: ' + rel)
+            mutable.append(rel)
+        return mutable
 
     def read_owned_config(self, game, rel):
         p = checked_path(Path(game['folder']), rel)
@@ -470,7 +480,7 @@ class Manager:
         current, baseline = rec.get('current', {}), rec.get('baseline', {})
         allowed = {str(Path(rel).parent / name) for name in ('OptiScaler.ini', 'fakenvapi.ini')}
         if (not isinstance(container, dict) or not isinstance(current, dict) or not isinstance(baseline, dict)
-                or any(k not in allowed or k not in current or k not in baseline or baseline[k] is not None for k in container)):
+                or any(k not in allowed or k not in current or k not in baseline for k in container)):
             raise ValueError('Invalid retained configuration record')
         saved = container.get(rel)
         if saved is None:
@@ -887,7 +897,10 @@ class Manager:
                             'saved-original bytes match' if actual == rec['baseline'].get(rel) else
                             'installed bytes match' if actual == expected else 'externally changed')
                 if actual != expected:
-                    blocked.append('Managed files changed; ownership needs review before further changes: ' + rel)
+                    state = ('missing' if actual is None else 'matches recorded original'
+                             if actual == rec['baseline'].get(rel) else 'different bytes')
+                    blocked.append('Managed files changed; ownership needs review before further changes: '
+                                   + rel + ' (current state: ' + state + ')')
         # Symlink candidates may hide API files and must never be mutated.
         for p in targets + ([main] if main else []):
             checked_path(root, str(p.relative_to(root)))
@@ -1815,6 +1828,13 @@ class Manager:
                 self.copy_atomic(package_path / source, target / dest, package_record['files'][source])
             fake_rel = str((target / 'fakenvapi.ini').relative_to(root))
             fake = self.retained_config(rec, fake_rel)
+            if fake is None and rec['baseline'].get(fake_rel) is not None:
+                # Fresh installs retain a standalone fakenvapi configuration
+                # instead of replacing the user's existing settings with defaults.
+                existing = self.read_owned_config(game, fake_rel)
+                if existing['sha256'] != rec['baseline'][fake_rel]:
+                    raise ValueError('Existing configuration changed during installation: ' + fake_rel)
+                fake = existing['content']
             if fake is None:
                 self.copy_atomic(package_path / 'optiscaler/fakenvapi.ini', target / 'fakenvapi.ini',
                                  package_record['files']['optiscaler/fakenvapi.ini'])

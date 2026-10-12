@@ -1384,7 +1384,7 @@ class TransactionTests(Fixtures):
                     self.assertEqual(data['targets'], receipt['targets'])
                     self.assertEqual(data['compatibility'], 'blocked')
                     self.assertIn('Managed files changed; ownership needs review before further changes: '
-                                  + self.native.name, data['reasons'])
+                                  + self.native.name + ' (current state: missing)', data['reasons'])
                     for action in ('update', 'remove', 'disable', 'enable'):
                         with self.assertRaisesRegex(ValueError, 'Managed files changed'):
                             self.m.preview(self.game['id'], action)
@@ -1705,6 +1705,109 @@ class TransactionTests(Fixtures):
         self.assertEqual(result, expected)
         self.assertEqual((self.root / 'fakenvapi.ini').read_bytes(), fake)
         self.assertEqual(self.m.record(self.game)['baseline'], baseline)
+
+    def test_preexisting_fakenvapi_settings_survive_install_update_and_restore(self):
+        path = self.root / 'fakenvapi.ini'
+        original = b'; existing choices\r\n[Settings]\r\nEnable=false\r\n'
+        write(path, original)
+        self.install_overlay_fixture()
+        self.assertEqual(path.read_bytes(), original)
+        receipt = self.m.record(self.game)
+        self.assertEqual(receipt['baseline']['fakenvapi.ini'], hashlib.sha256(original).hexdigest())
+        edited = original + b'CustomOption=kept\r\n'
+        write(path, edited)
+        self.assertEqual(self.m.assess(self.game)['compatibility'], 'candidate')
+        self.action('update')
+        self.assertEqual(path.read_bytes(), edited)
+        self.action('disable')
+        self.assertEqual(path.read_bytes(), original)
+        self.action('enable')
+        self.assertEqual(path.read_bytes(), edited)
+        self.action('remove')
+        self.assertEqual(path.read_bytes(), original)
+        self.assertFalse(self.m.record(self.game))
+        records = list((self.m.companion(self.game) / 'records').glob('config-*.json'))
+        self.assertTrue(any(manager.load_json(p)['configurations']['fakenvapi.ini']['content'].encode() == edited
+                            for p in records))
+
+    def test_legacy_preexisting_fakenvapi_edit_is_not_binary_ownership_conflict(self):
+        # Older installers overwrote a pre-existing INI with their defaults.
+        original = b'[Settings]\nEnable=false\n'
+        path = write(self.root / 'fakenvapi.ini', original)
+        package = self.install_overlay_fixture()
+        write(path, (package / 'optiscaler/fakenvapi.ini').read_bytes())
+        receipt = self.m.record(self.game)
+        receipt['current']['fakenvapi.ini'] = manager.sha(path)
+        manager.atomic_json(self.m.record_path(self.game), receipt)
+        edited = b'[Settings]\nEnable=true\n'
+        write(path, edited)
+        self.action('update')
+        self.assertEqual(path.read_bytes(), edited)
+        self.action('remove')
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_preexisting_config_missing_or_changed_original_still_blocks(self):
+        original = b'[Settings]\nEnable=false\n'
+        path = write(self.root / 'fakenvapi.ini', original)
+        self.install_overlay_fixture()
+        edited = b'[Settings]\nEnable=true\n'
+        write(path, edited)
+        backup = self.m.companion(self.game) / 'originals/fakenvapi.ini'
+        receipt = self.m.record(self.game)
+        for content in (None, b'[Settings]\nForeign=true\n'):
+            with self.subTest(content=content):
+                backup.unlink(missing_ok=True)
+                if content is not None:
+                    write(backup, content)
+                for action in ('update', 'disable', 'remove'):
+                    with self.assertRaisesRegex(ValueError, 'Original configuration backup'):
+                        self.m.preview(self.game['id'], action)
+                self.assertEqual(path.read_bytes(), edited)
+                self.assertEqual(self.m.record(self.game), receipt)
+
+    def test_disabled_preexisting_config_change_is_not_accepted(self):
+        path = write(self.root / 'fakenvapi.ini', b'[Settings]\nEnable=false\n')
+        self.install_overlay_fixture()
+        self.action('disable')
+        edited = b'[Settings]\nAnotherMod=true\n'
+        write(path, edited)
+        for action in ('enable', 'update', 'remove'):
+            with self.assertRaisesRegex(ValueError, 'Managed files changed'):
+                self.m.preview(self.game['id'], action)
+        self.assertEqual(path.read_bytes(), edited)
+
+    def test_preexisting_config_symlinked_original_directory_blocks(self):
+        path = write(self.root / 'fakenvapi.ini', b'[Settings]\nEnable=false\n')
+        self.install_overlay_fixture()
+        originals = self.m.companion(self.game) / 'originals'
+        moved = originals.with_name('originals-held')
+        originals.rename(moved)
+        try:
+            try:
+                originals.symlink_to(moved, target_is_directory=True)
+            except OSError:
+                self.skipTest('Directory symlinks unavailable on this host')
+            with self.assertRaisesRegex(ValueError, 'Symlink'):
+                self.m.preview(self.game['id'], 'update')
+            self.assertTrue(path.is_file())
+        finally:
+            if originals.is_symlink():
+                originals.unlink()
+            moved.rename(originals)
+
+    def test_verified_original_restoration_is_explained_but_not_unblocked(self):
+        self.package()
+        self.action('install')
+        write(self.native, self.original)
+        data = self.m.assess(self.game)
+        self.assertEqual(data['compatibility'], 'blocked')
+        issue = next(i for i in data['installation_status']['issues'] if i['code'] == 'managed_files_changed')
+        self.assertEqual(issue['title'], 'Original file restored')
+        self.assertIn('(current state: matches recorded original)', issue['reason'])
+        for action in ('update', 'disable', 'remove'):
+            with self.assertRaisesRegex(ValueError, 'Managed files changed'):
+                self.m.preview(self.game['id'], action)
+        self.assertEqual(self.native.read_bytes(), self.original)
 
     def test_configuration_record_failure_preserves_edited_live_files(self):
         self.install_overlay_fixture()

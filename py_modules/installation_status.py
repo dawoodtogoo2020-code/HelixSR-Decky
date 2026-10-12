@@ -62,6 +62,15 @@ def _issue(reason, game=None):
         return ('steam_update', 'Steam update in progress',
                 ['Let Steam finish the installation or update, then refresh.'])
     if 'managed files changed' in lower or 'ownership needs review' in lower:
+        if lower.endswith('(current state: matches recorded original)'):
+            return ('managed_files_changed', 'Original file restored',
+                    ['This file matches the original recorded before HelixSR installation, rather than the installed HelixSR file. Game verification or another installer may have restored it.',
+                     'The installation record and live files disagree. File changes remain blocked for review; reinstalling the plugin does not reconcile this game record.',
+                     'Report the named file and app version. Do not delete DLLs, saved originals or installation records.'])
+        if lower.endswith('(current state: missing)'):
+            return ('managed_files_changed', 'Installed file missing',
+                    ['A file recorded by this installation is missing. This is not a game ownership or administrator check.',
+                     'Report the named file and app version. Reinstalling the plugin does not restore files inside the game; keep installation records and saved originals for review.'])
         return ('managed_files_changed', 'Managed files changed',
                 ['The file no longer matches the bytes recorded by HelixSR. This is not a Linux owner or administrator check.',
                  'If another mod changed it, use that mod\'s own restore option, then refresh. Otherwise report the named file and your app version for a safe review.',
