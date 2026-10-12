@@ -299,21 +299,21 @@ function Content() {
         if (first) chooseGame(first.id);
       }
     }
-    const id = selectedRef.current;
-    if (id) {
-      const current = result?.games.find(g => g.id === id);
-      if (current?.managed || current?.route !== "optiscaler") executableRef.current = undefined;
-      const g = await run(() => details(id, executableRef.current));
-      if (g && selectedRef.current === id) setGame(g);
-    }
   }
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
     let active = true;
     setGame(undefined); setDx12(false); setDiagnostics(false);
-    if (selected) void run(() => details(selected)).then(g => { if (g && active) setGame(g); });
+    const current = data?.games.find(g => g.id === selected);
+    if (current?.managed || current?.route !== "optiscaler") executableRef.current = undefined;
+    // This effect alone owns selection scans, including refreshes of the same
+    // selected game. Wait for the library instead of queuing a duplicate scan.
+    const requestedExecutable = executableRef.current;
+    if (selected && current) void run(() => details(selected, requestedExecutable)).then(g => {
+      if (g && active && selectedRef.current === selected && executableRef.current === requestedExecutable) setGame(g);
+    });
     return () => { active = false; };
-  }, [selected]);
+  }, [selected, data?.games]);
   useEffect(() => {
     setVariant(game?.installed_variant || data?.model_catalog?.default);
   }, [game?.id, game?.installed_variant, data?.model_catalog?.default]);
@@ -363,11 +363,6 @@ function Content() {
       const first = result.games.find(g => report.game_ids.includes(g.id) && g.compatibility === "candidate");
       chooseGame(first?.id || "");
       setGame(undefined);
-    } else {
-      const id = selectedRef.current;
-      if (current.managed || current.route !== "optiscaler") executableRef.current = undefined;
-      const updated = await run(() => details(id, executableRef.current));
-      if (selectedRef.current === id) setGame(updated);
     }
     toaster.toast({ title: report.warnings.length ? "Game import finished with warnings" : "Game import complete", body: `${label}: ${message}`, duration: 6000 });
   }
@@ -375,7 +370,7 @@ function Content() {
   async function installOrUpdate() {
     if (!game) return;
     const currentRelease = await run(() => checkUpdates(true));
-    if (!currentRelease?.version || currentRelease.error) { setError(currentRelease?.error || "Could not check the latest HelixSR release. Retry Check for updates."); return; }
+    if (!currentRelease?.version || currentRelease.error) { setError(currentRelease?.error || "Could not check the latest HelixSR release. Retry Check latest HelixSR version in Updates."); return; }
     setData(d => d ? { ...d, release: currentRelease } : d);
     const executable = !game.managed && game.route === "optiscaler" ? game.selected_executable : undefined;
     const p = await run(() => previewLatest(game.id, dx12, variant, executable));
@@ -507,7 +502,7 @@ function Content() {
         {game.dx12_confirmation_needed && <PanelSectionRow><ToggleField label="Game is set to DirectX 12"
           description="Confirm the renderer selected in the game." checked={dx12} onChange={setDx12} disabled={disabled} /></PanelSectionRow>}
         <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
-          onClick={() => void interact(installOrUpdate)}>{game.managed || game.legacy ? "Update HelixSR" : "Install HelixSR"}</ButtonItem></PanelSectionRow></div>
+          onClick={() => void interact(installOrUpdate)}>{game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
       </>}
       <PanelSectionRow><ButtonItem layout="below" onClick={() => void refresh()} disabled={busy || modalOpen}>Refresh library and status</ButtonItem></PanelSectionRow>
       {!!unavailable.length && <PanelSectionRow><ButtonItem layout="below" onClick={() => setUnavailableGames(!unavailableGames)}>{unavailableGames ? "Hide unavailable games" : `Unavailable games (${unavailable.length})`}</ButtonItem></PanelSectionRow>}
@@ -598,7 +593,8 @@ function Content() {
     <PanelSection title="HelixSR updates">
       <PanelSectionRow><div className="helix-card" style={infoStyle}>Current HelixSR: {game?.installed_version || "not installed"}{"\n"}
         Latest HelixSR: {data?.release?.version || "checking required"}</div></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen} onClick={() => void run(() => checkUpdates(true)).then(r => { if (r) setData(d => d ? { ...d, release: r } : d); })}>Check for updates</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen} onClick={() => void run(() => checkUpdates(true)).then(r => { if (r) setData(d => d ? { ...d, release: r } : d); })}>Check latest HelixSR version</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><div className="helix-muted">Checks the release version. Use the selected game's Install or Update button to apply it.</div></PanelSectionRow>
       {data?.release?.error && <PanelSectionRow><div className="helix-muted">{data.release.error}</div></PanelSectionRow>}
       <PanelSectionRow><ButtonItem layout="below" onClick={() => setSetupOptions(!setupOptions)}>{setupOptions ? "Hide preparation settings" : "Preparation settings"}</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => void interact(async () => openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle="Installation guide" strOKButtonText="Done"

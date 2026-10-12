@@ -1421,6 +1421,52 @@ class TransactionTests(Fixtures):
                     self.assertEqual(nested.read_bytes(), self.original)
         self.assertFalse(self.m.record(self.game))
 
+    def test_log_discovery_checks_each_directory_once_and_preserves_unique_logs(self):
+        logfile = write(self.root / 'HelixSR/helixsr.log', 'fixture network running\n')
+        tree = [(self.root, [f'asset-{n}.bin' for n in range(1000)]),
+                (logfile.parent, ['helixsr.log'])]
+        with patch('awareness.safe_log', wraps=awareness.safe_log) as checks:
+            data = awareness.awareness(self.game, tree, self.home, 'direct', self.root)
+        self.assertLessEqual(checks.call_count, 3 * len(tree))
+        self.assertEqual([item['path'] for item in data['logs']], [str(logfile)])
+        self.assertIn('fixture network running', data['logs'][0]['excerpt'])
+
+    def test_library_refresh_is_offline_and_defers_package_verification_until_details(self):
+        self.package()
+        with patch('manager.discover', return_value=([self.game], [])), \
+                patch.object(self.m, 'package', wraps=self.m.package) as packages, \
+                patch('manager.urllib.request.urlopen', side_effect=OSError('offline')):
+            library_data = self.m.refresh()['games'][0]
+            self.assertEqual(library_data['compatibility'], 'candidate')
+            self.assertIsNone(library_data['package_version'])
+            packages.assert_not_called()
+            details = self.m.assess(self.game)
+            self.assertEqual(details['package_version'], '1.2.3')
+            self.assertEqual(details['compatibility'], library_data['compatibility'])
+            packages.assert_called_once()
+            self.action('install')
+            self.action('disable')
+            self.action('enable')
+            self.action('remove')
+            self.assertEqual(self.native.read_bytes(), self.original)
+
+    def test_library_summary_retains_anti_cheat_running_and_owned_hash_guards(self):
+        self.package()
+        self.action('install')
+        with patch('manager.discover', return_value=([self.game], [])):
+            write(self.root / 'EasyAntiCheat/protected.txt', 'fixture')
+            data = self.m.refresh()['games'][0]
+            self.assertEqual(data['compatibility'], 'blocked')
+            self.assertTrue(any('Anti-cheat' in reason for reason in data['reasons']))
+            (self.root / 'EasyAntiCheat/protected.txt').unlink()
+            with patch('manager.active_processes', return_value=[{'pid': 42}]):
+                self.assertEqual(self.m.refresh()['games'][0]['compatibility'], 'blocked')
+            write(self.native, b'externally changed')
+            data = self.m.refresh()['games'][0]
+            self.assertEqual(data['compatibility'], 'blocked')
+            self.assertTrue(any('Managed files changed' in reason for reason in data['reasons']))
+            self.assertFalse(data['installation_status']['can_restore'])
+
     def test_god_of_war_2018_is_unsupported_even_with_dlss_and_dx12_confirmation(self):
         self.native.unlink()
         write(self.root / 'nvngx_dlss.dll', pe())

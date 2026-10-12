@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
         self.helix_status.setWordWrap(True)
         self.helix_status.setTextFormat(Qt.PlainText)
         group_layout.addWidget(self.helix_status)
-        self.helix_check = self._button("Check HelixSR updates", lambda: self._run(lambda: self.backend.check_helix_updates(True), self._release_received), group_layout)
+        self.helix_check = self._button("Check latest HelixSR version", lambda: self._run(lambda: self.backend.check_helix_updates(True), self._release_received), group_layout)
         content.addWidget(group)
         group = QGroupBox("Desktop app updates")
         group_layout = QVBoxLayout(group)
@@ -416,7 +416,7 @@ class MainWindow(QMainWindow):
         report = game.get('installation_status') or {}
         if report:
             candidate = bool(report.get('can_modify')) and not game.get('recovery_available')
-        self.install.setText("Update HelixSR" if game.get("managed") else "Install HelixSR")
+        self.install.setText("Update this game's HelixSR" if game.get("managed") else "Install HelixSR for this game")
         self.install.setEnabled(free and candidate and confirmed and not game.get("legacy"))
         for action, button in self.actions.items():
             visible = (action == "recover" and game.get("recovery_available")) or (action == "adopt" and game.get("legacy")) or (action in ("enable", "disable", "remove") and game.get("managed"))

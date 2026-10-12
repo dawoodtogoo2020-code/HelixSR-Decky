@@ -885,7 +885,10 @@ class Manager:
         for p in targets + ([main] if main else []):
             checked_path(root, str(p.relative_to(root)))
         aware = awareness(dict(game, managed=bool(rec), enabled=rec.get('enabled', False)), tree, self.home, route, target)
-        package = self.package(game, route)
+        # A library row needs compatibility and recorded installation state,
+        # not a cross-library search and rehash of every prepared model. Details
+        # and every mutation retain the full, fresh package verification.
+        package = self.package(game, route) if detailed else None
         data = dict(game, compatibility='blocked' if blocked else 'unsupported' if dx11_title else 'candidate' if route else 'unsupported',
                     reasons=blocked + reasons, route=route, inputs=inputs, target=str(target) if target else None,
                     targets=[str(p) for p in targets], main_exe=str(main) if main else None,

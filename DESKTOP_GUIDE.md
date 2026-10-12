@@ -2,18 +2,20 @@
 
 HelixSR Desktop is a standalone Linux app. Decky Loader is optional. It manages HelixSR for compatible 64-bit Windows DirectX 12 games running through Proton or Wine.
 
+Game detection and local diagnostics work offline. Existing installations can be disabled or removed offline, and Enable works when the exact verified prepared package is available. HelixSR itself does not need internet during gameplay. Installing a new release, updating game installations and checking available releases require internet access. **Check latest HelixSR version** checks release metadata; **Update this game's HelixSR** changes the selected game's installation.
+
 ## Download and open
 
 1. Switch your SteamOS device to Desktop Mode.
-2. Download **HelixSR-Desktop-0.1.12-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.12). Save it in a folder such as `Applications` under your own home folder.
+2. Download **HelixSR-Desktop-0.1.13-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.13). Save it in a folder such as `Applications` under your own home folder.
 3. In your file manager, right-click the AppImage, open **Properties → Permissions**, and enable **Is executable** (wording varies).
 4. Double-click the AppImage. Do not run it with sudo or as administrator.
 
 If your system cannot mount AppImages, open a terminal in its folder and run:
 
 ```sh
-chmod +x HelixSR-Desktop-0.1.12-x86_64.AppImage
-./HelixSR-Desktop-0.1.12-x86_64.AppImage --appimage-extract-and-run
+chmod +x HelixSR-Desktop-0.1.13-x86_64.AppImage
+./HelixSR-Desktop-0.1.13-x86_64.AppImage --appimage-extract-and-run
 ```
 
 This fallback extracts the app temporarily and does not require FUSE or administrator access. [AppImage documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html) explains the options.
@@ -24,7 +26,7 @@ This fallback extracts the app temporarily and does not require FUSE or administ
 2. Choose a game from the dropdown. Unavailable entries show a reason and cannot be installed.
 3. For another launcher, choose **Import games from → Heroic, Lutris, Legendary, or Steam shortcuts**, then **Import now**. The app reads installed records; it does not start the launcher or alter its database.
 4. For an unlisted game, use **Import game folders → Add folder**. Add each game's install folder to the list, then choose **Import listed folders**. You can remove a mistaken entry before importing. Select each game's install folder, not an entire drive or Wine prefix.
-5. Close the game. Click **Install HelixSR** or **Update HelixSR**, review the files and terms, and confirm. Only confirm DirectX 12 when your game's selected renderer uses it.
+5. Close the game. Click **Install HelixSR for this game** or **Update this game's HelixSR**, review the files and terms, and confirm. Only confirm DirectX 12 when your game's selected renderer uses it.
    For a new OptiScaler installation with more than one executable, use **Game executable** to choose the DX12 executable you actually launch before installing. Games labelled **Choose executable** need an eligible x64 selection first. The file review binds that selection. Existing installations keep their recorded folder; remove them through the manager before changing it. See the [OptiScaler guide](OPTISCALER_GUIDE.md).
 6. Wait for **HelixSR enabled**. Downloads, dependencies and local network preparation happen automatically. Keep at least 3 GiB free on the game's drive while preparing.
 7. Follow the displayed launch-option guidance. For native FSR replacement, select AMD FSR in the game's settings. For an OptiScaler route, follow the displayed input and Proton override instructions. The desktop app displays these instructions and does not change Steam launch options for you.

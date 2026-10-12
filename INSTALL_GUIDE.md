@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.16.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin. It is distributed through GitHub and is currently not listed in the Decky Store.
+3. Open the [HelixSR Decky release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-0.1.17.zip** under **Assets**. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin. It is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -30,12 +30,14 @@ If Decky disappears after a SteamOS update, follow Decky's own recovery instruct
 
 1. Open the **Game** dropdown at the top. Select your installed game. Choose **Refresh library and status** if you recently installed it. Steam, supported Steam shortcuts, Heroic, Legendary and Lutris records are detected automatically.
 2. Read its status and route. **Needs review** or an unavailable game has a reason shown in the panel. Do not bypass a block. If asked, enable **Game is set to DirectX 12** only after confirming that renderer in the game's launch selection or settings.
-3. Select the purple **Install HelixSR** button directly beneath the game selector. An existing managed or supported legacy installation shows **Update HelixSR** instead.
+3. Select the purple **Install HelixSR for this game** button directly beneath the game selector. An existing managed or supported legacy installation shows **Update this game's HelixSR** instead.
 4. Review the selected game, changed files, download details and linked terms. Choose **Accept terms and install** when you agree. Preparation uses the [HelixSR license](https://github.com/lonewolf0622/HelixSR/blob/main/LICENSE), [NVIDIA DLSS license](https://github.com/NVIDIA/DLSS/blob/v310.7.0/LICENSE.txt) and required dependencies. Acceptance is tied to the release version and archive digest.
 5. Allow downloads and local network preparation to finish. Required portable dependencies are handled automatically. A verified package already prepared on that drive can be reused. Keep the game closed. You can close the Quick Access panel while the background job continues.
 6. Wait for the completion notification and check that the selected game says HelixSR is enabled. A failure notice needs attention before launch. Installed files and a completed job do not prove correct rendering or stability.
 
 Keep locally generated network files on your device. Do not upload prepared packages, weights or kernels with a bug report.
+
+**Offline use:** game detection, local diagnostics, Disable, Remove, and Enable with the exact verified prepared package work without GitHub access. HelixSR itself does not need an internet connection during gameplay. Installing a new release, updating game installations and checking available releases require internet access. **Check latest HelixSR version** checks the release metadata; **Update this game's HelixSR** applies it to the selected game.
 
 ## 5. Select the renderer and upscaler
 

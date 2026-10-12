@@ -134,10 +134,12 @@ def awareness(game, tree, home, route, target=None):
                 for k, value in re.findall(r'(?im)^\s*([^;#\r\n=]*(?:framegen|framegeneration|dlssg|xessfg|fginput|fgoutput)[^=\r\n]*)\s*=\s*([^\r\n;]+)', src):
                     source = 'OptiScaler' if lower == 'optiscaler.ini' else 'Native game'
                     fg.append(evidence(source, k.strip(), value.strip(), p))
-            for lp in (d / 'helixsr.log', d / 'HelixSR/helixsr.log', d / 'OptiScaler.log'):
-                if safe_log(lp, game['folder']) and str(lp) not in [x['path'] for x in logs]:
-                    logs.append(dict(path=str(lp), modified=lp.stat().st_mtime,
-                                     excerpt=text_tail(lp)))
+        # Log candidates belong to a directory, not each asset inside it. Avoid
+        # thousands of identical existence/symlink checks in large game folders.
+        for lp in (d / 'helixsr.log', d / 'HelixSR/helixsr.log', d / 'OptiScaler.log'):
+            if str(lp) not in [x['path'] for x in logs] and safe_log(lp, game['folder']):
+                logs.append(dict(path=str(lp), modified=lp.stat().st_mtime,
+                                 excerpt=text_tail(lp)))
     options = game.get('launch_options') or launch_options(home, game.get('appid'))
     if options:
         for feature, pattern in [('MAKO', r'mako'), ('LSFG-VK', r'lsfg|lossless'), ('OptiScaler proxy override', r'WINEDLLOVERRIDES')]:
