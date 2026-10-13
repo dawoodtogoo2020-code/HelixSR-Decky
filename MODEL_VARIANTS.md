@@ -23,3 +23,5 @@ Maintainers must review and test the actual upstream release before adding its r
 * Validate both frontends and target hardware. Require users to upgrade both managers before a new model is managed on a shared library. Document hardware/runtime evidence separately from static compatibility and source tests.
 
 Reviewed Model E source recipes cover the official 1.7.0, 1.8.0 and 1.8.1 layouts. Recipe identities are in `py_modules/model_variants.py`; generated NVIDIA-derived assets are never included in app downloads or this repository.
+
+Decky 0.1.22 also recognizes the reviewed replacement of the official 1.8.1 archive. Its converter adds advice and configuration handling in the embedded-output installer branch, which this app skips by requesting `--separate-files`. All 40 recipe files were compared with the prior reviewed archive; only that converter changed. The replacement has its own exact recipe fingerprint. Unknown changes still stop preparation, and downloaded archive and generated model checks remain required.

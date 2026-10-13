@@ -55,6 +55,8 @@ RECIPE_FILES = (
 REVIEWED_RECIPES = {
     'ac43f9144497a2e9f506d0bb05577328c667d3c657d466f469b9bf13558bb791': DEFAULT_VARIANT,
     '712dc923a8149fc0d2fcc6099d2f87df11d77c5999323a41bbc71075c8bd647d': DEFAULT_VARIANT,
+    # Official 1.8.1 replacement: installer-only converter edits; separate output unchanged.
+    '93930e9c131c82fe7810181cc8e6bc81cf18e9203737a9d28d769be5983acaef': DEFAULT_VARIANT,
 }
 VARIANTS = {
     DEFAULT_VARIANT: dict(id=DEFAULT_VARIANT, label='HelixSR Model E',
