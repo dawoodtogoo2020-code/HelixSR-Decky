@@ -26,12 +26,19 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 If Decky disappears after a SteamOS update, follow Decky's own recovery instructions before troubleshooting this plugin.
 
+### Errors after a Steam update
+
+Read the exact plugin name on Steam's error screen. An error naming **ProtonDB Badges** needs that plugin's troubleshooting; reinstalling HelixSR will not repair a different plugin. Restart Steam, then use Decky's settings to check updates or temporarily disable the named plugin to isolate the failure. Preserve your HelixSR game files and installation records.
+
+If HelixSR itself will not install, distinguish **installing the plugin ZIP** from **installing HelixSR for a game**. Check **Current plugin**, then note the game, exact button or failing step, full error, SteamOS version/channel and Steam client/Decky versions. [Report those details](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml) with private paths removed. A Steam update occurring first does not establish the cause.
+
 ## 4. Install HelixSR for one game
 
 **Not installed** means the plugin found the game but has not installed HelixSR into it. Selecting a game does not install anything. Follow **Next step** beside the game. If Install is disabled, its explanation tells you whether to confirm DX12, close the game, resolve a review reason, or finish another operation.
 
 1. Open the **Game** dropdown at the top. Select your installed game. Choose **Refresh library and status** if you recently installed it. Steam, supported Steam shortcuts, Heroic, Legendary and Lutris records are detected automatically.
 2. Read its status and route. **Needs review** or an unavailable game has a reason shown in the panel. Do not bypass a block. If asked, enable **Game is set to DirectX 12** only after confirming that renderer in the game's launch selection or settings.
+   This checkbox appears only when DX12 needs confirmation. A detected DX12 executable or native FSR replacement can proceed without it. Its absence does not prove gameplay compatibility. For native FSR replacement, select **AMD FSR** in the game; this route does not add a DLSS menu option.
 3. Select the purple **Install HelixSR for this game** button directly beneath the game selector. An existing managed or supported legacy installation shows **Update this game's HelixSR** instead.
 4. Review the selected game, changed files, download details and linked terms. Choose **Accept terms and install** when you agree. Preparation uses the [HelixSR license](https://github.com/lonewolf0622/HelixSR/blob/main/LICENSE), [NVIDIA DLSS license](https://github.com/NVIDIA/DLSS/blob/v310.7.0/LICENSE.txt) and required dependencies. Acceptance is tied to the release version and archive digest.
 5. Confirm once. **Starting installation** appears immediately while the backend accepts the request, followed by download and preparation progress. You do not need to press Install again. If the request fails, its error remains at the top of the panel even after reopening it. Required portable dependencies are handled automatically. A verified package already prepared on that drive can be reused. Keep the game closed. You can close the Quick Access panel while the background job continues.

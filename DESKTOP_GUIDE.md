@@ -7,15 +7,15 @@ Game detection and local diagnostics work offline. Existing installations can be
 ## Download and open
 
 1. Switch your SteamOS device to Desktop Mode.
-2. Download **HelixSR-Desktop-0.1.15-x86_64.AppImage** from the [desktop release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/desktop-v0.1.15). Save it in a folder such as `Applications` under your own home folder.
+2. Open the [releases page](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases) and choose the newest **HelixSR Desktop** release, whose tag starts with `desktop-v`. Download **HelixSR-Desktop-VERSION-x86_64.AppImage** under **Assets**. Replace VERSION below with that release's version. Save it in a folder such as `Applications` under your own home folder. The release marked **Latest** can be the Decky plugin ZIP; the standalone app has its own desktop release.
 3. In your file manager, right-click the AppImage, open **Properties → Permissions**, and enable **Is executable** (wording varies).
 4. Double-click the AppImage. Do not run it with sudo or as administrator.
 
 If your system cannot mount AppImages, open a terminal in its folder and run:
 
 ```sh
-chmod +x HelixSR-Desktop-0.1.15-x86_64.AppImage
-./HelixSR-Desktop-0.1.15-x86_64.AppImage --appimage-extract-and-run
+chmod +x HelixSR-Desktop-VERSION-x86_64.AppImage
+./HelixSR-Desktop-VERSION-x86_64.AppImage --appimage-extract-and-run
 ```
 
 This fallback extracts the app temporarily and does not require FUSE or administrator access. [AppImage documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html) explains the options.
@@ -27,6 +27,7 @@ This fallback extracts the app temporarily and does not require FUSE or administ
 3. For another launcher, choose **Import games from → Heroic, Lutris, Legendary, or Steam shortcuts**, then **Import now**. The app reads installed records; it does not start the launcher or alter its database.
 4. For an unlisted game, use **Import game folders → Add folder**. Add each game's install folder to the list, then choose **Import listed folders**. You can remove a mistaken entry before importing. Select each game's install folder, not an entire drive or Wine prefix.
 5. Close the game. Click **Install HelixSR for this game** or **Update this game's HelixSR**, review the files and terms, and confirm. Only confirm DirectX 12 when your game's selected renderer uses it.
+   The DX12 confirmation appears only when the app cannot establish it from the detected files. Its absence does not mean an installation option is missing. Native FSR replacement uses the game's **AMD FSR** setting; it does not add a DLSS setting to the game.
    For a new OptiScaler installation with more than one executable, use **Game executable** to choose the DX12 executable you actually launch before installing. Games labelled **Choose executable** need an eligible x64 selection first. The file review binds that selection. Existing installations keep their recorded folder; remove them through the manager before changing it. See the [OptiScaler guide](OPTISCALER_GUIDE.md).
 6. Wait for the installation job to complete in **Progress**. Downloads, dependencies and local network preparation happen automatically. Keep at least 3 GiB free on the game's drive while preparing.
 7. Follow the displayed launch-option guidance. For native FSR replacement, select AMD FSR in the game's settings. For an OptiScaler route, follow the displayed input and Proton override instructions. The desktop app displays these instructions and does not change Steam launch options for you.
