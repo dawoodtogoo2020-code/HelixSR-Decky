@@ -8,6 +8,7 @@ import { PluginInstaller, PluginArtifact } from "./pluginInstaller";
 import { canRestore, gameStatus, installReadiness, nextStep } from "./gameStatus";
 import { librarySelectable, libraryStatus } from "./libraryStatus";
 import { InstallSession, JobTracker } from "./installSession";
+import { readLaunchOptions } from "./launchDetails";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -117,13 +118,7 @@ const finalizeLaunch = callable<[string, string, string], unknown>("finalize_lau
 const ownedLaunch = callable<[string, string], { before: string; after: string; pending?: LaunchIntent } | null>("owned_launch_options");
 
 async function liveLaunchOptions(appid: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { subscription?.unregister(); reject(new Error("Steam did not provide live launch options")); }, 5000);
-    let subscription: { unregister(): void } | undefined;
-    subscription = SteamClient.Apps.RegisterForAppDetails(appid, detail => {
-      clearTimeout(timer); subscription?.unregister(); resolve(detail.strLaunchOptions);
-    });
-  });
+  return readLaunchOptions(listener => SteamClient.Apps.RegisterForAppDetails(appid, listener));
 }
 
 let lastSelected = "";

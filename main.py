@@ -8,10 +8,12 @@ from manager import Manager
 from plugin_updates import PluginUpdates
 from launch_receipts import LaunchReceipts
 from status_monitor import StatusMonitor
+from plugin_shutdown import shutdown_plugin
 
 
 class Plugin:
     async def _main(self):
+        self.shutting_down = False
         self.manager = Manager(decky.DECKY_USER_HOME, decky.DECKY_PLUGIN_SETTINGS_DIR)
         self.status_monitor = StatusMonitor(self.manager)
         self.api_lock = asyncio.Lock()
@@ -22,20 +24,11 @@ class Plugin:
         decky.logger.info('HelixSR Decky loaded without root permissions')
 
     async def _unload(self):
-        try:
-            await asyncio.to_thread(self.status_monitor.close)
-        except Exception as exc:
-            decky.logger.warning('Status monitor shutdown: %s', exc)
-        self.update_task.cancel()
-        try:
-            await self.update_task
-        except asyncio.CancelledError:
-            pass
-        for job in list(self.manager.jobs.values()):
-            if job['state'] == 'running':
-                self.manager.cancel_job(job['id'])
-        if self.manager.worker:
-            await asyncio.to_thread(self.manager.worker.join, 15)
+        # Decky force-kills a backend after five seconds. Close admission before
+        # waiting, and share one shorter deadline across owned resources.
+        self.updating_plugin = True
+        self.shutting_down = True
+        await shutdown_plugin(self.manager, self.status_monitor, self.update_task, decky.logger)
 
     async def _uninstall(self):
         # Game payloads and original files are intentionally retained. Remove per game first.
@@ -52,6 +45,8 @@ class Plugin:
             await asyncio.sleep(60)
 
     def _allow_game_change(self):
+        if getattr(self, 'shutting_down', False):
+            raise ValueError('The HelixSR plugin is closing')
         if self.updating_plugin or self.plugin_updates.pending:
             raise ValueError('Finish or cancel the pending Decky plugin update first')
 
@@ -66,6 +61,8 @@ class Plugin:
 
     async def prepare_plugin_update(self):
         async with self.api_lock:
+            if getattr(self, 'shutting_down', False):
+                raise ValueError('The HelixSR plugin is closing')
             if any(job['state'] == 'running' for job in self.manager.jobs.values()) or self.manager.transaction:
                 raise ValueError('Wait for the current HelixSR operation before updating the plugin')
             self.updating_plugin = True

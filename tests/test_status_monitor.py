@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import time
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -226,6 +227,78 @@ class StatusMonitorTests(unittest.TestCase):
         child.terminate.assert_called_once()
         self.monitor.child = None
         self.monitor.directory = None
+
+    def test_close_during_assessment_prevents_late_hud_and_sampler(self):
+        entered, release = threading.Event(), threading.Event()
+        errors = []
+        def assess(game, **kwargs):
+            entered.set()
+            release.wait(1)
+            return game
+        def configure():
+            try:
+                self.monitor.configure('game', True)
+            except ValueError as exc:
+                errors.append(str(exc))
+        with patch.object(self.manager, 'assess_safe', side_effect=assess), \
+                patch.object(status_monitor.subprocess, 'Popen') as popen:
+            worker = threading.Thread(target=configure, daemon=True)
+            worker.start()
+            self.assertTrue(entered.wait(1))
+            with self.assertRaisesRegex(ValueError, 'configuration is still stopping'):
+                self.monitor.close(deadline=time.monotonic() + 0.03)
+            release.set()
+            worker.join(1)
+            popen.assert_not_called()
+        self.assertEqual(errors, ['The status monitor is closed'])
+        self.assertIsNone(self.monitor.thread)
+        self.assertTrue(self.monitor.stop.is_set())
+
+    def test_bounded_close_kills_stubborn_hud_before_slow_sampler(self):
+        events = []
+        child = Mock()
+        child.poll.return_value = None
+        child.terminate.side_effect = lambda: events.append('term')
+        child.wait.side_effect = status_monitor.subprocess.TimeoutExpired('owned-hud', 0.01)
+        def killed():
+            events.append('kill')
+            child.poll.return_value = -9
+        child.kill.side_effect = killed
+        sampler = Mock()
+        sampler.join.side_effect = lambda timeout: events.append('join')
+        sampler.is_alive.return_value = True
+        self.monitor.child, self.monitor.thread = child, sampler
+        with self.assertRaisesRegex(ValueError, 'still stopping'):
+            self.monitor.close(deadline=time.monotonic() + 0.1)
+        self.assertEqual(events, ['term', 'kill', 'join'])
+        self.assertTrue(self.monitor.closed)
+
+    def test_sample_returning_after_close_does_not_publish_or_write_frame(self):
+        record = Path(self.tmp.name) / 'record.json'
+        evidence = Mock()
+        def sampled():
+            self.monitor.request_close()
+            return dict(state='output')
+        evidence.sample.side_effect = sampled
+        self.monitor.child = Mock()
+        with patch.object(self.monitor, '_frame') as frame:
+            self.monitor._loop(evidence, record, None)
+            frame.assert_not_called()
+        self.assertEqual(self.monitor.status()['runtime']['state'], 'unverified')
+
+    def test_shutdown_arriving_inside_popen_kills_returned_handle(self):
+        child = Mock()
+        def create(*args, **kwargs):
+            self.monitor.request_close()
+            return child
+        with patch.object(status_monitor.platform, 'system', return_value='Linux'), \
+                patch.object(status_monitor, 'private_directory', return_value=Path(self.tmp.name)), \
+                patch.object(status_monitor, 'display_environment', return_value={}), \
+                patch.object(status_monitor.subprocess, 'Popen', side_effect=create):
+            with self.assertRaisesRegex(ValueError, 'closed'):
+                self.monitor.configure('game', True)
+        child.kill.assert_called_once()
+        self.assertIsNone(self.monitor.thread)
 
 
 if __name__ == '__main__':

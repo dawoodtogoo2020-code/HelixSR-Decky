@@ -81,6 +81,7 @@ class StatusMonitor:
         self.child = None
         self.directory = None
         self.closed = False
+        self.closing = threading.Event()
         self.value = self._disabled()
 
     @staticmethod
@@ -113,6 +114,7 @@ class StatusMonitor:
             evidence = RuntimeEvidence(game)
             record = self.manager.record_path(game)
             stamp = record_stamp(record)
+            self._require_open()
             self.stop = threading.Event()
             with self.lock:
                 self.value = dict(enabled=True, game_id=gid, _sampled=time.monotonic(),
@@ -126,13 +128,21 @@ class StatusMonitor:
                     env = display_environment()
                     if getattr(sys, 'frozen', False) and not self.frozen_child:
                         env = host_environment(env)
+                    self._require_open()
                     self.child = subprocess.Popen(child_command(self.directory, self.nonce, frozen_child=self.frozen_child, env=env), env=env,
                                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if self.closing.is_set():
+                        # Shutdown can arrive while Popen itself is returning.
+                        # Retain ownership, but never start a sampler for it.
+                        self.stop.set()
+                        self.child.kill()
+                        raise ValueError('The status monitor is closed')
                     self.started_at = time.monotonic()
                 except (OSError, ValueError) as exc:
                     self._overlay_error(str(exc))
             else:
                 self._overlay_error('The continuous overlay currently requires Linux X11 or a verified Gamescope session.')
+            self._require_open()
             self.thread = threading.Thread(target=self._loop, args=(evidence, record, stamp), daemon=True, name='HelixSR-status')
             self.thread.start()
             return self.status()
@@ -185,6 +195,8 @@ class StatusMonitor:
                     runtime = evidence.sample()
             except Exception as exc:
                 runtime = dict(state='unavailable', label='Runtime sampler unavailable', detail=str(exc)[:200])
+            if self.stop.is_set():
+                break
             with self.lock:
                 self.value['runtime'] = runtime
                 self.value['_sampled'] = time.monotonic()
@@ -197,21 +209,30 @@ class StatusMonitor:
                     self._overlay_error(str(exc))
             self.stop.wait(1.5)
 
-    def _stop(self):
+    def _stop(self, deadline=None):
         self.stop.set()
+        remaining = lambda limit: limit if deadline is None else max(0, min(limit, deadline - time.monotonic()))
         still_stopping = False
+        # In bounded Decky shutdown, kill the owned HUD before a slow sampler
+        # can consume the loader's entire termination allowance.
+        if deadline is not None and self.child and self.child.poll() is None:
+            self.child.terminate()
+            try:
+                self.child.wait(timeout=remaining(0.5))
+            except subprocess.TimeoutExpired:
+                self.child.kill()
         if self.thread and self.thread is not threading.current_thread():
-            self.thread.join(5)
+            self.thread.join(remaining(5))
             still_stopping = self.thread.is_alive()
         if self.child:
             # Signal only the subprocess handle this controller created.
             if self.child.poll() is None:
                 self.child.terminate()
                 try:
-                    self.child.wait(timeout=3)
+                    self.child.wait(timeout=remaining(3))
                 except subprocess.TimeoutExpired:
                     self.child.kill()
-                    self.child.wait(timeout=2)
+                    self.child.wait(timeout=remaining(2))
             self.child = None
         if still_stopping:
             # Destroy the owned HUD even if a read is slow. Retain its directory
@@ -227,7 +248,29 @@ class StatusMonitor:
         with self.lock:
             self.value = self._disabled()
 
-    def close(self):
-        with self.control:
-            self._stop()
-            self.closed = True
+    def _require_open(self):
+        if self.closed or self.closing.is_set():
+            self.stop.set()
+            raise ValueError('The status monitor is closed')
+
+    def request_close(self):
+        # No control lock: configure can be blocked in assessment or display
+        # discovery. Its subsequent admission checks reject late children.
+        self.closing.set()
+        self.closed = True
+        self.stop.set()
+
+    def close(self, deadline=None):
+        self.request_close()
+        acquired = self.control.acquire() if deadline is None else self.control.acquire(timeout=max(0, deadline - time.monotonic()))
+        if not acquired:
+            # configure owns the control lock, but this Popen still belongs to
+            # us. Any child created later is killed by configure's close check.
+            child = self.child
+            if child and child.poll() is None:
+                child.kill()
+            raise ValueError('Status configuration is still stopping')
+        try:
+            self._stop(deadline)
+        finally:
+            self.control.release()

@@ -408,6 +408,8 @@ class Manager:
         self.lock = threading.RLock()
         self.entries, self.previews, self.jobs = {}, {}, {}
         self.worker = None
+        self.process_guard = threading.Lock()
+        self.closing = threading.Event()
         self.cancel = threading.Event()
         self.process = None
         self.transaction = None
@@ -1148,6 +1150,8 @@ class Manager:
 
     def start_job(self, kind, gid, preview=None):
         with self.lock:
+            if self.closing.is_set():
+                raise ValueError('The HelixSR manager is closing')
             if self.worker and self.worker.is_alive():
                 raise ValueError('Another operation is running')
             game = self.get_game(gid)
@@ -1201,8 +1205,33 @@ class Manager:
                         self.process = None
                         operation.close()
             self.worker = threading.Thread(target=run, daemon=True)
-            self.worker.start()
+            with self.process_guard:
+                if self.closing.is_set():
+                    self.cancel.set()
+                    self.jobs.pop(job['id'], None)
+                    raise ValueError('The HelixSR manager is closing')
+                self.worker.start()
             return dict(job)
+
+    def request_shutdown(self):
+        # Never wait on the long preparation/transaction lock to close admission.
+        self.closing.set()
+        self.cancel.set()
+
+    def _spawn_compiler(self, args, **kwargs):
+        with self.process_guard:
+            if self.closing.is_set() or self.cancel.is_set():
+                raise ValueError('Cancelled before compiler startup')
+            if kwargs.get('start_new_session') is not True:
+                raise ValueError('Compiler requires its own process session')
+            self.process = subprocess.Popen(args, **kwargs)
+            if self.closing.is_set() and self.process.poll() is None:
+                # Shutdown raced with Popen. This exact newly created session
+                # is ours; do not leave it alive after the unload deadline.
+                import signal
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(self.process.pid, signal.SIGKILL)
+            return self.process
 
     def cancel_job(self, jid):
         job = self.jobs.get(jid)
@@ -1293,7 +1322,7 @@ class Manager:
                 if runtime_notes:
                     output.write(('\n'.join(runtime_notes) + '\n').encode('utf-8'))
                     output.flush()
-                self.process = subprocess.Popen(['bash', str(build), '--yes'], cwd=package, env=env,
+                self._spawn_compiler(['bash', str(build), '--yes'], cwd=package, env=env,
                                                 stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                                                 start_new_session=True)
                 deadline = time.monotonic() + 900
