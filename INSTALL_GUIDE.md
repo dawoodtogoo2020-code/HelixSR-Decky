@@ -31,9 +31,10 @@ If Decky disappears after a SteamOS update, follow Decky's own recovery instruct
 This is a failure to load the Decky plugin's interface, before game detection or HelixSR installation. A developer source ZIP can cause it: Decky accepts the manifest, but that archive has no compiled `dist/index.js` interface. An incomplete plugin installation or a Decky loading problem can also produce this message.
 
 1. Download the **install ZIP** linked in section 1. Check that the filename has no `-source` suffix and leave it zipped.
-2. Use **Decky Settings → Developer → Install Plugin from ZIP File** to install that ZIP again, and confirm **Update** if offered. Wait for completion, then reopen HelixSR Decky. Restart Steam if Decky still shows the old loading error.
-3. Keep your per-game HelixSR files, settings and installation records. You do not need to remove or reinstall game modifications to repair the plugin interface.
-4. If it still fails, [report the full error](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml), exact downloaded filename, Decky version, and SteamOS version/channel. Include the module URL and HTTP status if available. Remove private paths. The missing-interface reproduction does not establish the cause of every dynamic-import error.
+2. If you installed a **source ZIP**, first remove **HelixSR Decky only** through **Decky Settings → Plugins → Uninstall**. This removes the broken plugin code; its uninstall hook leaves per-game modifications alone. A source archive uses a different plugin folder, so installing over it can leave the broken copy selected. Keep the plugin's settings/data folders and all game installation records.
+3. Use **Decky Settings → Developer → Install Plugin from ZIP File** to install the correct ZIP, and confirm the installation or **Update** prompt. Wait for completion, then reopen HelixSR Decky. Restart Steam if Decky still shows the old loading error.
+4. Keep your per-game HelixSR files, settings and installation records. You do not need to remove or reinstall game modifications to repair the plugin interface.
+5. If it still fails, [report the full error](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml), exact downloaded filename, Decky version, and SteamOS version/channel. Include the module URL and HTTP status if available. Remove private paths. The missing-interface reproduction does not establish the cause of every dynamic-import error.
 
 From 0.1.25, the custom developer source download uses `.tar.gz` so it cannot be mistaken for an install ZIP. The release build checks that the install ZIP contains the compiled frontend and that its download links and checksums match the release.
 
