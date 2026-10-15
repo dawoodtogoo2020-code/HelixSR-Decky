@@ -31,12 +31,15 @@ jobs:
           mkdir -p release
           version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
           cp "../HelixSR-Decky-$version.zip" release/
-          cp "../HelixSR-Decky-$version.zip.sha256" release/SHA256SUMS
+          git archive --format=tar.gz --prefix=HelixSR-Decky-source/ -o "release/HelixSR-Decky-$version-source.tar.gz" HEAD
+          (cd release && sha256sum "HelixSR-Decky-$version.zip" "HelixSR-Decky-$version-source.tar.gz") > release/SHA256SUMS
+          python3 scripts/check_release.py release
       - name: Save code-only plugin package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: HelixSR-Decky
           path: |
             release/HelixSR-Decky-*.zip
+            release/HelixSR-Decky-*-source.tar.gz
             release/SHA256SUMS
           if-no-files-found: error

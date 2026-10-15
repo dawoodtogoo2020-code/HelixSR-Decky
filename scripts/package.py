@@ -1,4 +1,4 @@
-"""Build the source-only Decky install ZIP. Run after pnpm build."""
+"""Build the Decky install ZIP, including its compiled frontend. Run after pnpm build."""
 from pathlib import Path
 import hashlib
 import json

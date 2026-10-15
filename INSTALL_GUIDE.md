@@ -6,7 +6,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Open the [HelixSR Decky release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) and download **HelixSR-Decky-VERSION.zip** under **Assets**, where VERSION is that release's version. Do not select **Source code (zip)** or **Code → Download ZIP**: those contain source files rather than the ready-to-install plugin. It is distributed through GitHub and is currently not listed in the Decky Store.
+3. Download the [Decky 0.1.25 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.25/HelixSR-Decky-0.1.25.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -25,6 +25,17 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 5. Confirm the installation prompt. Wait for Decky to finish, then return to its plugin list and open **HelixSR Decky**. The ZIP picker selects a local file; you do not need to paste a URL or extract it.
 
 If Decky disappears after a SteamOS update, follow Decky's own recovery instructions before troubleshooting this plugin.
+
+### Failed to fetch dynamically imported module
+
+This is a failure to load the Decky plugin's interface, before game detection or HelixSR installation. A developer source ZIP can cause it: Decky accepts the manifest, but that archive has no compiled `dist/index.js` interface. An incomplete plugin installation or a Decky loading problem can also produce this message.
+
+1. Download the **install ZIP** linked in section 1. Check that the filename has no `-source` suffix and leave it zipped.
+2. Use **Decky Settings → Developer → Install Plugin from ZIP File** to install that ZIP again, and confirm **Update** if offered. Wait for completion, then reopen HelixSR Decky. Restart Steam if Decky still shows the old loading error.
+3. Keep your per-game HelixSR files, settings and installation records. You do not need to remove or reinstall game modifications to repair the plugin interface.
+4. If it still fails, [report the full error](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml), exact downloaded filename, Decky version, and SteamOS version/channel. Include the module URL and HTTP status if available. Remove private paths. The missing-interface reproduction does not establish the cause of every dynamic-import error.
+
+From 0.1.25, the custom developer source download uses `.tar.gz` so it cannot be mistaken for an install ZIP. The release build checks that the install ZIP contains the compiled frontend and that its download links and checksums match the release.
 
 ### Errors after a Steam update
 
