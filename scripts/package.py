@@ -28,6 +28,7 @@ missing_licenses = [name for name in license_files if not (root / name).is_file(
 if missing_licenses:
     raise SystemExit('Required third-party license/source files missing: ' + ', '.join(missing_licenses))
 files = [root / n for n in allowed if (root / n).is_file()]
+files.append(root / 'docs/menu-labels.md')
 files += [root / name for name in license_files]
 files += list((root / 'dist').rglob('*.js'))
 files += list((root / 'py_modules').glob('*.py'))

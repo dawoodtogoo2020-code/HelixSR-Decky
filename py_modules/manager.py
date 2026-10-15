@@ -28,6 +28,7 @@ from game_guidance import setup_guidance
 from operation_lock import operation_lock, game_locked
 from host_environment import host_environment
 from installation_status import installation_status
+import menu_labels
 from build_runtime import wine_candidates
 from github_release import web_latest_release
 from model_variants import (DEFAULT_VARIANT, catalog, package_selection, same_release,
@@ -445,6 +446,33 @@ class Manager:
 
     def record(self, game):
         return load_json(self.record_path(game))
+
+    def checked_menu_path(self, game, relative):
+        return checked_path(safe_root(game['folder']), relative)
+
+    def checked_menu_original(self, game, relative):
+        return checked_path(self.companion(game), str(Path('originals') / relative))
+
+    def menu_process_guard(self, game):
+        if self.closing.is_set():
+            raise ValueError('The HelixSR plugin is closing; menu changes are paused')
+        menu_labels.process_scan_ready()
+        if active_processes(game['folder'], game.get('appid', '')):
+            raise ValueError('Game is running; close it before changing menu labels')
+
+    def menu_change_guard(self, game, paths):
+        if str(Path(menu_labels.WITCHER_XML)) in paths:
+            self.menu_process_guard(game)
+
+    def menu_status(self, game, data, rec, detailed=True):
+        try:
+            return menu_labels.inspect(self, game, data, rec, detailed)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            saved = rec.get('menu_labels')
+            return dict(supported=False, available=False,
+                        enabled=isinstance(saved, dict) and saved.get('enabled') is True,
+                        reason=str(exc), label=menu_labels.LABEL, resource_sha256=None,
+                        experimental=True)
 
     def mutable_config_paths(self, game, rec):
         # Configurations tracked by this installation are editable. Older installs
@@ -987,6 +1015,7 @@ class Manager:
             data.pop('logs', None)
         data['installation_status'] = installation_status(data)
         data['setup_guidance'] = setup_guidance(data)
+        data['menu_labels'] = self.menu_status(game, data, rec, detailed)
         return data
 
     def import_folder(self, folder, name=''):
@@ -1443,12 +1472,14 @@ class Manager:
     def preview(self, gid, action, dx12_confirmed=False, executable=None):
         with self.lock:
             game = self.get_game(gid)
-            if action not in ('install', 'update', 'enable', 'disable', 'remove', 'adopt', 'recover'):
+            if action not in ('install', 'update', 'enable', 'disable', 'remove', 'adopt', 'recover') + menu_labels.ACTIONS:
                 raise ValueError('Unknown action')
             if action == 'recover':
                 journal = self.companion(game) / 'transaction/journal.json'
                 if not journal.exists():
                     raise ValueError('No interrupted transaction')
+                saved = load_json(journal)
+                self.menu_change_guard(game, saved.get('before', {}))
                 token = uuid.uuid4().hex
                 self.previews[token] = dict(game=gid, action=action, fingerprint=None,
                                            expires=time.time()+120, dx12=False)
@@ -1460,9 +1491,12 @@ class Manager:
                             warning='Recover the interrupted transaction before any new installation.')
             data = self.assess(game, executable=executable)
             rec = self.record(game)
+            self.menu_change_guard(game, rec.get('baseline', {}))
             package = None
             if not self.action_compatible(data, action):
                 raise ValueError('; '.join(data['reasons']))
+            if action in menu_labels.ACTIONS:
+                menu_labels.plan(self, game, data, rec, action)
             if action in ('install', 'update', 'enable'):
                 self.validate_install_executable(data)
             if data['dx12_confirmation_needed'] and not dx12_confirmed and action in ('install', 'update'):
@@ -1506,8 +1540,11 @@ class Manager:
             return dict(token=token, action=action, name=game['name'], route=data['route'],
                         selected_executable=data['selected_executable'],
                         files=self.planned_paths(game, data, action, package),
-                        select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
-                        warning=('Close the game. Originals are retained for disable/remove. '
+                        select_upscaler=(menu_labels.LABEL if action == 'labels_enable' else 'AMD FSR') if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
+                        warning=('Cosmetic menu label only; it does not prove HelixSR is running. '
+                                 'Close the game. Original menu bytes are restored when this option or HelixSR is disabled. '
+                                 'Quality modes and frame-generation labels are unchanged.' if action in menu_labels.ACTIONS else
+                                 'Close the game. Originals are retained for disable/remove. '
                                  'Owned OptiScaler configuration edits are preserved in installation records; '
                                  'enable restores them and update pins only HelixSR backend/provider paths. '
                                  'Game settings, overlay hotkeys and frame-generation choices are preserved.'
@@ -1537,6 +1574,7 @@ class Manager:
         executable = data.get('main_exe')
         files['executable_sha256'] = sha(executable) if executable and Path(executable).is_file() else None
         files['installation_record'] = rec
+        files['menu_resource_sha256'] = data.get('menu_labels', {}).get('resource_sha256')
         for rel in paths:
             p = checked_path(Path(game['folder']), rel)
             files[rel] = sha(p) if p.is_file() else None
@@ -1555,6 +1593,10 @@ class Manager:
             package = self.package(game, data['route'])
         if rec:
             paths = list(rec['baseline'])
+            if action == 'labels_enable':
+                rel = str(Path(menu_labels.WITCHER_XML))
+                if rel not in paths:
+                    paths.append(rel)
             if (action in ('install', 'update', 'enable', 'latest') and data['route'] == 'optiscaler'
                     and (action == 'latest' or package and (package[1] / 'amd-fsr' / AMD_FG).is_file())):
                 path = str((Path(data['target']) / 'HelixSR' / AMD_FG).relative_to(root))
@@ -1606,6 +1648,9 @@ class Manager:
             return {'message': 'Interrupted transaction recovered'}
         data = self.assess(game, executable=preview.get('executable'))
         rec = self.record(game)
+        self.menu_change_guard(game, rec.get('baseline', {}))
+        if preview['action'] in menu_labels.ACTIONS:
+            menu_labels.plan(self, game, data, rec, preview['action'])
         package = None
         if preview['action'] in ('install', 'update', 'enable'):
             package = self.package(game, data['route'],
@@ -1622,6 +1667,8 @@ class Manager:
         tx = companion / 'transaction'
         if tx.exists():
             raise ValueError('Interrupted transaction exists; recover it first')
+        label_plan = menu_labels.plan(self, game, data, self.record(game), action) if action in menu_labels.ACTIONS else None
+        self.menu_change_guard(game, self.record(game).get('baseline', {}))
         if package is AUTO_PACKAGE:
             rec = self.record(game)
             package = None
@@ -1666,7 +1713,31 @@ class Manager:
                                 baseline=baseline, enabled=False, version=None)
                 if data['route'] == 'optiscaler':
                     previous['selected_executable'] = data['selected_executable']
-            if action == 'adopt':
+            if label_plan:
+                rel = label_plan['path']
+                expected = (menu_labels.digest(label_plan['original']) if action == 'labels_enable'
+                            else previous['current'][rel])
+                if before[rel] != expected or sha(root / rel) != before[rel]:
+                    raise ValueError('Menu resource changed during transaction')
+                if rel not in previous['baseline']:
+                    if before[rel] is None:
+                        raise ValueError('Menu original disappeared before transaction')
+                    original_path = self.checked_menu_original(game, rel)
+                    if original_path.exists():
+                        if menu_labels.digest(menu_labels.read_resource(original_path)) != before[rel]:
+                            raise ValueError('Menu original backup conflicts with current source')
+                    else:
+                        journal['new_menu_original'] = dict(path=rel, sha256=before[rel])
+                        atomic_json(tx / 'journal.json', journal)
+                        durable_copy(root / rel, original_path, before[rel])
+                    previous['baseline'][rel] = before[rel]
+                self.write_managed_bytes(root / rel, label_plan['payload'])
+                previous['menu_labels'] = dict(enabled=action == 'labels_enable',
+                    profile=label_plan['profile'], path=rel,
+                    original_sha256=previous['baseline'][rel],
+                    patched_sha256=(menu_labels.digest(label_plan['payload']) if action == 'labels_enable'
+                                    else previous['menu_labels']['patched_sha256']))
+            elif action == 'adopt':
                 # Baseline restores native DLL and removes only identified Helix payload.
                 for target in map(Path, data['targets']):
                     rel = str(target.relative_to(root))
@@ -1690,6 +1761,8 @@ class Manager:
                 self.retain_configs(game, previous, action)
                 self.restore_baseline(game, previous)
                 previous['enabled'] = False
+                if isinstance(previous.get('menu_labels'), dict):
+                    previous['menu_labels']['enabled'] = False
             elif action in ('install', 'update', 'enable'):
                 if not package:
                     raise ValueError('Prepared package unavailable')
@@ -1771,7 +1844,9 @@ class Manager:
         sync_directory(Path(path).parent)
 
     def write_managed(self, path, content):
-        payload = content.encode('utf-8')
+        self.write_managed_bytes(path, content.encode('utf-8'))
+
+    def write_managed_bytes(self, path, payload):
         self.track_write(path, hashlib.sha256(payload).hexdigest())
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -1814,6 +1889,8 @@ class Manager:
         journal = load_json(tx / 'journal.json')
         if not journal:
             raise ValueError('Transaction journal missing; manual inspection required')
+        new_menu_original = menu_labels.new_original_intent(journal)
+        self.menu_change_guard(game, journal.get('before', {}))
         if journal.get('state') == 'snapshotting':
             shutil.rmtree(tx)
             return
@@ -1858,6 +1935,17 @@ class Manager:
         else:
             self.record_path(game).unlink(missing_ok=True)
             shutil.rmtree(self.companion(game) / 'originals', ignore_errors=True)
+        if new_menu_original and self.record(game) == journal['previous']:
+            original = self.checked_menu_original(game, new_menu_original['path'])
+            # An exact journal-owned copy can be discarded after rollback.
+            # Unknown partial or subsequently edited bytes remain for review.
+            try:
+                known = menu_labels.digest(menu_labels.read_resource(original)) == new_menu_original['sha256']
+            except (OSError, ValueError):
+                known = False
+            if known:
+                original.unlink()
+                sync_directory(original.parent)
         shutil.rmtree(tx)
 
     def copy_atomic(self, src, dst, expected=None):

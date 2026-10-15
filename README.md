@@ -6,12 +6,13 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 
 [Support Blackheart909 on Ko-fi](https://ko-fi.com/blackheart909). Optional support helps with my work on this independent plugin and my other projects. HelixSR is developed separately by Lone Wolf.
 
-[Download Decky 0.1.25 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.25/HelixSR-Decky-0.1.25.zip) · [All releases](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Desktop AppImage and guide](DESKTOP_GUIDE.md) · [OptiScaler setup](OPTISCALER_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
+[Download Decky 0.1.26 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.26/HelixSR-Decky-0.1.26.zip) · [All releases](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Desktop AppImage and guide](DESKTOP_GUIDE.md) · [OptiScaler setup](OPTISCALER_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
 
 Use the **install ZIP** in Decky. Developer source archives, including older `-source.zip` files and GitHub's **Source code** downloads, cannot run as a plugin. If Decky reports **Failed to fetch dynamically imported module**, follow the [repair steps](INSTALL_GUIDE.md#failed-to-fetch-dynamically-imported-module).
 
 ## Features
 
+* Optional [native menu labels](docs/menu-labels.md) rename The Witcher 3's direct-route FSR option to **Helix SR**. Off by default, with reviewed changes and exact original restoration. This is cosmetic; visible in-game verification is pending. Other games need separate verified adapters.
 * Clear installation reasons and next steps in both interfaces, plus an optional experimental status HUD. Running games remain inspectable while file changes are paused. Runtime output and overlay helper health are separate. See the [status and overlay guide](STATUS_GUIDE.md) for evidence levels and display limitations.
 
 * The Decky plugin and desktop app share a **HelixSR model** selector and display the installed model separately from the release and input route. Currently the reviewed choice is **Model E, sourced from NVIDIA DLSS 310.7.0**. DLSS 4 or FSR-derived networks are not selectable yet. Unknown conversion recipes stop before building or changing a game; updating the app can add reviewed model support. See [model support and future variants](MODEL_VARIANTS.md).

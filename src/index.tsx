@@ -51,6 +51,7 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
   main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
   executable_choices?: { path: string; dx12: boolean }[]; selected_executable?: string; executable_selection_needed?: boolean;
+  menu_labels?: { available: boolean; supported: boolean; enabled: boolean; reason: string; label: string; experimental: boolean };
   awareness_warnings?: string[];
   awareness_deferred?: boolean;
   setup_guidance?: {action: string; headline: string; steps: string[]; notes: string[]; links: {label: string; url: string}[]};
@@ -452,7 +453,9 @@ function Content() {
     const executable = !game.managed && game.route === "optiscaler" ? game.selected_executable : undefined;
     const p = await run(() => previewAction(game.id, name, dx12, executable));
     if (!p) return;
-    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`${name.toUpperCase()}: ${p.name}`}
+    const actionTitle = name === "labels_enable" ? "Enable Helix SR menu labels"
+      : name === "labels_disable" ? "Restore original menu labels" : name.toUpperCase();
+    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`${actionTitle}: ${p.name}`}
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
         <p>{p.warning}</p><p>Route: {p.route}. In game: select {p.select_upscaler}.</p>
         {p.selected_executable && <p>Game executable: {p.selected_executable}</p>}
@@ -632,6 +635,12 @@ function Content() {
       </>}
       <PanelSectionRow><div className="helix-muted">Downloads, required dependencies and the local network build are handled automatically. Administrator access is not needed for your own game folders.</div></PanelSectionRow>
       {game.managed && <>
+        {game.menu_labels && <>
+          <PanelSectionRow><ToggleField label="Use HelixSR menu labels" checked={game.menu_labels.enabled}
+            disabled={disabled || !game.menu_labels.available}
+            onChange={enabled => void interact(() => action(enabled ? "labels_enable" : "labels_disable"))} /></PanelSectionRow>
+          <PanelSectionRow><div className="helix-muted">{game.menu_labels.reason} This changes menu text only and does not verify the active upscaler.</div></PanelSectionRow>
+        </>}
         {game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)}
           onClick={() => void interact(() => action("disable"))}>Disable HelixSR</ButtonItem></PanelSectionRow>}
         <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)} onClick={() => void interact(() => action("remove"))}>Remove and restore originals</ButtonItem></PanelSectionRow>

@@ -31,6 +31,9 @@ function harness(overrides = {}) {
     preview_latest: () => ({ token: "reviewed-token", name: game.name, files: ["reviewed.dll"],
       warning: "Reviewed changes", model: "Model E", release_version: "1.8.1" }),
     set_license: () => true, install_latest: () => job(), job_status: () => [],
+    preview_action: (_id, action) => ({ token: "menu-token", action, name: game.name,
+      files: ["graphics.xml"], warning: "Cosmetic label only", select_upscaler: "Helix SR", route: "direct" }),
+    apply_action: () => ({message: "Reviewed change complete"}),
     plugin_update_status: () => ({ current_version: "0.1.21", auto_check: true }),
     overlay_status: () => ({ enabled: false }), ...overrides };
   function useState(initial) {
@@ -120,19 +123,71 @@ function harness(overrides = {}) {
     return modal;
   }
   async function ready() { mount(); await flush(); render(); await flush(); render(); }
+  function menuToggle() {
+    const toggle = walk(render(), node => node.type === "ToggleField" && node.props.label === "Use HelixSR menu labels")[0];
+    assert.ok(toggle, "optional menu label toggle is visible"); return toggle;
+  }
+  async function openMenuChange(enabled) {
+    const toggle = menuToggle(); assert.equal(toggle.props.disabled, false);
+    toggle.props.onChange(enabled); await flush(); assert.equal(modal.element.type, "ConfirmModal");
+    return modal;
+  }
   async function chooseExecutable(path) {
     const dropdown = walk(render(), node => node.type === "DropdownItem" && node.props.label === "Game executable")[0];
     assert.ok(dropdown, "Game executable selector is visible");
     dropdown.props.onChange({ data: path }); await flush(); render();
   }
   return { game, library, calls, toasts, intervals, ready, render, mount, unmount, text, openInstall,
-    chooseExecutable,
+    chooseExecutable, menuToggle, openMenuChange,
     count: route => calls.filter(call => call.route === route).length };
 }
 function job(state = "running") {
   return { id: "job-one", kind: "install_latest", gid: "pragmata", game: "PRAGMATA",
     state, message: state === "running" ? "Building local network" : "Files verified", log: "" };
 }
+
+test("menu labels stay off until review applies and the backend refresh confirms them", async () => {
+  const h = harness({apply_action: () => {
+    h.game.menu_labels.enabled = true;
+    return {message: "Menu label verified"};
+  }});
+  Object.assign(h.game, {managed: true, enabled: true, menu_labels: {available: true,
+    supported: true, enabled: false, label: "Helix SR", reason: "Original menu retained", experimental: true}});
+  await h.ready();
+  assert.equal(h.menuToggle().props.checked, false);
+  const modal = await h.openMenuChange(true);
+  assert.equal(h.calls.filter(c => c.route === "preview_action").at(-1).args[1], "labels_enable");
+  assert.equal(h.count("apply_action"), 0);
+  assert.equal(h.menuToggle().props.checked, false);
+  assert.match(modal.element.props.strTitle, /Enable Helix SR menu labels/);
+  modal.element.props.onOK(); modal.options.fnOnClose(); await flush(); h.render(); await flush(); h.render();
+  assert.equal(h.count("apply_action"), 1);
+  assert.equal(h.menuToggle().props.checked, true);
+});
+
+test("unsupported menu profiles are disabled with an explanation", async () => {
+  const h = harness();
+  Object.assign(h.game, {managed: true, enabled: true, menu_labels: {available: false,
+    supported: false, enabled: false, label: "Helix SR", reason: "Verified profile unavailable", experimental: true}});
+  await h.ready();
+  assert.equal(h.menuToggle().props.disabled, true);
+  assert.match(h.text(h.render()), /Verified profile unavailable/);
+  assert.match(h.text(h.render()), /does not verify the active upscaler/);
+  assert.equal(h.count("apply_action"), 0);
+});
+
+test("disabling menu labels uses a reviewed restore request and cancel changes nothing", async () => {
+  const h = harness();
+  Object.assign(h.game, {managed: true, enabled: true, menu_labels: {available: true,
+    supported: true, enabled: true, label: "Helix SR", reason: "Enabled", experimental: true}});
+  await h.ready();
+  const modal = await h.openMenuChange(false);
+  assert.match(modal.element.props.strTitle, /Restore original menu labels/);
+  assert.equal(h.calls.filter(c => c.route === "preview_action").at(-1).args[1], "labels_disable");
+  modal.options.fnOnClose(); await flush();
+  assert.equal(h.menuToggle().props.checked, true);
+  assert.equal(h.count("apply_action"), 0);
+});
 
 test("explicit executable survives a real panel remount and is used for install review", async () => {
   const h = harness({ game_details: (_id, executable) => ({ ...h.game,
