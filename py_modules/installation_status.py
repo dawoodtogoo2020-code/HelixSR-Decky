@@ -68,6 +68,10 @@ def _issue(reason, game=None):
                      'The installation record and live files disagree. File changes remain blocked for review; reinstalling the plugin does not reconcile this game record.',
                      'Report the named file and app version. Do not delete DLLs, saved originals or installation records.'])
         if lower.endswith('(current state: missing)'):
+            if (game or {}).get('restore_eligible'):
+                return ('managed_files_changed', 'Plugin-created file already absent',
+                        ['Close the game, then review Disable HelixSR or Remove and restore originals to finish cleanup.',
+                         'Installation and updates remain blocked. Keep the companion folder and saved originals.'])
             return ('managed_files_changed', 'Installed file missing',
                     ['A file recorded by this installation is missing. This is not a game ownership or administrator check.',
                      'Report the named file and app version. Reinstalling the plugin does not restore files inside the game; keep installation records and saved originals for review.'])
@@ -162,6 +166,10 @@ def installation_status(game):
     selectable = (compatibility == 'candidate' or state == 'running' or bool(game.get('managed'))
                   or recovery or bool(game.get('executable_selection_needed')))
     can_restore = bool(game.get('managed')) and (state == 'ready' or
+        game.get('restore_eligible') and not running and not recovery or
         compatibility == 'unsupported' and game.get('renderer_unsupported') and not running and not recovery)
+    if can_restore and game.get('restore_eligible'):
+        summary = ('Some plugin-created files are already absent. Disable or Remove can finish restoring '
+                   'the recorded originals; installation and updates stay blocked.')
     return dict(state=state, label=label, summary=summary, running=running,
                 selectable=selectable, can_modify=state == 'ready', can_restore=can_restore, issues=issues)

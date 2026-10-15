@@ -1904,7 +1904,7 @@ class TransactionTests(Fixtures):
                     self.m.preview(self.game['id'], 'remove')
                 write(path, original)
 
-    def test_overlay_invalid_utf8_oversized_and_missing_configs_block(self):
+    def test_overlay_invalid_utf8_oversized_configs_block_but_missing_introduced_config_can_restore(self):
         self.install_overlay_fixture()
         path = self.root / 'OptiScaler.ini'
         original = path.read_bytes()
@@ -1914,8 +1914,12 @@ class TransactionTests(Fixtures):
                 with self.assertRaises(ValueError):
                     self.m.preview(self.game['id'], 'disable')
         path.unlink()
-        with self.assertRaises(ValueError):
-            self.m.preview(self.game['id'], 'disable')
+        data = self.m.assess(self.game)
+        self.assertTrue(data['installation_status']['can_restore'])
+        for action in ('update', 'enable'):
+            with self.assertRaises(ValueError):
+                self.m.preview(self.game['id'], action)
+        self.m.preview(self.game['id'], 'disable')
         write(path, original)
 
     def test_overlay_symlink_and_hardlink_configs_block(self):

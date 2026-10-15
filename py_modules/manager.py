@@ -45,6 +45,21 @@ PACKAGE_FILES = NETWORK + (DLL, 'optiscaler/OptiScaler.dll',
 INPUTS = {'nvngx_dlss.dll': 'DLSS', 'libxess.dll': 'XeSS',
           'ffx_fsr2_api_x64.dll': 'FSR 2', 'ffx_fsr2_api_dx12_x64.dll': 'FSR 2'}
 ANTI = ('easyanticheat', 'battleye', 'beclient', 'equ8', 'faceit', 'vanguard')
+
+
+def anti_cheat_name(value):
+    # EA uses both spaced and compact names for the same protected launcher.
+    compact = re.sub(r'[\s_.-]+', '', value.lower())
+    return any(name in compact for name in ANTI + ('eaanticheat', 'eajavelin', 'javelinanticheat'))
+
+
+def absent_path(path):
+    # Only ENOENT proves absence; permission and I/O failures must stay blocked.
+    try:
+        Path(path).lstat()
+    except FileNotFoundError:
+        return True
+    return False
 # Official Steam requirements: https://store.steampowered.com/app/1593500/
 DX11_ONLY_STEAM_APPS = {'1593500': 'God of War (2018)'}
 LICENSE_REV = 'helixsr-local-nvidia-network-2026-10'
@@ -767,7 +782,9 @@ class Manager:
         inputs = sorted({INPUTS[n] for _, n in names if n in INPUTS})
         targets = [p for p, n in names if n in ('amd_fidelityfx_upscaler_dx12.dll', DLL)]
         exes = [p for p, n in names if n.endswith('.exe') and
-                not re.search(r'launcher|crash|setup|redist|unins|helper|easyanticheat|beservice', n)]
+                not re.search(r'launcher|crash|setup|redist|unins|helper|beservice', n) and
+                not anti_cheat_name(n) and
+                not any(anti_cheat_name(part) for part in p.relative_to(root).parts[:-1])]
         exes.sort(key=lambda p: (p.name.lower().endswith('-win64-shipping.exe'), p.stat().st_size), reverse=True)
         main = exes[0] if exes else None
         rec = self.record(game)
@@ -834,7 +851,7 @@ class Manager:
         if not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']):
             reasons.append('DX12 is not confirmed by executable imports; confirm the game runs DX12 before installation')
         directory_names = [str(d.relative_to(root)).lower() for d, _ in tree]
-        if any(any(a in n for a in ANTI) for _, n in names) or any(any(a in n for a in ANTI) for n in directory_names):
+        if any(anti_cheat_name(n) for _, n in names) or any(anti_cheat_name(n) for n in directory_names):
             blocked.append('Anti-cheat files detected; injection is blocked')
         if game.get('manifest'):
             from library import vdf
@@ -871,6 +888,7 @@ class Manager:
         if legacy:
             reasons.append('Existing direct HelixSR installation: explicit import is required before management')
         steam_build_review = None
+        restore_eligible = False
         if rec:
             if game.get('build') and rec.get('game_build') and game['build'] != rec['game_build']:
                 blocked.append('Steam build changed; installation needs review')
@@ -883,15 +901,31 @@ class Manager:
                 if steam_build_review is not None and len(steam_build_review['files']) < 20:
                     steam_build_review['files'].append(dict(path=rel, state=state))
             mutable = self.mutable_config_paths(game, rec)
+            restore_blocked = list(blocked)
+            missing_introduced = []
             for rel, expected in rec['current'].items():
                 p = checked_path(root, rel)
+                try:
+                    info = p.lstat()
+                except FileNotFoundError:
+                    info = None
+                if info is not None and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1):
+                    reason = ('Unsafe managed configuration: ' if rel in mutable else
+                              'Unsafe managed file type or hardlink: ') + rel
+                    blocked.append(reason)
+                    restore_blocked.append(reason)
+                    continue
+                absent_introduced = (rec.get('route') == 'optiscaler' and expected is not None
+                                     and rel in rec['baseline'] and rec['baseline'][rel] is None
+                                     and absent_path(p))
                 if rel in mutable:
                     self.retained_config(rec, rel)
-                    if rec.get('enabled') and expected is not None:
+                    if rec.get('enabled') and expected is not None and not absent_introduced:
                         try:
                             self.read_owned_config(game, rel)
                         except (OSError, ValueError) as exc:
                             blocked.append(str(exc))
+                            restore_blocked.append(str(exc))
                         file_review(rel, 'retained configuration')
                         continue
                 actual = sha(p) if p.is_file() else None
@@ -901,8 +935,17 @@ class Manager:
                 if actual != expected:
                     state = ('missing' if actual is None else 'matches recorded original'
                              if actual == rec['baseline'].get(rel) else 'different bytes')
-                    blocked.append('Managed files changed; ownership needs review before further changes: '
-                                   + rel + ' (current state: ' + state + ')')
+                    reason = ('Managed files changed; ownership needs review before further changes: '
+                              + rel + ' (current state: ' + state + ')')
+                    blocked.append(reason)
+                    if absent_introduced:
+                        missing_introduced.append(rel)
+                    else:
+                        restore_blocked.append(reason)
+            # Only cleanup can reconcile already absent files that this install
+            # introduced. Other ownership/build/process guards are unchanged.
+            restore_eligible = bool(missing_introduced and not restore_blocked
+                                    and set(rec['baseline']) == set(rec['current']))
         # Symlink candidates may hide API files and must never be mutated.
         for p in targets + ([main] if main else []):
             checked_path(root, str(p.relative_to(root)))
@@ -937,6 +980,7 @@ class Manager:
                     installed_model=variant_label(rec.get('variant')) if rec or legacy else None,
                     installed_variant=rec.get('variant', {}).get('id') if valid_variant(rec.get('variant')) else None,
                     recovery_available=self.recovery_available(game), steam_build_review=steam_build_review,
+                    restore_eligible=restore_eligible,
                     dx12_confirmation_needed=not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']),
                     **aware)
         if not detailed:
@@ -1391,6 +1435,8 @@ class Manager:
         # An unsupported renderer can still restore owned originals. Any other
         # assessment blocker (build, hashes, process, staging) remains decisive.
         return (data['compatibility'] == 'candidate' or
+                action in ('disable', 'remove') and data.get('restore_eligible')
+                and data.get('managed') and not data.get('recovery_available') or
                 action in ('disable', 'remove') and data['compatibility'] == 'unsupported'
                 and data.get('renderer_unsupported') and data.get('managed'))
 
@@ -1704,6 +1750,9 @@ class Manager:
             return
         saved = dict(rec.get('saved_configs', {}))
         for rel in self.mutable_config_paths(game, rec):
+            if (action in ('disable', 'remove') and rec['baseline'][rel] is None
+                    and absent_path(checked_path(Path(game['folder']), rel))):
+                continue
             saved[rel] = self.read_owned_config(game, rel)
         if saved:
             # These are installation records, never disposable rollback backups.
@@ -1713,7 +1762,12 @@ class Manager:
 
     def unlink_managed(self, path):
         self.track_write(path, None)
-        Path(path).unlink(missing_ok=True)
+        try:
+            Path(path).unlink()
+        except FileNotFoundError:
+            # Already absent paths can also have an absent parent directory.
+            # No directory entry changed, so there is nothing to persist.
+            return
         sync_directory(Path(path).parent)
 
     def write_managed(self, path, content):
@@ -1737,12 +1791,19 @@ class Manager:
 
     def restore_baseline(self, game, rec):
         root, companion = Path(game['folder']), self.companion(game)
+        # Validate all saved originals before the first write. A changed backup
+        # must never cause a partial restore, even when some files are absent.
+        for rel, expected in rec['baseline'].items():
+            if expected is not None:
+                src = checked_path(companion, str(Path('originals') / rel))
+                if not src.is_file() or sha(src) != expected:
+                    raise ValueError('Original file hash mismatch: ' + rel)
         for rel, expected in rec['baseline'].items():
             p = checked_path(root, rel)
             if expected is None:
                 self.unlink_managed(p)
             else:
-                src = companion / 'originals' / rel
+                src = checked_path(companion, str(Path('originals') / rel))
                 if sha(src) != expected:
                     raise ValueError('Original file hash mismatch: ' + rel)
                 self.copy_atomic(src, p)

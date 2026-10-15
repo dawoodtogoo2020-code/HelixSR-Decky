@@ -120,13 +120,46 @@ function harness(overrides = {}) {
     return modal;
   }
   async function ready() { mount(); await flush(); render(); await flush(); render(); }
+  async function chooseExecutable(path) {
+    const dropdown = walk(render(), node => node.type === "DropdownItem" && node.props.label === "Game executable")[0];
+    assert.ok(dropdown, "Game executable selector is visible");
+    dropdown.props.onChange({ data: path }); await flush(); render();
+  }
   return { game, library, calls, toasts, intervals, ready, render, mount, unmount, text, openInstall,
+    chooseExecutable,
     count: route => calls.filter(call => call.route === route).length };
 }
 function job(state = "running") {
   return { id: "job-one", kind: "install_latest", gid: "pragmata", game: "PRAGMATA",
     state, message: state === "running" ? "Building local network" : "Files verified", log: "" };
 }
+
+test("explicit executable survives a real panel remount and is used for install review", async () => {
+  const h = harness({ game_details: (_id, executable) => ({ ...h.game,
+    selected_executable: executable || "DX11/Game.exe" }) });
+  Object.assign(h.game, { route: "optiscaler", selected_executable: "DX11/Game.exe",
+    executable_choices: [{ path: "DX11/Game.exe", dx12: false }, { path: "DX12/Game.exe", dx12: true }] });
+  await h.ready(); await h.chooseExecutable("DX12/Game.exe");
+  h.unmount(); h.mount(); await flush(); h.render(); await flush(); h.render();
+  assert.equal(h.calls.filter(call => call.route === "game_details").at(-1).args[1], "DX12/Game.exe");
+  await h.openInstall();
+  assert.equal(h.calls.filter(call => call.route === "preview_latest").at(-1).args[3], "DX12/Game.exe");
+});
+
+test("a failed selection request from an old panel cannot clear the new panel's choice", async () => {
+  const old = deferred(); let selectedReads = 0;
+  const h = harness({ game_details: (_id, executable) => {
+    if (executable && ++selectedReads === 1) return old.promise;
+    return { ...h.game, selected_executable: executable || "DX11/Game.exe" };
+  } });
+  Object.assign(h.game, { route: "optiscaler", selected_executable: "DX11/Game.exe",
+    executable_choices: [{ path: "DX11/Game.exe", dx12: false }, { path: "DX12/Game.exe", dx12: true }] });
+  await h.ready(); await h.chooseExecutable("DX12/Game.exe");
+  h.unmount(); h.mount(); await flush(); h.render(); await flush(); h.render();
+  old.reject(Error("Old panel request failed")); await flush();
+  h.unmount(); h.mount(); await flush(); h.render(); await flush(); h.render();
+  assert.equal(h.calls.filter(call => call.route === "game_details").at(-1).args[1], "DX12/Game.exe");
+});
 
 test("first confirmation starts once and survives panel remount during both RPCs", async () => {
   const terms = deferred(), install = deferred();

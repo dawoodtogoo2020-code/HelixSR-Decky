@@ -6,6 +6,7 @@ import { FaAdjust } from "react-icons/fa";
 import { proxyOptions } from "./launchOptions";
 import { PluginInstaller, PluginArtifact } from "./pluginInstaller";
 import { canRestore, gameStatus, installReadiness, nextStep } from "./gameStatus";
+import { executableSession } from "./executableSession";
 import { librarySelectable, libraryStatus } from "./libraryStatus";
 import { InstallSession, JobTracker } from "./installSession";
 import { readLaunchOptions } from "./launchDetails";
@@ -127,6 +128,7 @@ function chooseGame(id: string) {
   if (lastSelected !== id && latestOverlayStatus?.enabled)
     void setStatusOverlay(null, false).then(publishOverlayStatus).catch(() => {});
   lastSelected = id;
+  executableSession.selectGame(id);
   selectionListeners.forEach(listener => listener(id));
 }
 // Steam can unmount the quick-access panel when a dialog opens. Keep the lock across mounts.
@@ -259,8 +261,14 @@ function Content() {
   const [pluginUpdate, setPluginUpdate] = useState(latestPluginStatus);
   const [pluginInstallMessage, setPluginInstallMessage] = useState(pluginInstaller.message);
   const selectedRef = useRef(selected);
-  const executableRef = useRef<string | undefined>(undefined);
+  const executableRef = useRef<string | undefined>(executableSession.get(selected));
+  const mountedRef = useRef(true);
   selectedRef.current = selected;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => installSession.subscribe(setSubmission), []);
 
@@ -283,7 +291,11 @@ function Content() {
     return () => { interactionListeners.delete(changed); };
   }, []);
   useEffect(() => {
-    const changed = (id: string) => { if (selectedRef.current !== id) executableRef.current = undefined; selectedRef.current = id; select(id); };
+    const changed = (id: string) => {
+      executableSession.selectGame(id);
+      executableRef.current = executableSession.get(id);
+      selectedRef.current = id; select(id);
+    };
     selectionListeners.add(changed); changed(lastSelected);
     return () => { selectionListeners.delete(changed); };
   }, []);
@@ -336,7 +348,8 @@ function Content() {
     let active = true;
     setGame(undefined); setDx12(false); setDiagnostics(false);
     const current = data?.games.find(g => g.id === selected);
-    if (current?.managed || current?.route !== "optiscaler") executableRef.current = undefined;
+    if (current) executableSession.reconcile({ ...current, route: current.route ?? "" });
+    executableRef.current = executableSession.get(selected);
     // This effect alone owns selection scans, including refreshes of the same
     // selected game. Wait for the library instead of queuing a duplicate scan.
     const requestedExecutable = executableRef.current;
@@ -364,12 +377,14 @@ function Content() {
       if (!stopped) return;
       publishOverlayStatus(stopped);
     }
+    if (!mountedRef.current || selectedRef.current !== id) return;
     executableRef.current = path;
+    executableSession.choose(id, path);
     setDx12(false);
     const updated = await run(() => details(id, path));
-    if (selectedRef.current !== id || executableRef.current !== path) return;
+    if (!mountedRef.current || selectedRef.current !== id || executableRef.current !== path) return;
     if (updated) setGame(updated);
-    else { executableRef.current = undefined; setGame(undefined); }
+    else { executableSession.clear(id); executableRef.current = undefined; setGame(undefined); }
   }
 
   async function importFromLauncher() {
