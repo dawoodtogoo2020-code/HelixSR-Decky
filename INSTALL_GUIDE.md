@@ -1,12 +1,18 @@
 # HelixSR Decky: beginner installation guide
 
+## Installation error mentioning LICENSE-APACHE-2.0
+
+HelixSR 1.9 changed its license files, converter and Scaler installation layout. Our older preparation adapter cannot install it by ignoring the missing filename. Update to **Decky 0.1.29** or **Desktop 0.1.18**, select your game, set **Release to install → Compatible HelixSR 1.8.1**, then choose Install/Update and review the version and terms. This installs the reviewed 1.8.1 release; it does not install upstream 1.9.3 or its newer Scaler engine. Latest-version checks still report the newest upstream release.
+
+The compatibility download is tied to the reviewed official archive SHA-256 and the [1.8.1 license](https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE). A replaced archive is rejected. Newer or unverified existing installations are blocked from being downgraded; remove them using their owning manager first. Keep locally generated networks and game installation records.
+
 HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on SteamOS. You install the Decky plugin once, then install HelixSR separately for each game. A game listed as a candidate still needs a successful gameplay test. Control Ultimate Edition and PRAGMATA are currently being tested; this guide does not claim verified gameplay for either.
 
 ## 1. Download the plugin in Desktop Mode
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Download the [Decky 0.1.28 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.28/HelixSR-Decky-0.1.28.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
+3. Download the [Decky 0.1.29 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.29/HelixSR-Decky-0.1.29.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -40,7 +46,7 @@ From 0.1.25, the custom developer source download uses `.tar.gz` so it cannot be
 
 From 0.1.27, detected games remain in the Game dropdown even when installation is blocked. Select a game to see the reason. EA anti-cheat helpers are not eligible game executables, and choosing another executable does not remove an anti-cheat block. A DX12 renderer alone does not establish compatibility. No anti-cheat files should be deleted to force installation.
 
-If the library does not answer within 30 seconds, the panel reports the stalled read instead of loading indefinitely. Refresh checks the same outstanding scan without queuing duplicates. From 0.1.28, a result that completes after the timeout remains available to the next Refresh. Missing optional SQLite support no longer prevents Steam discovery; Lutris can use its game configuration files instead. If it still does not respond, restart Decky and include the HelixSR backend log in a bug report. Version 0.1.27 also isolates optional menu-label XML dependencies so missing parsers cannot prevent the backend from starting.
+If the library does not answer within 30 seconds, the panel reports the stalled read instead of loading indefinitely. Refresh checks the same outstanding scan without queuing duplicates. From 0.1.29, a result that completes after the timeout remains available to the next Refresh. Missing optional SQLite support no longer prevents Steam discovery; Lutris can use its game configuration files instead. If it still does not respond, restart Decky and include the HelixSR backend log in a bug report. Version 0.1.27 also isolates optional menu-label XML dependencies so missing parsers cannot prevent the backend from starting.
 
 ### Errors after a Steam update
 

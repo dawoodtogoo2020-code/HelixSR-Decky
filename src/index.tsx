@@ -70,7 +70,8 @@ type Library = { games: Game[]; warnings: string[]; release: Release; license_ac
 let cachedLibrary: Library | undefined;
 function cacheLibrary(next: Library) { cachedLibrary = next; return next; }
 type Preview = { token: string; name: string; action: string; route: string; files: string[];
-  warning: string; select_upscaler: string; model?: string; variant_id?: string; release_version?: string; selected_executable?: string };
+  warning: string; select_upscaler: string; model?: string; variant_id?: string; release_version?: string;
+  license_url?: string; license_accepted?: boolean; selected_executable?: string };
 const library = callable<[], Library>("library");
 const libraryRead = new LibraryRead(library);
 const details = callable<[string, string?], Game>("game_details");
@@ -83,7 +84,8 @@ const jobStatus = callable<[], Job[]>("job_status");
 const cancelJob = callable<[string], boolean>("cancel_job");
 const previewAction = callable<[string, string, boolean, string?], Preview>("preview_action");
 const applyAction = callable<[string], { message: string }>("apply_action");
-const previewLatest = callable<[string, boolean, string?, string?], Preview>("preview_latest");
+const previewLatest = callable<[string, boolean, string?, string?, string?], Preview>("preview_latest");
+let selectedReleaseChoice = "latest";
 const installLatest = callable<[string], Job>("install_latest");
 type OverlayStatus = { enabled: boolean; game_id: string | null;
   overlay: {state: string; label: string; detail: string; responding: boolean; visible_verified: boolean};
@@ -239,6 +241,7 @@ function watchJobs(next: Job[], expectedRevision?: number, submittedId?: string)
   }
 }
 function Content() {
+  const [releaseChoice, setReleaseChoice] = useState(selectedReleaseChoice);
   const [submission, setSubmission] = useState(installSession.snapshot);
   const [overlay, setOverlay] = useState(latestOverlayStatus);
   const [data, setData] = useState<Library | undefined>(cachedLibrary);
@@ -422,27 +425,31 @@ function Content() {
   async function installOrUpdate() {
     if (!game || installSession.snapshot.pending || watchedJobs.some(j => j.state === "running")) return;
     installSession.clearError();
-    const currentRelease = await run(() => checkUpdates(true));
-    if (!currentRelease?.version || currentRelease.error) { setError(currentRelease?.error || "Could not check the latest HelixSR release. Retry Check latest HelixSR version in Updates."); return; }
-    setData(d => d ? { ...d, release: currentRelease } : d);
+    if (releaseChoice === "latest") {
+      const currentRelease = await run(() => checkUpdates(true));
+      if (!currentRelease?.version || currentRelease.error) { setError(currentRelease?.error || "Could not check the latest HelixSR release. Retry Check latest HelixSR version in Updates."); return; }
+      setData(d => d ? { ...d, release: currentRelease } : d);
+    }
     const executable = !game.managed && game.route === "optiscaler" ? game.selected_executable : undefined;
-    const p = await run(() => previewLatest(game.id, dx12, variant, executable));
+    const p = await run(() => previewLatest(game.id, dx12, variant, executable,
+      releaseChoice === "latest" ? undefined : releaseChoice));
     if (!p) return;
-    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`${game.managed || game.legacy ? "Update" : "Install"} HelixSR ${currentRelease.version}`}
+    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`${game.managed || game.legacy ? "Update" : "Install"} HelixSR ${p.release_version || ""}`}
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
         <p>{p.name}: {p.warning}</p>
         <p>Selected model: {p.model}. HelixSR release: {p.release_version}.</p>
+        {p.license_url && <p><a href={p.license_url} onClick={event => { event.preventDefault(); SteamClient.System.OpenInSystemBrowser(p.license_url!); }}>Read the license for HelixSR {p.release_version}</a></p>}
         {p.selected_executable && <p>Game executable: {p.selected_executable}</p>}
         <p>Required downloads and local preparation are automatic. Uses HelixSR freeware and NVIDIA DLSS under their linked licenses. Locally generated network files must stay on this device.</p>
         <p>Files: {p.files.join(", ")}</p>
       </div>}
-      strOKButtonText={data?.license_accepted ? "Install / update HelixSR" : "Accept terms and install"}
+      strOKButtonText={(p.license_accepted ?? data?.license_accepted) ? "Install / update HelixSR" : "Accept terms and install"}
       onOK={() => { if (!beginReview()) return;
         void installSession.start(game.id, p.name, async () => {
           toaster.toast({ title: "Starting HelixSR installation", body: `${p.name}: starting the reviewed request. Please wait; you do not need to press Install again.`, duration: 6000 });
           await setLicense(true, p.token);
           const job = await installLatest(p.token);
-          if (cachedLibrary) cachedLibrary = { ...cachedLibrary, license_accepted: true };
+          if (cachedLibrary && releaseChoice === "latest") cachedLibrary = { ...cachedLibrary, license_accepted: true };
           watchJobs([...watchedJobs.filter(old => old.id !== job.id), job], undefined, job.id);
         }).then(ok => {
           if (!ok && installSession.snapshot.error && !pluginDisposed)
@@ -596,6 +603,10 @@ function Content() {
           description="Confirm the renderer selected in the game." checked={dx12} onChange={setDx12} disabled={disabled} /></PanelSectionRow>}
         {installState?.reason && <PanelSectionRow><div role="status" style={infoStyle}>{installState.reason}</div></PanelSectionRow>}
         {!!pluginUpdate?.pending && <PanelSectionRow><div style={infoStyle}>Finish or cancel the downloaded plugin update in Plugin updates before installing game files.</div></PanelSectionRow>}
+        <PanelSectionRow><DropdownItem layout="below" label="Release to install" selectedOption={releaseChoice} disabled={disabled}
+          rgOptions={[{ label: "Latest upstream", data: "latest" }, { label: "Compatible HelixSR 1.8.1", data: "compatible-1.8.1" }]}
+          onChange={option => { selectedReleaseChoice = option.data; setReleaseChoice(option.data); }} /></PanelSectionRow>
+        <PanelSectionRow><div className="helix-muted">HelixSR 1.9 uses a newer installer and Scaler engine that this app does not yet support. Choose Compatible HelixSR 1.8.1 to install the reviewed version. Latest-version checks remain separate.</div></PanelSectionRow>
         <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || !installState?.allowed}
           onClick={() => void interact(installOrUpdate)}>{submission.pending ? "Starting installation…" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
         {game.managed && !game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
@@ -722,10 +733,9 @@ function Content() {
       <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/dawoodtogoo2020-code/HelixSR-Decky/blob/main/INSTALL_GUIDE.md")}>Open full guide</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml")}>Report a problem</ButtonItem></PanelSectionRow>
       {setupOptions && <>
-      <PanelSectionRow><ToggleField label="Accept local preparation terms" checked={!!data?.license_accepted} disabled={disabled}
-        description="Uses the official HelixSR freeware release, NVIDIA DLSS under NVIDIA's license, portable Python, numpy and DXC. Network stays on this device. Review upstream licenses before accepting."
-        onChange={accepted => void run(() => setLicense(accepted)).then(ok => setData(d => d ? { ...d, license_accepted: !!ok } : d))} /></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/lonewolf0622/HelixSR/blob/main/LICENSE")}>Read HelixSR license</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><div className="helix-muted">Accept preparation terms in the selected game's installation review. Consent applies to that release, archive and model. Generated network files stay on this device.</div></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser(releaseChoice === "compatible-1.8.1"
+        ? "https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE" : "https://github.com/lonewolf0622/HelixSR/blob/main/LICENSE")}>Read HelixSR license</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/NVIDIA/DLSS/blob/v310.7.0/LICENSE.txt")}>Read NVIDIA DLSS license</ButtonItem></PanelSectionRow>
       </>}
     </PanelSection>

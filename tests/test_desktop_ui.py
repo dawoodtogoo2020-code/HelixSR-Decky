@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 QT = importlib.util.find_spec('PySide6') is not None
 if QT:
     from PySide6.QtCore import QEvent, QTimer
-    from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox
+    from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QLabel, QTextEdit
     from desktop.app import MainWindow, PreviewDialog, LIMIT, open_external_url
 
 
@@ -50,10 +50,15 @@ class FakeBackend:
         self.calls.append(('app_check', force))
         return dict(current='0.1.0', latest='0.2.0', update_available=True, auto_check=True)
 
-    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None):
+    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None, release_choice=None):
         self.preview_variant = variant_id
         self.preview_executable = executable
+        self.preview_release_choice = release_choice
         self.calls.append(('preview', gid, dx12_confirmed))
+        if release_choice == 'compatible-1.8.1':
+            return dict(token='compatible-token', action='latest', name='Game A', route='optiscaler', files=['dxgi.dll'],
+                        release_version='1.8.1', warning='Explicit compatibility release',
+                        license_url='https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE')
         return dict(token='token', action='latest', name='Game A', route='optiscaler', files=['dxgi.dll'], warning='Close the game')
 
     def accept_license(self, accepted, token=None):
@@ -161,6 +166,21 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertIn('Protected game', self.window.unavailable.item(0).text())
         self.assertFalse(any(c[0] in ('install', 'preview', 'license') for c in self.backend.calls))
         self.assertIn('OptiScaler installed: yes', self.window.evidence.toPlainText())
+
+    def test_explicit_compatibility_choice_reaches_review_with_matching_license(self):
+        self.window.release_choice.setCurrentIndex(self.window.release_choice.findData('compatible-1.8.1'))
+        with mock.patch.object(self.window, '_preview_received') as received:
+            self.window.preview_latest()
+            self.settle()
+        self.assertEqual(self.backend.preview_release_choice, 'compatible-1.8.1')
+        preview = received.call_args.args[0]
+        dialog = PreviewDialog(preview, self.window)
+        try:
+            self.assertIn('HelixSR release: 1.8.1', dialog.findChild(QTextEdit).toPlainText())
+            self.assertTrue(any('/blob/v1.8.1/LICENSE' in label.text() for label in dialog.findChildren(QLabel)))
+            self.assertFalse(any(call[0] in ('license', 'install') for call in self.backend.calls))
+        finally:
+            dialog.deleteLater()
 
     def test_next_step_surfaces_install_dx12_and_game_specific_requirements(self):
         self.backend.game.update(appid='2054970', name="Dragon's Dogma 2", dx12_confirmation_needed=True)

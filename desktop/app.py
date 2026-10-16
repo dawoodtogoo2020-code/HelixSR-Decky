@@ -36,7 +36,7 @@ TERMS = (
     "NVIDIA DLSS and generated network files remain subject to NVIDIA's license. "
     "Generated weights and kernels are private local assets and must not be redistributed. "
     "OptiScaler is GPL 3.0; fakenvapi is MIT; AMD FidelityFX retains AMD notices. "
-    "Setup scripts are Apache 2.0. Review upstream terms before continuing."
+    "Setup scripts through 1.8.1 retain Apache 2.0 terms. Newer releases have different terms and require a supported adapter. Review the selected release license."
 )
 
 
@@ -126,7 +126,8 @@ class PreviewDialog(QDialog):
             "\n\nTerms and credits:\n" + TERMS
         )
         layout.addWidget(body)
-        links = link_label('<a href="https://github.com/lonewolf0622/HelixSR">HelixSR terms and credits</a>', parent._notify)
+        license_url = preview.get('license_url') or 'https://github.com/lonewolf0622/HelixSR'
+        links = link_label('<a href="' + html.escape(license_url, quote=True) + '">Selected HelixSR release license</a>', parent._notify)
         layout.addWidget(links)
         self.ack = QCheckBox("I have reviewed the changes and accept the applicable terms")
         layout.addWidget(self.ack)
@@ -243,6 +244,17 @@ class MainWindow(QMainWindow):
         self.executable_note = QLabel("Choose the DX12 executable you actually launch. HelixSR will be installed beside it. Remove an existing installation before choosing another executable.")
         self.executable_note.setWordWrap(True)
         content.addWidget(self.executable_note)
+        content.addWidget(QLabel("Release to install"))
+        self.release_choice = QComboBox()
+        self.release_choice.setObjectName("release_choice")
+        self.release_choice.addItem("Latest upstream", "latest")
+        self.release_choice.addItem("Compatible HelixSR 1.8.1", "compatible-1.8.1")
+        self.release_choice.setMinimumHeight(40)
+        content.addWidget(self.release_choice)
+        release_note = QLabel("HelixSR 1.9 uses a newer installer and Scaler engine that this app does not yet support. "
+                             "Choose Compatible HelixSR 1.8.1 to install the reviewed version. Latest-version checks remain separate.")
+        release_note.setWordWrap(True)
+        content.addWidget(release_note)
         content.addWidget(QLabel("HelixSR model"))
         self.models = QComboBox()
         self.models.setObjectName("models")
@@ -428,7 +440,7 @@ class MainWindow(QMainWindow):
         active = any(j.get("state") in ACTIVE for j in self._jobs)
         free = not (self._task or self._modal or self._closing or active)
         game = self.game or {}
-        for control in (self.games, self.executables, self.models, self.refresh_button, self.launchers, self.import_button, self.folder_button, self.helix_check, self.app_check, self.auto_check, self.diagnostic_button):
+        for control in (self.games, self.executables, self.models, self.release_choice, self.refresh_button, self.launchers, self.import_button, self.folder_button, self.helix_check, self.app_check, self.auto_check, self.diagnostic_button):
             control.setEnabled(free)
         choices = game.get("executable_choices", [])
         show_executable = not game.get("managed") and game.get("route") == "optiscaler" and bool(choices) and (len(choices) > 1 or not any(e['path'] == game.get('selected_executable') for e in choices))
@@ -622,7 +634,10 @@ class MainWindow(QMainWindow):
         if self.game and self.install.isEnabled():
             gid, confirmed, model = self.game["id"], self.dx12.isChecked(), self.models.currentData()
             executable = self.game.get("selected_executable") if not self.game.get("managed") and self.game.get("route") == "optiscaler" else None
-            self._run(lambda: self.backend.preview_latest(gid, confirmed, model, executable), lambda p: self._preview_received(p, True))
+            choice = self.release_choice.currentData()
+            call = (lambda: self.backend.preview_latest(gid, confirmed, model, executable)) if choice == "latest" else (
+                lambda: self.backend.preview_latest(gid, confirmed, model, executable, choice))
+            self._run(call, lambda p: self._preview_received(p, True))
 
     def preview_action(self, action):
         if self.game and self.actions[action].isEnabled():

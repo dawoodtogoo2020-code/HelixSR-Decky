@@ -335,3 +335,28 @@ for (const state of ["completed", "failed"]) {
     assert.ok(h.count("library") >= 2);
   });
 }
+
+test("explicit compatible release survives remount and confirms its exact version without a latest lookup", async () => {
+  const h = harness({ check_updates: () => { throw Error("Latest lookup must stay separate"); },
+    preview_latest: (_gid, _dx12, _model, _exe, choice) => {
+      assert.equal(choice, "compatible-1.8.1");
+      return { token: "compat-token", name: "PRAGMATA", files: ["reviewed.dll"], warning: "Compatibility release, not the latest Scaler engine",
+        model: "Model E", release_version: "1.8.1", license_accepted: false,
+        license_url: "https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE" };
+    } });
+  await h.ready();
+  const dropdown = h.walk(h.render(), node => node.type === "DropdownItem" && node.props.label === "Release to install")[0];
+  assert.ok(dropdown);
+  dropdown.props.onChange({ data: "compatible-1.8.1" });
+  h.unmount(); h.mount(); await flush(); h.render(); await flush(); h.render();
+  const modal = await h.openInstall();
+  assert.match(modal.element.props.strTitle, /1\.8\.1/);
+  assert.equal(modal.element.props.strOKButtonText, "Accept terms and install");
+  assert.ok(h.walk(modal.element.props.strDescription, node => node.type === "a"
+    && node.props.href === "https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE").length);
+  assert.equal(h.count("check_updates"), 0);
+  modal.element.props.onOK(); await flush();
+  assert.equal(h.count("set_license"), 1);
+  assert.equal(h.count("install_latest"), 1);
+  assert.equal(h.calls.find(call => call.route === "set_license").args[1], "compat-token");
+});

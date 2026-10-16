@@ -1,5 +1,7 @@
 # HelixSR models and future variants
 
+HelixSR 1.9 has introduced a different preparation and Scaler contract. It requires a new integration before these managers can install it. **Release to install → Compatible HelixSR 1.8.1** is an explicit, reviewed installation option in Decky 0.1.29 and Desktop 0.1.18. The selected release is separate from the model and from latest-upstream discovery. No HelixSR 1.9 frame-generation or Scaler feature is claimed by that option.
+
 Both interfaces use the same model registry and installation engine. The **HelixSR model** dropdown shows reviewed, supported choices. The selected game's details show the installed model; older installations whose source cannot be proven show **Model unverified**.
 
 1. Update the Decky plugin through **Plugin updates**, or the desktop app through **App updates**.

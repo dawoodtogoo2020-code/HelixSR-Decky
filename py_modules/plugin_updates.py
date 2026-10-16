@@ -97,6 +97,8 @@ def validate_zip(path, version):
                              '_helix_html_entities', '_helix_markupbase'))
             required.update(f'{FOLDER}/licenses/{name}' for name in
                             ('cpython-3.11.17-LICENSE.txt', 'cpython-3.11.17-PROVENANCE.json'))
+        if semver(version) >= (0, 1, 29):
+            required.add(f'{FOLDER}/py_modules/compatibility_release.py')
         if not required <= seen:
             raise ValueError('Incomplete plugin ZIP')
         for name in ('plugin.json', 'package.json'):

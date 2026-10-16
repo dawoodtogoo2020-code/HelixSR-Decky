@@ -29,6 +29,8 @@ from operation_lock import operation_lock, game_locked
 from host_environment import host_environment
 from installation_status import installation_status
 import menu_labels
+from compatibility_release import (COMPATIBLE_CHOICE, compatible_release, selection,
+                                   validate_compatible_release, require_supported_latest)
 from build_runtime import wine_candidates
 from github_release import web_latest_release
 from model_variants import (DEFAULT_VARIANT, catalog, package_selection, same_release,
@@ -1046,7 +1048,12 @@ class Manager:
         return self.refresh()
 
     def accept_license(self, accepted, token=None):
-        release = self.check_update() if accepted else {}
+        reviewed = None
+        if accepted and token:
+            reviewed = self.previews.get(token)
+            if not reviewed or reviewed.get('action') != 'latest' or time.time() > reviewed['expires']:
+                raise ValueError('Installation review expired; review the change again')
+        release = (self.reviewed_install_release(reviewed) if reviewed else self.check_update()) if accepted else {}
         if accepted and release.get('error'):
             raise ValueError(release['error'])
         selected = None
@@ -1063,6 +1070,24 @@ class Manager:
         self.cfg['license'] = key
         self.save()
         return bool(accepted)
+
+    def release_for_choice(self, choice=None, force=False):
+        """Latest discovery stays independent from an explicitly selected archive."""
+        if selection(choice) == COMPATIBLE_CHOICE:
+            return validate_compatible_release(compatible_release())
+        release = self.check_update(force)
+        if release.get('error') or not release.get('version'):
+            raise ValueError(release.get('error') or 'Check upstream updates first')
+        return require_supported_latest(release)
+
+    def reviewed_install_release(self, preview):
+        choice = selection(preview.get('release_choice'))
+        release = self.release_for_choice(choice)
+        if choice == COMPATIBLE_CHOICE:
+            validate_compatible_release(preview['release'])
+        if not same_release(release, preview['release']):
+            raise ValueError('Upstream release changed since review; review Install or Update again')
+        return release
 
     def check_update(self, force=False):
         old = load_release(self.settings)
@@ -1182,14 +1207,24 @@ class Manager:
             atomic_json(self.settings / 'release.json', failed)
             return failed
 
-    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None):
+    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None, release_choice=None):
         with self.lock:
             selected = select_variant(variant_id)
-            release = self.check_update()
+            choice = selection(release_choice)
+            release = self.release_for_choice(choice)
             if release.get('error') or not release.get('version'):
                 raise ValueError(release.get('error') or 'Check upstream updates first')
             game = self.get_game(gid)
             data = self.assess(game, executable=executable)
+            if choice == COMPATIBLE_CHOICE and (data.get('managed') or data.get('legacy')):
+                installed = data.get('installed_version')
+                try:
+                    newer = version(installed) > version(release['version'])
+                except (ValueError, TypeError):
+                    newer = True
+                if newer:
+                    raise ValueError('Compatibility installation would downgrade a newer or unverified HelixSR installation. '
+                                     'Remove it with its owning manager first; no files were changed.')
             if data['compatibility'] != 'candidate':
                 raise ValueError('; '.join(data['reasons']))
             self.validate_install_executable(data)
@@ -1200,7 +1235,7 @@ class Manager:
                 self.previews.pop(self.preview(gid, 'adopt', dx12_confirmed)['token'], None)
             token = uuid.uuid4().hex
             self.previews[token] = dict(game=gid, action='latest', expires=time.time()+120,
-                                       release=dict(release), variant_id=selected['id'],
+                                       release=dict(release), release_choice=choice, variant_id=selected['id'],
                                        executable=data['selected_executable'] if not data['managed'] and data['route'] == 'optiscaler' else None,
                                        selected_executable=data['selected_executable'],
                                        dx12=dx12_confirmed,
@@ -1208,9 +1243,15 @@ class Manager:
             return dict(token=token, name=game['name'], action='latest', route=data['route'],
                         selected_executable=data['selected_executable'],
                         model=selected['label'], variant_id=selected['id'], release_version=release['version'],
+                        release=dict(release), release_choice=choice,
+                        license_url=f'https://github.com/{REPO}/blob/v{release["version"]}/LICENSE',
+                        license_accepted=self.cfg.get('license') == license_key(release, selected['id']),
                         files=self.planned_paths(game, data, 'latest'),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
-                        warning='Download required files, prepare the local network and install or update HelixSR for this game. Existing native HelixSR is imported first. Close the game. Frame generation is preserved.')
+                        warning=('You explicitly selected the reviewed HelixSR 1.8.1 compatibility release. '
+                                 'This does not install the latest upstream 1.9 Scaler engine. '
+                                 if choice == COMPATIBLE_CHOICE else '') +
+                                'Download required files, prepare the local network and install or update HelixSR for this game. Existing native HelixSR is imported first. Close the game. Frame generation is preserved.')
 
     def execute_latest(self, token):
         with self.lock:
@@ -1230,7 +1271,8 @@ class Manager:
             game = self.get_game(gid)
             if kind not in ('prepare', 'install_latest'):
                 raise ValueError('Unsupported background operation')
-            release = load_release(self.settings)
+            choice = selection(preview.get('release_choice') if preview else None)
+            release = self.reviewed_install_release(preview) if preview and choice == COMPATIBLE_CHOICE else load_release(self.settings)
             if preview and not same_release(release, preview['release']):
                 raise ValueError('Upstream release changed since review; review Install or Update again')
             selected = select_variant(preview.get('variant_id') if preview else None)
@@ -1239,7 +1281,7 @@ class Manager:
             self.cancel.clear()
             job = {'id': uuid.uuid4().hex, 'kind': kind, 'game': game['name'], 'gid': gid, 'state': 'running',
                    'message': 'Starting', 'started_at': time.time(), 'log': '',
-                   'variant_id': selected['id'], 'reviewed_release': dict(release)}
+                   'variant_id': selected['id'], 'reviewed_release': dict(release), 'release_choice': choice}
             self.jobs[job['id']] = job
 
             def run():
@@ -1321,7 +1363,9 @@ class Manager:
     def prepare(self, game, job):
         if os.name == 'posix' and os.geteuid() == 0:
             raise ValueError('Refusing preparation as root')
-        release = self.check_update(True)
+        release = self.release_for_choice(job.get('release_choice'), True)
+        if selection(job.get('release_choice')) == COMPATIBLE_CHOICE:
+            validate_compatible_release(job.get('reviewed_release'))
         if release.get('error') or not release.get('version'):
             raise ValueError(release.get('error', 'Check upstream updates first'))
         selected = select_variant(job.get('variant_id'))

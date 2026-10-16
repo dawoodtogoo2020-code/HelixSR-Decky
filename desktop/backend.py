@@ -130,10 +130,10 @@ class DesktopBackend:
             self._write()
             return self.manager.accept_license(accepted, token)
 
-    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None):
+    def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None, release_choice=None):
         with self.lock:
             self._open()
-            return self.manager.preview_latest(gid, dx12_confirmed, variant_id, executable)
+            return self.manager.preview_latest(gid, dx12_confirmed, variant_id, executable, release_choice)
 
     def install_latest(self, token):
         with self.lock:

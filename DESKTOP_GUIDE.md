@@ -6,6 +6,8 @@ Game detection and local diagnostics work offline. Existing installations can be
 
 ## Download and open
 
+If installation reports **Unexpected upstream package layout: LICENSE-APACHE-2.0**, update to **Desktop 0.1.18**. Choose the game, set **Release to install → Compatible HelixSR 1.8.1**, then choose Install/Update and confirm the displayed version and terms. This explicitly installs the reviewed compatibility release. Latest upstream 1.9 has a different installer and Scaler layout and needs a new adapter. Latest-version checks still show it. The manager refuses silent downgrades or a replaced compatibility archive.
+
 1. Switch your SteamOS device to Desktop Mode.
 2. Open the [releases page](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases) and choose the newest **HelixSR Desktop** release, whose tag starts with `desktop-v`. Download **HelixSR-Desktop-VERSION-x86_64.AppImage** under **Assets**. Replace VERSION below with that release's version. Save it in a folder such as `Applications` under your own home folder. The release marked **Latest** can be the Decky plugin ZIP; the standalone app has its own desktop release.
 3. In your file manager, right-click the AppImage, open **Properties → Permissions**, and enable **Is executable** (wording varies).

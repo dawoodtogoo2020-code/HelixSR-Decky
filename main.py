@@ -162,9 +162,9 @@ class Plugin:
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.preview, gid, action, dx12_confirmed, executable)
 
-    async def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None):
+    async def preview_latest(self, gid, dx12_confirmed=False, variant_id=None, executable=None, release_choice=None):
         async with self.api_lock:
-            return await asyncio.to_thread(self.manager.preview_latest, gid, dx12_confirmed, variant_id, executable)
+            return await asyncio.to_thread(self.manager.preview_latest, gid, dx12_confirmed, variant_id, executable, release_choice)
 
     async def install_latest(self, token):
         async with self.api_lock:
