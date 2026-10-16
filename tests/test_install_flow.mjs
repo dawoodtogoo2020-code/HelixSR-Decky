@@ -25,7 +25,7 @@ function harness(overrides = {}) {
     setup_guidance: { headline: "Not installed", steps: ["Choose Install HelixSR"], notes: [], links: [] } };
   const release = { version: "1.8.1" };
   const library = () => ({ games: [game], warnings: [], release, license_accepted: false, jobs: [] });
-  const calls = [], toasts = [], intervals = new Map(), modules = new Map();
+  const calls = [], toasts = [], intervals = new Map(), timeouts = new Map(), modules = new Map();
   let panel, cursor, effects, modal, timer = 0;
   const handlers = { library, game_details: () => game, check_updates: () => release,
     preview_latest: () => ({ token: "reviewed-token", name: game.name, files: ["reviewed.dll"],
@@ -71,7 +71,8 @@ function harness(overrides = {}) {
       }, toaster: { toast: value => toasts.push(value) }, openFilePicker: () => { throw Error("Unexpected picker"); }
     } };
   const context = vm.createContext({ console, Date, Set, Map, Promise,
-    setTimeout: () => ++timer, clearTimeout: () => {},
+    setTimeout: (callback, ms) => { timeouts.set(++timer, {callback, ms}); return timer; },
+    clearTimeout: id => timeouts.delete(id),
     setInterval: (callback, ms) => { intervals.set(++timer, { callback, ms }); return timer; },
     clearInterval: id => intervals.delete(id) });
   function load(filename) {
@@ -137,14 +138,72 @@ function harness(overrides = {}) {
     assert.ok(dropdown, "Game executable selector is visible");
     dropdown.props.onChange({ data: path }); await flush(); render();
   }
-  return { game, library, calls, toasts, intervals, ready, render, mount, unmount, text, openInstall,
-    chooseExecutable, menuToggle, openMenuChange,
+  return { game, library, calls, toasts, intervals, timeouts, ready, render, mount, unmount, text, openInstall,
+    chooseExecutable, menuToggle, openMenuChange, walk, installButton,
     count: route => calls.filter(call => call.route === route).length };
 }
 function job(state = "running") {
   return { id: "job-one", kind: "install_latest", gid: "pragmata", game: "PRAGMATA",
     state, message: state === "running" ? "Building local network" : "Files verified", log: "" };
 }
+
+test("protected games remain in the dropdown with diagnostics and installation blocked", async () => {
+  const h = harness();
+  Object.assign(h.game, {name: "skate", appid: "123456", compatibility: "blocked", route: "optiscaler",
+    reasons: ["Anti-cheat files detected; injection is blocked"],
+    installation_status: {state: "review", label: "Needs review", selectable: false,
+      can_modify: false, can_restore: false, running: false,
+      summary: "Anti-cheat files detected; injection is blocked", issues: []}});
+  await h.ready();
+  const dropdown = h.walk(h.render(), n => n.type === "DropdownItem" && n.props.label === "Game")[0];
+  assert.equal(dropdown.props.rgOptions.length, 1);
+  assert.equal(dropdown.props.rgOptions[0].data, h.game.id);
+  assert.match(h.text(dropdown.props.rgOptions[0].label), /skate.*Needs review/);
+  assert.match(h.text(h.render()), /Anti-cheat files detected/);
+  assert.equal(h.installButton().props.disabled, true);
+  const proxy = h.walk(h.render(), n => n.type === "ButtonItem" && /Review Proton proxy launch option/.test(h.text(n)))[0];
+  assert.ok(proxy);
+  assert.equal(proxy.props.disabled, true);
+  proxy.props.onClick(); await flush();
+  assert.equal(h.count("owned_launch_options"), 0);
+  assert.equal(h.count("preview_latest"), 0);
+  assert.equal(h.count("install_latest"), 0);
+});
+
+test("an unresponsive backend ends loading, exposes an error, and shares its pending scan across remounts", async () => {
+  const pending = deferred();
+  const h = harness({library: () => pending.promise});
+  await h.ready();
+  assert.match(h.text(h.render()), /Detecting installed games/);
+  const deadline = [...h.timeouts.values()].find(t => t.ms === 30000);
+  assert.ok(deadline);
+  deadline.callback(); await flush();
+  assert.match(h.text(h.render()), /Library scan failed/);
+  assert.match(h.text(h.render()), /backend could not start/);
+  const refresh = h.walk(h.render(), n => n.type === "ButtonItem" && /Refresh library and status/.test(h.text(n)))[0];
+  assert.equal(refresh.props.disabled, false);
+  refresh.props.onClick(); await flush();
+  h.unmount(); h.mount(); await flush();
+  assert.equal(h.count("library"), 1);
+  pending.resolve(h.library()); await flush(); h.render(); await flush();
+  assert.match(h.text(h.render()), /1 games found/);
+  assert.doesNotMatch(h.text(h.render()), /Library scan failed/);
+});
+
+test("a blocked enabled installation cannot enable the Proton proxy", async () => {
+  const h = harness();
+  Object.assign(h.game, {appid: "123456", compatibility: "blocked", route: "optiscaler",
+    managed: true, enabled: true,
+    installation_status: {state: "review", label: "Needs review", selectable: true,
+      can_modify: false, can_restore: false, running: false, summary: "Anti-cheat detected", issues: []}});
+  await h.ready();
+  const proxy = h.walk(h.render(), n => n.type === "ButtonItem" && /Review Proton proxy launch option/.test(h.text(n)))[0];
+  assert.ok(proxy);
+  assert.equal(proxy.props.disabled, true);
+  proxy.props.onClick(); await flush();
+  assert.equal(h.count("owned_launch_options"), 0);
+  assert.equal(h.count("prepare_launch_options"), 0);
+});
 
 test("menu labels stay off until review applies and the backend refresh confirms them", async () => {
   const h = harness({apply_action: () => {

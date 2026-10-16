@@ -4,8 +4,6 @@ Synthetic validation of this transform does not prove an installed game build
 uses this resource. No filesystem, network, or game-state operations occur here.
 """
 import re
-import xml.etree.ElementTree as ET
-from xml.parsers import expat
 
 LABEL = 'Helix SR'
 WITCHER_XML = 'bin/config/r4game/user_config_matrix/pc/graphics.xml'
@@ -50,6 +48,11 @@ def _tag_end(raw, start):
 
 def patch_witcher3(raw: bytes) -> bytes:
     """Replace only the validated FSR Option displayName's literal UTF-8 bytes."""
+    try:
+        import xml.etree.ElementTree as ET
+        from xml.parsers import expat
+    except ImportError as exc:
+        raise ValueError('Optional menu-label XML parser is unavailable') from exc
     if not isinstance(raw, bytes) or not raw or len(raw) > MAX_XML_BYTES:
         raise ValueError('Menu XML must be nonempty bytes no larger than 128 KiB')
     if b'<!DOCTYPE' in raw.upper() or b'<!ENTITY' in raw.upper():

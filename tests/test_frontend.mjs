@@ -5,6 +5,32 @@ import { proxyOptions } from "../src/launchOptions.ts";
 import { PluginInstaller } from "../src/pluginInstaller.ts";
 import { canRestore, gameStatus, installReadiness, nextStep } from "../src/gameStatus.ts";
 import { librarySelectable, libraryStatus } from "../src/libraryStatus.ts";
+import { LibraryRead } from "../src/libraryRead.ts";
+
+test("hung library read times out without queuing duplicate scans and can recover", async () => {
+  let resolve, calls = 0;
+  const pending = new Promise(yes => { resolve = yes; });
+  const reader = new LibraryRead(() => { calls++; return calls === 1 ? pending : Promise.resolve("fresh"); }, 5);
+  await assert.rejects(reader.get(), /library has not responded/);
+  await assert.rejects(reader.get(), /library has not responded/);
+  assert.equal(calls, 1);
+  const waiting = reader.get();
+  resolve("completed scan");
+  assert.equal(await waiting, "completed scan");
+  assert.equal(await reader.get(), "fresh");
+  assert.equal(calls, 2);
+});
+
+test("library errors remain visible and a later refresh starts a fresh read", async () => {
+  let calls = 0;
+  const reader = new LibraryRead(async () => {
+    if (++calls === 1) throw new Error("backend unavailable");
+    return [];
+  });
+  await assert.rejects(reader.get(), /backend unavailable/);
+  assert.deepEqual(await reader.get(), []);
+  assert.equal(calls, 2);
+});
 
 test("active installation replaces stale install instructions then accepts refreshed launch steps", () => {
   const before = {headline: "Not installed", steps: ["Choose Install"], notes: [], links: []};

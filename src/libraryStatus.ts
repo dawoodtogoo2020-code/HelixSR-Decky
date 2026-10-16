@@ -24,7 +24,7 @@ export function libraryStatus(games: LibraryGame[] | undefined, loading = false,
     hint: !total
       ? "No installed game folders were found. Check Discovery notes below. Open Steam and check that your library drive is mounted, then refresh. For other launchers, use Import Games From or import the individual game folder."
       : unavailable === total
-      ? "Your games were found, but none can be selected for installation yet. See Unavailable games below for each reason and next step."
-      : unavailable ? "Some games are unavailable. See Unavailable games below for their reasons." : "",
+      ? "Your games were found, but none is available for installation yet. Select a game to review its reason and next step."
+      : unavailable ? "Some games are unavailable for installation. Select them to review their reasons." : "",
   };
 }
