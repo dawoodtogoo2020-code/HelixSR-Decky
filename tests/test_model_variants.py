@@ -26,7 +26,7 @@ def reviewed_variant(recipe=REVIEWED_RECIPE):
                 recipe_sha256=recipe)
 
 
-def release(version='1.9.0', digest='a' * 64, size=1):
+def release(version='1.8.0', digest='a' * 64, size=1):
     tag = 'v' + version
     return dict(version=version, sha256=digest, size=size,
                 url=f'https://github.com/{manager.REPO}/releases/download/{tag}/HelixSR-{version}.zip',
@@ -93,7 +93,7 @@ class RecipeGateTests(Fixtures):
     def archive(self, missing=None, extra=None):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
-            prefix = 'HelixSR-1.9.0/'
+            prefix = 'HelixSR-1.8.0/'
             files = set(model_variants.RECIPE_FILES)
             if missing:
                 files.remove(missing)
@@ -253,8 +253,8 @@ class ManagerVariantTests(Fixtures):
             check.assert_not_called()
 
     def test_release_change_between_preview_and_accept_is_rejected(self):
-        before = release('1.9.0', 'a' * 64)
-        after = release('1.9.1', 'b' * 64)
+        before = release('1.8.0', 'a' * 64)
+        after = release('1.8.1', 'b' * 64)
         with patch.object(self.m, 'check_update', return_value=before):
             token = self.m.preview_latest(self.game['id'],
                                           variant_id=model_variants.DEFAULT_VARIANT)['token']
@@ -264,8 +264,8 @@ class ManagerVariantTests(Fixtures):
         self.assertFalse(self.m.cfg.get('license'))
 
     def test_release_change_between_accept_and_prepare_is_rejected(self):
-        before = release('1.9.0', 'a' * 64)
-        after = release('1.9.1', 'b' * 64)
+        before = release('1.8.0', 'a' * 64)
+        after = release('1.8.1', 'b' * 64)
         with patch.object(self.m, 'check_update', return_value=before):
             token = self.m.preview_latest(self.game['id'])['token']
             self.m.accept_license(True, token)
