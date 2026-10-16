@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 import re
-import sqlite3
 import struct
 
 
@@ -211,6 +210,13 @@ def lutris_database(path, warnings, max_rows=10000):
     """Read the small installed-Wine-game subset from an existing pga.db."""
     path = Path(path)
     if not path.is_file():
+        return None
+    # Decky's embedded Python may omit this optional native extension. Steam,
+    # Heroic and Lutris YAML discovery must still be able to start and run.
+    try:
+        import sqlite3
+    except (ImportError, OSError):
+        warnings.append('Lutris: database support is unavailable in this Python runtime; using game configuration files')
         return None
     try:
         if path.stat().st_size > 256 << 20:
