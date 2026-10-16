@@ -8,6 +8,7 @@ import { PluginInstaller, PluginArtifact } from "./pluginInstaller";
 import { canRestore, gameStatus, installReadiness, nextStep } from "./gameStatus";
 import { executableSession } from "./executableSession";
 import { librarySelectable, libraryStatus } from "./libraryStatus";
+import { LibraryRead } from "./libraryRead";
 import { InstallSession, JobTracker } from "./installSession";
 import { readLaunchOptions } from "./launchDetails";
 
@@ -71,6 +72,7 @@ function cacheLibrary(next: Library) { cachedLibrary = next; return next; }
 type Preview = { token: string; name: string; action: string; route: string; files: string[];
   warning: string; select_upscaler: string; model?: string; variant_id?: string; release_version?: string; selected_executable?: string };
 const library = callable<[], Library>("library");
+const libraryRead = new LibraryRead(library);
 const details = callable<[string, string?], Game>("game_details");
 const checkUpdates = callable<[boolean], Release>("check_updates");
 const forgetGame = callable<[string], Library>("forget_game");
@@ -320,14 +322,14 @@ function Content() {
     const jobRevision = jobTracker.revision;
     setLibraryLoading(true); setLibraryError("");
     const result = await run(async () => {
-      try { return await library(); }
+      try { return await libraryRead.get(); }
       catch (e) { setLibraryError(e instanceof Error ? e.message : String(e)); throw e; }
       finally { setLibraryLoading(false); }
     });
     if (result) {
       setData(cacheLibrary(result)); watchJobs(result.jobs, jobRevision);
       if (!selectedRef.current || !result.games.some(g => g.id === selectedRef.current)) {
-        const first = result.games.find(g => g.recovery_available) || result.games.find(g => g.compatibility === "candidate" && g.managed) || result.games.find(g => g.compatibility === "candidate" || g.executable_selection_needed);
+        const first = result.games.find(g => g.recovery_available) || result.games.find(g => g.compatibility === "candidate" && g.managed) || result.games.find(g => g.compatibility === "candidate" || g.executable_selection_needed) || result.games[0];
         if (first) chooseGame(first.id);
       }
     }
@@ -468,6 +470,10 @@ function Content() {
   }
   async function launchChange(restore = false) {
     if (!game?.appid) return;
+    if (!restore && (game.compatibility !== "candidate" || game.installation_status?.can_modify === false)) {
+      setError("Resolve this game's review reasons before enabling the Proton proxy.");
+      return;
+    }
     const appid = Number(game.appid);
     const before = await run(() => liveLaunchOptions(appid));
     if (before === undefined) return;
@@ -521,8 +527,10 @@ function Content() {
   const running = jobs.some(x => x.state === "running");
   const disabled = busy || running || submission.pending || modalOpen || !!pluginUpdate?.pending;
   const libraryGames = (data?.games || []).map(g => game?.id === g.id ? game : g);
-  const games = libraryGames.filter(librarySelectable);
-  const unavailable = libraryGames.filter(g => !games.includes(g));
+  // Selection opens diagnostics; it does not authorize installation. Keep
+  // protected/unsupported games visible and let installReadiness gate writes.
+  const games = libraryGames;
+  const unavailable = libraryGames.filter(g => !librarySelectable(g));
   const libraryView = libraryStatus(data ? libraryGames : undefined, libraryLoading, !!libraryError);
   const selectedStatus = game ? gameStatus(game) : undefined;
   const selectedJob = jobs.find(job => job.state === "running"
@@ -592,7 +600,7 @@ function Content() {
           onClick={() => void interact(installOrUpdate)}>{submission.pending ? "Starting installation…" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
         {game.managed && !game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
           onClick={() => void interact(() => action("enable"))}>Enable HelixSR</ButtonItem></PanelSectionRow>}
-        {game.managed && game.enabled && game.route === "optiscaler" && game.appid && <PanelSectionRow><ButtonItem layout="below" disabled={disabled}
+        {game.managed && game.enabled && game.route === "optiscaler" && game.appid && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
           onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>}
       </>}
       {jobs.slice().reverse().map(job => <PanelSectionRow key={job.id}><div className="helix-card" style={infoStyle} role="status">
@@ -664,7 +672,7 @@ function Content() {
         {(game.optiscaler.setup?.checks || []).join("\n\n")}
       </div></PanelSectionRow>}
       {game.route === "optiscaler" && game.appid && <>
-        {!(game.managed && game.enabled) && <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>}
+        {!(game.managed && game.enabled) && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false} onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>}
         <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void interact(() => launchChange(true))}>Restore plugin launch-option change</ButtonItem></PanelSectionRow>
       </>}
       <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiagnostics(!diagnostics)}>{diagnostics ? "Hide diagnostics" : "Show diagnostics and logs"}</ButtonItem></PanelSectionRow>

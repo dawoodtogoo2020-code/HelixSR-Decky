@@ -1,5 +1,6 @@
 """Synthetic layout tests only; these are not real game compatibility proof."""
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 
@@ -25,6 +26,37 @@ def fixture(label=b'AMD FSR Upscaling', quote=b'"', bom=False, wrapper=True):
 
 
 class MenuLabelProfiles(unittest.TestCase):
+    def test_optional_xml_parsers_are_not_backend_startup_dependencies(self):
+        modules = str(Path(__file__).resolve().parents[1] / 'py_modules')
+        script = r'''
+import builtins
+import sys
+mode = sys.argv[1]
+real_import = builtins.__import__
+def without_expat(name, globals=None, locals=None, fromlist=(), level=0):
+    if (mode == 'elementtree' and name.startswith('xml.etree')
+            or mode == 'expat' and (name in ('pyexpat', 'xml.parsers.expat')
+                or name == 'xml.parsers' and 'expat' in fromlist)):
+        raise ImportError('fixture: optional XML parser unavailable')
+    return real_import(name, globals, locals, fromlist, level)
+builtins.__import__ = without_expat
+import manager
+profile = manager.menu_labels.profile_for({'source': 'Steam', 'appid': '292030'}, 'direct')
+assert profile['supported'] is True
+try:
+    manager.menu_labels.patch_witcher3(b'<xml/>')
+except ValueError as exc:
+    assert str(exc) == 'Optional menu-label XML parser is unavailable'
+else:
+    raise AssertionError('missing parser must fail the optional transform closed')
+'''
+        for mode in ('elementtree', 'expat'):
+            with self.subTest(missing=mode):
+                completed = subprocess.run(
+                    [sys.executable, '-c', script, mode], env={'PYTHONPATH': modules},
+                    capture_output=True, text=True, timeout=10, check=False)
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_profile_is_only_exact_steam_direct_target(self):
         game = dict(source='Steam', appid='292030')
         profile = profile_for(game, 'direct')
