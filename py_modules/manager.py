@@ -1491,7 +1491,10 @@ class Manager:
                 if not (package / name).is_file() or (package / name).stat().st_size < 1024:
                     raise ValueError('Generated HelixSR model files are missing or incomplete. '
                                      'See the build log; this is not an internet connection error.')
-            verify_outputs(package)
+            if modern:
+                modern_release.verify_outputs(package)
+            else:
+                verify_outputs(package)
             api = pe_info(package / DLL)
             if api['arch'] != 'x64' or not api['ffx']:
                 raise ValueError('Prepared HelixSR DLL has an unsupported installation interface')

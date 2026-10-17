@@ -7,10 +7,12 @@ controller-authored text fixtures keep the suite offline and self-contained.
 Executables/networks are synthetic in both modes.
 """
 import json
+import io
+import contextlib
 import os
 from pathlib import Path
 import sys
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 PLUGIN = Path(os.environ.get('HELIXSR_TEST_PLUGIN', str(Path(__file__).resolve().parents[1])))
 sys.path.insert(0, str(PLUGIN / 'py_modules'))
@@ -267,6 +269,43 @@ class ModernInstallTests(Fixtures):
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(conflict.read_bytes(), b'foreign provider to preserve')
         self.assertFalse(self.m.record(self.game))
+
+    def test_prepare_rejects_legacy_output_contract_for_modern_release(self):
+        release = self.release()
+        self.m.cfg['license'] = manager.license_key(release, 'helixsr-model-e')
+        before = self.snapshot()
+        def extract(_archive, destination):
+            package = destination / 'HelixSR-1.9.3'
+            for name in ['LICENSE', 'THIRD_PARTY_NOTICES.md', manager.DLL,
+                         'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
+                         'helixsr-scaler/OptiScaler.dll', 'helixsr-scaler/OptiScaler.ini']:
+                write(package / name, 'synthetic input')
+            for name in manager.NETWORK:
+                write(package / name, b'x' * 2048)
+            write(package / 'helixsr_setup.json', json.dumps({'legacy': True}))
+        def spawn(*args, **kwargs):
+            self.m.process = MagicMock(returncode=0)
+            self.m.process.poll.return_value = 0
+        response = io.BytesIO(b'fixture')
+        release['size'] = len(response.getvalue())
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(self.m, 'release_for_choice', return_value=release))
+            stack.enter_context(patch.object(self.m, 'package', return_value=None))
+            stack.enter_context(patch.object(manager.urllib.request, 'urlopen', return_value=response))
+            stack.enter_context(patch.object(manager, 'sha', return_value=release['sha256']))
+            stack.enter_context(patch.object(manager, 'safe_extract', side_effect=extract))
+            stack.enter_context(patch.object(manager, 'verify_recipe', return_value={'recipe_sha256': modern_release.RECIPE_SHA256}))
+            stack.enter_context(patch.object(manager, 'select_build_wine', return_value=(Path('/fake/wine'), [])))
+            stack.enter_context(patch.object(self.m, '_spawn_compiler', side_effect=spawn))
+            legacy = stack.enter_context(patch.object(manager, 'verify_outputs'))
+            modern = stack.enter_context(patch.object(modern_release, 'verify_outputs', side_effect=ValueError('Modern output contract rejected')))
+            with self.assertRaisesRegex(ValueError, 'Modern output contract rejected'):
+                self.m.prepare(self.game, {'id': 'invalid-modern-output', 'log': ''})
+            modern.assert_called_once()
+            legacy.assert_not_called()
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse((self.m.companion(self.game) / 'records/package.json').exists())
+        self.assertFalse((self.m.companion(self.game) / 'staging/invalid-modern-output').exists())
 
     def test_direct_install_disable_enable_remove_restores_original_exactly(self):
         before = self.snapshot()

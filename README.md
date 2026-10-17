@@ -62,7 +62,7 @@ This plugin is independent of the HelixSR, OptiScaler and Decky projects. It can
 
 Open **Plugin updates**, check for updates and choose **Download plugin update**. Downloading alone does not install it: press **Update** in Decky's confirmation and wait for the plugin to reload. Verify **Current plugin** afterward. If the screen closes, choose **Open update confirmation**; it reuses the verified ZIP and cancels the previous native request. To abandon a downloaded update, close the native screen and choose **Cancel downloaded update**. If installation status is unresolved, restart Decky before retrying. Restart invalidates orphaned download prompts. Older plugin versions label the download button **Update Decky plugin** and require the same native confirmation.
 
-Automatic checks run on startup and once a day and only notify you. They never silently replace the plugin. Network failures retain an explicit error; automatic retries wait an hour. If the installer bridge is unavailable, use the release ZIP through Decky Settings → Developer. **HelixSR updates** is the separate section for game payloads. These checks follow current release metadata without fixed plugin-version URLs.
+Automatic checks run on startup and once a day and only notify you. They never silently replace the plugin. Network failures retain an explicit error; automatic retries wait an hour. If the installer bridge is unavailable, use the release ZIP through Decky Settings → Developer. Game payload updates use **Check latest HelixSR version** and **Update this game's HelixSR** beside the game and release selection. These checks follow current release metadata without fixed plugin-version URLs.
 
 ## Import launcher games
 

@@ -1,8 +1,8 @@
 # HelixSR Decky: beginner installation guide
 
-### Finding controls in Decky
+## Finding controls in Decky
 
-Choose **Game** and **Release to install** at the top. HelixSR version checks sit with the game installation controls. Plugin version and updates are grouped immediately below, followed by **Import games**. Expand **Advanced game settings** for the overlay, optional menu labels and diagnostics.
+Choose **Game** and **Release to install** at the top. HelixSR version checks sit with the game installation controls. Plugin version and updates are grouped immediately below, followed by **Import games**. Expand **Advanced game settings** for model settings, the overlay, optional menu labels, diagnostics, **Disable HelixSR** and **Remove and restore originals**.
 
 HelixSR 1.9.3 does not include its own frame generation. Alternative Scaler providers retain their settings and can be configured in Scaler's Frame Generation menu, subject to game, GPU and dependency requirements. Native FSR replacement installs use the game's available FG controls. A generic multiplier does not apply to every provider. To replace a modern Scaler installation with 1.8.1, remove HelixSR first to restore original files, then review a new installation.
 
@@ -135,7 +135,7 @@ For the **Decky plugin itself**:
 
 For **HelixSR inside a game**, and troubleshooting:
 
-1. In **HelixSR updates**, choose **Check for updates**, select a game, then **Update HelixSR** and review the change. Updates apply per game. Close it and wait for completion again. Updating the Decky plugin does not replace a game's HelixSR files.
+1. Select a game and release, choose **Check latest HelixSR version**, then **Update this game's HelixSR** and review the change. Updates apply per game. Close it and wait for completion again. Updating the Decky plugin does not replace a game's HelixSR files.
    The plugin follows the latest official stable HelixSR ZIP even if its size changes or upstream replaces the ZIP without changing the version number. New preparation checks the latest asset metadata, and changed bytes require fresh terms acceptance. A download must match GitHub's advertised size and SHA256. If the archive changes during downloading, check again and retry. If a future release changes its setup layout, preparation stops with a clear error rather than altering game files.
 2. **Disable HelixSR** restores original files while retaining what is needed to enable it again. **Remove and restore originals** removes the managed installation. If used, separately choose **Restore plugin launch-option change**. Removing the Decky plugin itself does not remove game modifications.
 3. For **game running** or incomplete Steam downloads, close it or wait, then refresh. For network failures, reconnect and retry after reviewing the message. For other injector conflicts, resolve the existing mod through its own installer before retrying; do not overwrite unknown DLLs.
