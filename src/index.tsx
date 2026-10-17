@@ -549,6 +549,7 @@ function Content() {
     : selectedStatus?.summary;
   const installState = game ? installReadiness(game, dx12) : undefined;
   const guidance = submission.pending ? undefined : nextStep(game?.setup_guidance, jobs.find(job => job.state === "running"));
+  const guidanceNeedsAttention = selectedStatus?.review || installState?.allowed === false;
   const infoStyle = { fontSize: "13px", lineHeight: "1.45", overflowWrap: "anywhere" as const, whiteSpace: "pre-wrap" as const };
 
   return <div className="helixsr-decky">
@@ -572,28 +573,30 @@ function Content() {
       <PanelSectionRow><DropdownItem layout="below" label="Release to install" selectedOption={releaseChoice} disabled={disabled}
         rgOptions={[{ label: "Latest upstream", data: "latest" }, { label: "Compatible HelixSR 1.8.1", data: "compatible-1.8.1" }]}
         onChange={option => { selectedReleaseChoice = option.data; setReleaseChoice(option.data); }} /></PanelSectionRow>
-      <PanelSectionRow><div className="helix-muted">HelixSR 1.9.3 uses Scaler 1.0.6 and withdraws HelixSR frame generation. Alternatives depend on the provider. Compatible 1.8.1 is also available.</div></PanelSectionRow>
+      <PanelSectionRow><div className="helix-muted">1.9.3: Scaler 1.0.6; HelixSR frame generation withdrawn.</div></PanelSectionRow>
       <PanelSectionRow><div className="helix-card" style={infoStyle}>Current HelixSR: {game ? game.installed_version || "not installed" : "select a game"}{"\n"}
         Latest HelixSR: {data?.release?.version || "checking required"}</div></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen} onClick={() => void run(() => checkUpdates(true)).then(r => { if (r) setData(d => d ? { ...d, release: r } : d); })}>Check latest HelixSR version</ButtonItem></PanelSectionRow>
       {data?.release?.error && <PanelSectionRow><div className="helix-muted">{data.release.error}</div></PanelSectionRow>}
+      {game && <>
+        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || !installState?.allowed}
+          onClick={() => void interact(installOrUpdate)}>{submission.pending ? "Starting installation…" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
+      </>}
       {submission.pending && <PanelSectionRow><div className="helix-card" style={infoStyle} role="status">
         <strong>{submission.name}: Starting installation…</strong>{"\n"}{submission.message}
       </div></PanelSectionRow>}
       {!!submission.error && <PanelSectionRow><div className="helix-card" role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>
         <strong>{submission.name}: Installation could not start</strong>{"\n"}{submission.error}
       </div></PanelSectionRow>}
-      <PanelSectionRow><div className="helix-card helix-muted">{libraryView.summary}</div></PanelSectionRow>
-      {libraryView.hint && <PanelSectionRow><div className="helix-muted">{libraryView.hint}</div></PanelSectionRow>}
       {!!libraryError && <PanelSectionRow><div style={infoStyle}>{libraryError}</div></PanelSectionRow>}
       {game && <>
         {!submission.pending && <PanelSectionRow><div className="helix-muted" style={{ color: selectedStatus?.color }}>{selectedSummary}</div></PanelSectionRow>}
-        {guidance && <PanelSectionRow><div className="helix-card" style={infoStyle}>
+        {guidance && guidanceNeedsAttention && <PanelSectionRow><div className="helix-card" style={infoStyle}>
           <strong>Next step: {guidance.headline}</strong>{"\n"}
           {guidance.steps.join("\n\n")}
           {guidance.notes.map((note, index) => <p key={index}>{note}</p>)}
         </div></PanelSectionRow>}
-        {guidance?.links.map(link => <PanelSectionRow key={link.url}><ButtonItem layout="below" disabled={modalOpen}
+        {guidanceNeedsAttention && guidance?.links.map(link => <PanelSectionRow key={link.url}><ButtonItem layout="below" disabled={modalOpen}
           onClick={() => SteamClient.System.OpenInSystemBrowser(link.url)}>{link.label}</ButtonItem></PanelSectionRow>)}
         {game.installation_status?.issues.map((issue, index) => <PanelSectionRow key={`${issue.code}-${index}`}><div className="helix-card" style={{ ...infoStyle, borderLeftColor: issue.blocking ? "#f1ca7e" : "#53c5d0" }}>
           <strong>{issue.title}</strong>{"\n"}{issue.reason}{"\n"}Next: {issue.steps.join(" ")}
@@ -610,14 +613,6 @@ function Content() {
         {installState?.reason && <PanelSectionRow><div role="status" style={infoStyle}>{installState.reason}</div></PanelSectionRow>}
         {game.recovery_available && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running} onClick={() => void interact(() => action("recover"))}>Recover interrupted file transaction</ButtonItem></PanelSectionRow>}
         {!!pluginUpdate?.pending && <PanelSectionRow><div style={infoStyle}>Finish or cancel the downloaded plugin update in Plugin updates before installing game files.</div></PanelSectionRow>}
-        {!!data?.model_catalog?.variants.length && <>
-          <PanelSectionRow><DropdownItem label="HelixSR model" rgOptions={data.model_catalog.variants.map(v => ({ label: `${v.label} · ${v.source}`, data: v.id }))}
-          selectedOption={variant || data.model_catalog.default} disabled={disabled}
-          onChange={option => setVariant(String(option.data))} /></PanelSectionRow>
-          <PanelSectionRow><div className="helix-muted">{data.model_catalog.note}</div></PanelSectionRow>
-        </>}
-        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || !installState?.allowed}
-          onClick={() => void interact(installOrUpdate)}>{submission.pending ? "Starting installation…" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
         {game.managed && !game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
           onClick={() => void interact(() => action("enable"))}>Enable HelixSR</ButtonItem></PanelSectionRow>}
         {game.managed && game.enabled && game.route === "optiscaler" && game.appid && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
@@ -630,6 +625,8 @@ function Content() {
           onOK={() => void run(() => cancelJob(job.id))} />))}>Cancel preparation</ButtonItem>}
         {diagnostics && <pre style={{ ...infoStyle, fontSize: "11px" }}>{job.log}</pre>}
       </div></PanelSectionRow>)}
+      <PanelSectionRow><div className="helix-card helix-muted">{libraryView.summary}</div></PanelSectionRow>
+      {libraryView.hint && <PanelSectionRow><div className="helix-muted">{libraryView.hint}</div></PanelSectionRow>}
       {(data?.warnings || []).length > 0 && <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiscoveryNotes(!discoveryNotes)}>
         {discoveryNotes ? "Hide discovery notes" : `Show discovery notes (${data!.warnings.length})`}</ButtonItem></PanelSectionRow>}
       {discoveryNotes && !!data?.warnings.length && <PanelSectionRow><div style={infoStyle}>{data.warnings.join("\n")}</div></PanelSectionRow>}
@@ -710,6 +707,21 @@ function Content() {
         Installed model: {game.installed_model || "not installed"}{"\n"}
         {game.reasons.join("\n")}
       </div></PanelSectionRow>
+        {!!data?.model_catalog?.variants.length && <>
+          <PanelSectionRow><DropdownItem label="HelixSR model" rgOptions={data.model_catalog.variants.map(v => ({ label: `${v.label} · ${v.source}`, data: v.id }))}
+          selectedOption={variant || data.model_catalog.default} disabled={disabled}
+          onChange={option => setVariant(String(option.data))} /></PanelSectionRow>
+          <PanelSectionRow><div className="helix-muted">{data.model_catalog.note}</div></PanelSectionRow>
+        </>}
+      {guidance && !guidanceNeedsAttention && <>
+        <PanelSectionRow><div className="helix-card" style={infoStyle}>
+          <strong>Next step: {guidance.headline}</strong>{"\n"}
+          {guidance.steps.join("\n\n")}
+          {guidance.notes.map((note, index) => <p key={index}>{note}</p>)}
+        </div></PanelSectionRow>
+        {guidance.links.map(link => <PanelSectionRow key={link.url}><ButtonItem layout="below" disabled={modalOpen}
+          onClick={() => SteamClient.System.OpenInSystemBrowser(link.url)}>{link.label}</ButtonItem></PanelSectionRow>)}
+      </>}
       <PanelSectionRow><div className="helix-muted">Downloads, required dependencies and the local network build are handled automatically. Administrator access is not needed for your own game folders.</div></PanelSectionRow>
       {game.managed && <>
         {game.menu_labels && <>
