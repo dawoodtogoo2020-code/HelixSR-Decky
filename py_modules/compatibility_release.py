@@ -1,11 +1,8 @@
-"""Explicit HelixSR 1.8.1 compatibility release policy.
+"""Explicit reviewed release policy for HelixSR 1.8.1 and pinned 1.9.3.
 
-The managers support the reviewed HelixSR 1.8.1 recipe only. Upstream 1.9.x
-changed the converter manifest, the Scaler tree and the licensing terms, so a
-newer "latest" release is rejected instead of silently falling back. The pinned
-1.8.1 identity applies only after the user explicitly selects compatibility.
-
-This module is pure: no network, cache, filesystem or clock access.
+Latest discovery remains separate from compatibility selection. Modern 1.9.3
+uses its own complete Scaler and unmodified converter adapter. Unknown versions
+and replaced modern archives stay blocked pending review.
 """
 
 import re
@@ -91,6 +88,10 @@ def require_supported_latest(release):
     if not isinstance(release, Mapping):
         raise ValueError("Latest HelixSR release metadata must be a mapping.")
     version = release.get("version")
+    if version == "1.9.3":
+        from modern_release import validate_release
+        validate_release(release)
+        return release
     if parse_version(version) > _COMPATIBLE_TUPLE:
         raise ValueError(
             f"Latest HelixSR {version} is not supported: HelixSR 1.9 and later "

@@ -102,9 +102,9 @@ class CompatibilityInstallTests(Fixtures):
         for version in ('1.9.0', '1.9.3', '2.0.0'):
             with self.subTest(version=version):
                 self.latest = release(version)
-                with self.assertRaisesRegex(ValueError, r'1\.8\.1|compatib'):
+                with self.assertRaisesRegex(ValueError, r'1\.8\.1|compatib|identity changed'):
                     self.m.preview_latest(self.game['id'])
-                with self.assertRaisesRegex(ValueError, r'1\.8\.1|compatib'):
+                with self.assertRaisesRegex(ValueError, r'1\.8\.1|compatib|identity changed'):
                     self.m.release_for_choice()
         self.assertFalse(self.m.worker)
         self.assertFalse(self.m.companion(self.game).exists())

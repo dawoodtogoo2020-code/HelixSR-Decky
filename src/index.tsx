@@ -606,7 +606,7 @@ function Content() {
         <PanelSectionRow><DropdownItem layout="below" label="Release to install" selectedOption={releaseChoice} disabled={disabled}
           rgOptions={[{ label: "Latest upstream", data: "latest" }, { label: "Compatible HelixSR 1.8.1", data: "compatible-1.8.1" }]}
           onChange={option => { selectedReleaseChoice = option.data; setReleaseChoice(option.data); }} /></PanelSectionRow>
-        <PanelSectionRow><div className="helix-muted">HelixSR 1.9 uses a newer installer and Scaler engine that this app does not yet support. Choose Compatible HelixSR 1.8.1 to install the reviewed version. Latest-version checks remain separate.</div></PanelSectionRow>
+        <PanelSectionRow><div className="helix-muted">HelixSR 1.9.3 is supported with Scaler 1.0.6. Its own frame generation is unavailable; alternative providers retain their settings and requirements. Compatible HelixSR 1.8.1 remains available.</div></PanelSectionRow>
         <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || !installState?.allowed}
           onClick={() => void interact(installOrUpdate)}>{submission.pending ? "Starting installation…" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
         {game.managed && !game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}

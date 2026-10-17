@@ -251,8 +251,8 @@ class MainWindow(QMainWindow):
         self.release_choice.addItem("Compatible HelixSR 1.8.1", "compatible-1.8.1")
         self.release_choice.setMinimumHeight(40)
         content.addWidget(self.release_choice)
-        release_note = QLabel("HelixSR 1.9 uses a newer installer and Scaler engine that this app does not yet support. "
-                             "Choose Compatible HelixSR 1.8.1 to install the reviewed version. Latest-version checks remain separate.")
+        release_note = QLabel("HelixSR 1.9.3 is supported with Scaler 1.0.6. Its own frame generation is unavailable; "
+                             "alternative providers retain their settings and requirements. Compatible HelixSR 1.8.1 remains available.")
         release_note.setWordWrap(True)
         content.addWidget(release_note)
         content.addWidget(QLabel("HelixSR model"))

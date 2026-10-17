@@ -7,6 +7,7 @@ adapter before they can become selectable in either frontend.
 import hashlib
 import json
 import struct
+import modern_release
 
 DEFAULT_VARIANT = 'helixsr-model-e'
 ADAPTER = 'separate-network-v1'
@@ -57,6 +58,7 @@ REVIEWED_RECIPES = {
     '712dc923a8149fc0d2fcc6099d2f87df11d77c5999323a41bbc71075c8bd647d': DEFAULT_VARIANT,
     # Official 1.8.1 replacement: installer-only converter edits; separate output unchanged.
     '93930e9c131c82fe7810181cc8e6bc81cf18e9203737a9d28d769be5983acaef': DEFAULT_VARIANT,
+    modern_release.RECIPE_SHA256: DEFAULT_VARIANT,
 }
 VARIANTS = {
     DEFAULT_VARIANT: dict(id=DEFAULT_VARIANT, label='HelixSR Model E',
@@ -96,6 +98,8 @@ def recipe_digest(package):
 
 def verify_recipe(package, variant_id=None):
     selected = select_variant(variant_id)
+    if (package / 'helixsr-scaler').is_dir():
+        return modern_release.verify_recipe(package)
     digest = recipe_digest(package)
     if REVIEWED_RECIPES.get(digest) != selected['id']:
         raise ValueError('This upstream model recipe needs support in an app update. '
@@ -130,6 +134,8 @@ def verify_outputs(package):
     if not manifest.is_file() or manifest.stat().st_size > 4096:
         raise ValueError('Generated HelixSR model identity is missing; see the build log')
     data = json.loads(manifest.read_text(encoding='utf-8'))
+    if isinstance(data, dict) and 'fp32' in data:
+        return modern_release.verify_outputs(package)
     if (not isinstance(data, dict) or set(data) != {'source_sha256', 'ptx_target', 'shaders', 'wave64', 'weights_sha256'}
             or data['source_sha256'] != SOURCE_SHA256 or data['weights_sha256'] != WEIGHTS_SHA256
             or data['ptx_target'] not in ('sm_80', 'sm_89') or type(data['wave64']) is not bool
