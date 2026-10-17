@@ -488,8 +488,11 @@ class Manager:
         target = Path(rec['target'])
         if not isinstance(rec.get('baseline'), dict) or not isinstance(rec.get('current'), dict):
             raise ValueError('Invalid configuration ownership record')
-        paths = [str((target / name).relative_to(root))
-                 for name in ('OptiScaler.ini', 'fakenvapi.ini')]
+        # Modern Scaler retires fakenvapi.ini by restoring its baseline. Keep
+        # its ownership and saved-edit history, but no longer read it as an
+        # active editable config (it can legitimately be absent).
+        names = ('OptiScaler.ini',) if modern_release.modern(rec) else ('OptiScaler.ini', 'fakenvapi.ini')
+        paths = [str((target / name).relative_to(root)) for name in names]
         mutable = []
         for rel in paths:
             if rel not in rec['current'] or rel not in rec['baseline']:
@@ -559,6 +562,11 @@ class Manager:
         if not isinstance(record, dict):
             return None
         if 'variant' in record and not valid_variant(record['variant']):
+            return None
+        if modern_release.modern(record) and (
+                record.get('release_sha256') != modern_release.RELEASE_SHA256
+                or not valid_variant(record.get('variant'))
+                or record['variant']['recipe_sha256'] != modern_release.RECIPE_SHA256):
             return None
         if 'variant' in record and (not isinstance(record.get('files'), dict)
                                     or 'helixsr_setup.json' not in record['files']):
@@ -632,7 +640,10 @@ class Manager:
                        and (path / name).is_file() and sha(path / name) == record['files'][name]
                        for name in record['files'])
             if verified and record.get('variant'):
-                verify_outputs(path)
+                if modern_release.modern(record):
+                    modern_release.verify_outputs(path)
+                else:
+                    verify_outputs(path)
                 api = pe_info(path / DLL)
                 verified = api['arch'] == 'x64' and bool(api['ffx'])
             return verified
@@ -1650,7 +1661,12 @@ class Manager:
         rec, root = self.record(game), Path(game['folder'])
         if package is AUTO_PACKAGE:
             package = self.package(game, data['route'])
-        modern = modern_release.modern(release or (package[2] if package else {}))
+        payload = release or (package[2] if package else {})
+        modern = modern_release.modern(payload)
+        if (data['route'] == 'optiscaler' and modern_release.modern(rec) and payload and not modern
+                and action in ('install', 'update', 'enable', 'latest')):
+            raise ValueError('Updating modern Scaler to legacy HelixSR is unsupported. '
+                             'Remove HelixSR to restore original files first, then install the compatibility release.')
         if modern and data['route'] == 'optiscaler' and action in ('install', 'update', 'enable', 'latest'):
             target = Path(data['target'])
             names = [dest for _, dest in modern_release.scaler_pairs()] + ['OptiScaler.ini', 'HelixSR/helixsr-install.json']

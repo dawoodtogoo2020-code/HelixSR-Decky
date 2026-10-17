@@ -1,5 +1,11 @@
 # HelixSR Decky: beginner installation guide
 
+### Finding controls in Decky
+
+Choose **Game** and **Release to install** at the top. HelixSR version checks sit with the game installation controls. Plugin version and updates are grouped immediately below, followed by **Import games**. Expand **Advanced game settings** for the overlay, optional menu labels and diagnostics.
+
+HelixSR 1.9.3 does not include its own frame generation. Alternative Scaler providers retain their settings and can be configured in Scaler's Frame Generation menu, subject to game, GPU and dependency requirements. Native FSR replacement installs use the game's available FG controls. A generic multiplier does not apply to every provider. To replace a modern Scaler installation with 1.8.1, remove HelixSR first to restore original files, then review a new installation.
+
 ## Installation error mentioning LICENSE-APACHE-2.0
 
 Decky **0.1.30** and Desktop **0.1.19** support the reviewed official **HelixSR 1.9.3** release and its complete **Scaler 1.0.6** package. Select **Latest upstream**, then Install/Update and review the version and terms. The converter runs unchanged and builds Model E locally. Alternative frame-generation settings are preserved; HelixSR's own frame generation is unavailable. **Compatible HelixSR 1.8.1** remains an explicit option. Unknown releases or replaced 1.9.3 archives require another reviewed app update.

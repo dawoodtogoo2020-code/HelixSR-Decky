@@ -124,6 +124,11 @@ function harness(overrides = {}) {
     return modal;
   }
   async function ready() { mount(); await flush(); render(); await flush(); render(); }
+  function openAdvanced() {
+    const button = walk(render(), node => node.type === "ButtonItem" && text(node) === "Show game settings, overlay and diagnostics")[0];
+    if (button) button.props.onClick();
+    render();
+  }
   function menuToggle() {
     const toggle = walk(render(), node => node.type === "ToggleField" && node.props.label === "Use HelixSR menu labels")[0];
     assert.ok(toggle, "optional menu label toggle is visible"); return toggle;
@@ -139,7 +144,7 @@ function harness(overrides = {}) {
     dropdown.props.onChange({ data: path }); await flush(); render();
   }
   return { game, library, calls, toasts, intervals, timeouts, ready, render, mount, unmount, text, openInstall,
-    chooseExecutable, menuToggle, openMenuChange, walk, installButton,
+    chooseExecutable, menuToggle, openMenuChange, openAdvanced, walk, installButton,
     count: route => calls.filter(call => call.route === route).length };
 }
 function job(state = "running") {
@@ -161,6 +166,7 @@ test("protected games remain in the dropdown with diagnostics and installation b
   assert.match(h.text(dropdown.props.rgOptions[0].label), /skate.*Needs review/);
   assert.match(h.text(h.render()), /Anti-cheat files detected/);
   assert.equal(h.installButton().props.disabled, true);
+  h.openAdvanced();
   const proxy = h.walk(h.render(), n => n.type === "ButtonItem" && /Review Proton proxy launch option/.test(h.text(n)))[0];
   assert.ok(proxy);
   assert.equal(proxy.props.disabled, true);
@@ -197,6 +203,7 @@ test("a blocked enabled installation cannot enable the Proton proxy", async () =
     installation_status: {state: "review", label: "Needs review", selectable: true,
       can_modify: false, can_restore: false, running: false, summary: "Anti-cheat detected", issues: []}});
   await h.ready();
+  h.openAdvanced();
   const proxy = h.walk(h.render(), n => n.type === "ButtonItem" && /Review Proton proxy launch option/.test(h.text(n)))[0];
   assert.ok(proxy);
   assert.equal(proxy.props.disabled, true);
@@ -213,6 +220,7 @@ test("menu labels stay off until review applies and the backend refresh confirms
   Object.assign(h.game, {managed: true, enabled: true, menu_labels: {available: true,
     supported: true, enabled: false, label: "Helix SR", reason: "Original menu retained", experimental: true}});
   await h.ready();
+  h.openAdvanced();
   assert.equal(h.menuToggle().props.checked, false);
   const modal = await h.openMenuChange(true);
   assert.equal(h.calls.filter(c => c.route === "preview_action").at(-1).args[1], "labels_enable");
@@ -229,6 +237,7 @@ test("unsupported menu profiles are disabled with an explanation", async () => {
   Object.assign(h.game, {managed: true, enabled: true, menu_labels: {available: false,
     supported: false, enabled: false, label: "Helix SR", reason: "Verified profile unavailable", experimental: true}});
   await h.ready();
+  h.openAdvanced();
   assert.equal(h.menuToggle().props.disabled, true);
   assert.match(h.text(h.render()), /Verified profile unavailable/);
   assert.match(h.text(h.render()), /does not verify the active upscaler/);
@@ -240,6 +249,7 @@ test("disabling menu labels uses a reviewed restore request and cancel changes n
   Object.assign(h.game, {managed: true, enabled: true, menu_labels: {available: true,
     supported: true, enabled: true, label: "Helix SR", reason: "Enabled", experimental: true}});
   await h.ready();
+  h.openAdvanced();
   const modal = await h.openMenuChange(false);
   assert.match(modal.element.props.strTitle, /Restore original menu labels/);
   assert.equal(h.calls.filter(c => c.route === "preview_action").at(-1).args[1], "labels_disable");
@@ -359,4 +369,18 @@ test("explicit compatible release survives remount and confirms its exact versio
   assert.equal(h.count("set_license"), 1);
   assert.equal(h.count("install_latest"), 1);
   assert.equal(h.calls.find(call => call.route === "set_license").args[1], "compat-token");
+});
+
+
+test("primary controls precede collapsed advanced settings", async () => {
+  const h = harness(); await h.ready();
+  const tree = h.render();
+  const dropdowns = h.walk(tree, n => n.type === "DropdownItem");
+  assert.deepEqual(dropdowns.slice(0, 2).map(n => n.props.label), ["Game", "Release to install"]);
+  const sections = h.walk(tree, n => n.type === "PanelSection").map(n => n.props.title);
+  assert.ok(sections.indexOf("Plugin updates") < sections.indexOf("Import games"));
+  assert.ok(sections.indexOf("Import games") < sections.indexOf("Advanced game settings"));
+  assert.equal(h.walk(tree, n => n.type === "ToggleField" && /status overlay/.test(n.props.label)).length, 0);
+  h.openAdvanced();
+  assert.equal(h.walk(h.render(), n => n.type === "ToggleField" && /status overlay/.test(n.props.label)).length, 1);
 });
