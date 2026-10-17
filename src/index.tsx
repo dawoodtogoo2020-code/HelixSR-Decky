@@ -258,7 +258,8 @@ function Content() {
   const [variant, setVariant] = useState<string>();
   const [diagnostics, setDiagnostics] = useState(false);
   const [discoveryNotes, setDiscoveryNotes] = useState(false);
-  const [setupOptions, setSetupOptions] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [unavailableGames, setUnavailableGames] = useState(false);
   const [importOpen, setImportOpen] = useState(!!pendingFolders.length);
   const [launcher, setLauncher] = useState(selectedLauncher);
@@ -427,7 +428,7 @@ function Content() {
     installSession.clearError();
     if (releaseChoice === "latest") {
       const currentRelease = await run(() => checkUpdates(true));
-      if (!currentRelease?.version || currentRelease.error) { setError(currentRelease?.error || "Could not check the latest HelixSR release. Retry Check latest HelixSR version in Updates."); return; }
+      if (!currentRelease?.version || currentRelease.error) { setError(currentRelease?.error || "Could not check the latest HelixSR release. Retry Check latest HelixSR version beside the release selection."); return; }
       setData(d => d ? { ...d, release: currentRelease } : d);
     }
     const executable = !game.managed && game.route === "optiscaler" ? game.selected_executable : undefined;
@@ -548,6 +549,7 @@ function Content() {
     : selectedStatus?.summary;
   const installState = game ? installReadiness(game, dx12) : undefined;
   const guidance = submission.pending ? undefined : nextStep(game?.setup_guidance, jobs.find(job => job.state === "running"));
+  const guidanceNeedsAttention = selectedStatus?.review || installState?.allowed === false;
   const infoStyle = { fontSize: "13px", lineHeight: "1.45", overflowWrap: "anywhere" as const, whiteSpace: "pre-wrap" as const };
 
   return <div className="helixsr-decky">
@@ -562,32 +564,39 @@ function Content() {
       .helixsr-decky .helix-muted{color:#c5d1df;font-size:12px}
       .helixsr-decky .helix-status{color:#8ee8bc}`}</style>
     <PanelSection title="Games">
-      {submission.pending && <PanelSectionRow><div className="helix-card" style={infoStyle} role="status">
-        <strong>{submission.name}: Starting installation…</strong>{"\n"}{submission.message}
-      </div></PanelSectionRow>}
-      {!!submission.error && <PanelSectionRow><div className="helix-card" role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>
-        <strong>{submission.name}: Installation could not start</strong>{"\n"}{submission.error}
-      </div></PanelSectionRow>}
-      <PanelSectionRow><div className="helix-card helix-muted">{libraryView.summary}</div></PanelSectionRow>
-      {libraryView.hint && <PanelSectionRow><div className="helix-muted">{libraryView.hint}</div></PanelSectionRow>}
-      {!!libraryError && <PanelSectionRow><div style={infoStyle}>{libraryError}</div></PanelSectionRow>}
-      {(data?.warnings || []).length > 0 && <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiscoveryNotes(!discoveryNotes)}>
-        {discoveryNotes ? "Hide discovery notes" : `Show discovery notes (${data!.warnings.length})`}</ButtonItem></PanelSectionRow>}
-      {discoveryNotes && !!data?.warnings.length && <PanelSectionRow><div style={infoStyle}>{data.warnings.join("\n")}</div></PanelSectionRow>}
       <div className={`${selectedStatus?.installed ? "helix-installed" : ""} helix-selected`}><PanelSectionRow>
         <DropdownItem layout="below" label="Game" menuLabel="Detected games" selectedOption={selected}
           strDefaultLabel={games.length ? "Select a game" : libraryGames.length ? "See unavailable games below" : "No games available to select"} disabled={busy || modalOpen || !games.length}
           rgOptions={games.map(g => ({ data: g.id, label: <span style={{ borderLeft: `3px solid ${gameStatus(g).color}`, paddingLeft: 8 }}>{g.name} · {gameStatus(g).label}</span> }))}
           onChange={option => chooseGame(String(option.data))} />
       </PanelSectionRow></div>
+      <PanelSectionRow><DropdownItem layout="below" label="Release to install" selectedOption={releaseChoice} disabled={disabled}
+        rgOptions={[{ label: "Latest upstream", data: "latest" }, { label: "Compatible HelixSR 1.8.1", data: "compatible-1.8.1" }]}
+        onChange={option => { selectedReleaseChoice = option.data; setReleaseChoice(option.data); }} /></PanelSectionRow>
+      <PanelSectionRow><div className="helix-muted">1.9.3: Scaler 1.0.6; HelixSR frame generation withdrawn.</div></PanelSectionRow>
+      <PanelSectionRow><div className="helix-card" style={infoStyle}>Current HelixSR: {game ? game.installed_version || "not installed" : "select a game"}{"\n"}
+        Latest HelixSR: {data?.release?.version || "checking required"}</div></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen} onClick={() => void run(() => checkUpdates(true)).then(r => { if (r) setData(d => d ? { ...d, release: r } : d); })}>Check latest HelixSR version</ButtonItem></PanelSectionRow>
+      {data?.release?.error && <PanelSectionRow><div className="helix-muted">{data.release.error}</div></PanelSectionRow>}
+      {game && <>
+        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || !installState?.allowed}
+          onClick={() => void interact(installOrUpdate)}>{submission.pending ? "Starting installation…" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
+      </>}
+      {submission.pending && <PanelSectionRow><div className="helix-card" style={infoStyle} role="status">
+        <strong>{submission.name}: Starting installation…</strong>{"\n"}{submission.message}
+      </div></PanelSectionRow>}
+      {!!submission.error && <PanelSectionRow><div className="helix-card" role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>
+        <strong>{submission.name}: Installation could not start</strong>{"\n"}{submission.error}
+      </div></PanelSectionRow>}
+      {!!libraryError && <PanelSectionRow><div style={infoStyle}>{libraryError}</div></PanelSectionRow>}
       {game && <>
         {!submission.pending && <PanelSectionRow><div className="helix-muted" style={{ color: selectedStatus?.color }}>{selectedSummary}</div></PanelSectionRow>}
-        {guidance && <PanelSectionRow><div className="helix-card" style={infoStyle}>
+        {guidance && guidanceNeedsAttention && <PanelSectionRow><div className="helix-card" style={infoStyle}>
           <strong>Next step: {guidance.headline}</strong>{"\n"}
           {guidance.steps.join("\n\n")}
           {guidance.notes.map((note, index) => <p key={index}>{note}</p>)}
         </div></PanelSectionRow>}
-        {guidance?.links.map(link => <PanelSectionRow key={link.url}><ButtonItem layout="below" disabled={modalOpen}
+        {guidanceNeedsAttention && guidance?.links.map(link => <PanelSectionRow key={link.url}><ButtonItem layout="below" disabled={modalOpen}
           onClick={() => SteamClient.System.OpenInSystemBrowser(link.url)}>{link.label}</ButtonItem></PanelSectionRow>)}
         {game.installation_status?.issues.map((issue, index) => <PanelSectionRow key={`${issue.code}-${index}`}><div className="helix-card" style={{ ...infoStyle, borderLeftColor: issue.blocking ? "#f1ca7e" : "#53c5d0" }}>
           <strong>{issue.title}</strong>{"\n"}{issue.reason}{"\n"}Next: {issue.steps.join(" ")}
@@ -602,13 +611,8 @@ function Content() {
         {game.dx12_confirmation_needed && <PanelSectionRow><ToggleField label="Game is set to DirectX 12"
           description="Confirm the renderer selected in the game." checked={dx12} onChange={setDx12} disabled={disabled} /></PanelSectionRow>}
         {installState?.reason && <PanelSectionRow><div role="status" style={infoStyle}>{installState.reason}</div></PanelSectionRow>}
+        {game.recovery_available && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running} onClick={() => void interact(() => action("recover"))}>Recover interrupted file transaction</ButtonItem></PanelSectionRow>}
         {!!pluginUpdate?.pending && <PanelSectionRow><div style={infoStyle}>Finish or cancel the downloaded plugin update in Plugin updates before installing game files.</div></PanelSectionRow>}
-        <PanelSectionRow><DropdownItem layout="below" label="Release to install" selectedOption={releaseChoice} disabled={disabled}
-          rgOptions={[{ label: "Latest upstream", data: "latest" }, { label: "Compatible HelixSR 1.8.1", data: "compatible-1.8.1" }]}
-          onChange={option => { selectedReleaseChoice = option.data; setReleaseChoice(option.data); }} /></PanelSectionRow>
-        <PanelSectionRow><div className="helix-muted">HelixSR 1.9 uses a newer installer and Scaler engine that this app does not yet support. Choose Compatible HelixSR 1.8.1 to install the reviewed version. Latest-version checks remain separate.</div></PanelSectionRow>
-        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || !installState?.allowed}
-          onClick={() => void interact(installOrUpdate)}>{submission.pending ? "Starting installation…" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
         {game.managed && !game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
           onClick={() => void interact(() => action("enable"))}>Enable HelixSR</ButtonItem></PanelSectionRow>}
         {game.managed && game.enabled && game.route === "optiscaler" && game.appid && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
@@ -621,79 +625,16 @@ function Content() {
           onOK={() => void run(() => cancelJob(job.id))} />))}>Cancel preparation</ButtonItem>}
         {diagnostics && <pre style={{ ...infoStyle, fontSize: "11px" }}>{job.log}</pre>}
       </div></PanelSectionRow>)}
+      <PanelSectionRow><div className="helix-card helix-muted">{libraryView.summary}</div></PanelSectionRow>
+      {libraryView.hint && <PanelSectionRow><div className="helix-muted">{libraryView.hint}</div></PanelSectionRow>}
+      {(data?.warnings || []).length > 0 && <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiscoveryNotes(!discoveryNotes)}>
+        {discoveryNotes ? "Hide discovery notes" : `Show discovery notes (${data!.warnings.length})`}</ButtonItem></PanelSectionRow>}
+      {discoveryNotes && !!data?.warnings.length && <PanelSectionRow><div style={infoStyle}>{data.warnings.join("\n")}</div></PanelSectionRow>}
       <PanelSectionRow><ButtonItem layout="below" onClick={() => void refresh()} disabled={busy || modalOpen}>Refresh library and status</ButtonItem></PanelSectionRow>
       {!!unavailable.length && <PanelSectionRow><ButtonItem layout="below" onClick={() => setUnavailableGames(!unavailableGames)}>{unavailableGames ? "Hide unavailable games" : `Unavailable games (${unavailable.length})`}</ButtonItem></PanelSectionRow>}
       {unavailableGames && unavailable.map(g => <PanelSectionRow key={g.id}><div className="helix-card helix-muted">{g.name}{"\n"}{g.installation_status?.issues.map(i => `${i.title}: ${i.reason}\nNext: ${i.steps.join(" ")}`).join("\n\n") || g.reasons.join("\n") || "No supported upscaler detected"}</div></PanelSectionRow>)}
       {error && <PanelSectionRow><div role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>{error}</div></PanelSectionRow>}
     </PanelSection>
-    {game && <PanelSection title="Status overlay">
-      <PanelSectionRow><ToggleField label="Show HelixSR status overlay (experimental)"
-        description="Checks the HUD helper and monitors new session log events. Enable before launching the game."
-        checked={!!overlay?.enabled && overlay.game_id === game.id} disabled={busy || modalOpen}
-        onChange={enabled => void run(() => setStatusOverlay(game.id, enabled, executableRef.current)).then(value => { if (value) publishOverlayStatus(value); })} /></PanelSectionRow>
-      {!!overlay?.enabled && overlay.game_id === game.id && <PanelSectionRow><div className="helix-card" style={infoStyle}>
-        {overlay.overlay.label}{"\n"}{overlay.overlay.detail}{"\n\n"}
-        {overlay.runtime.label}{"\n"}{overlay.runtime.detail}
-      </div></PanelSectionRow>}
-      <PanelSectionRow><div className="helix-muted">A mapped HUD confirms the helper responds; it does not prove the HUD is visible. New dispatch events report neural output, not image quality or active frame generation. Other overlays and game settings are left unchanged.</div></PanelSectionRow>
-    </PanelSection>}
-    {game && <PanelSection title={game.name}>
-      <PanelSectionRow><div className="helix-card" style={infoStyle}>
-        {game.source} · {game.compatibility}{"\n"}
-        {game.managed ? "Recorded route" : "Detected route"}: {game.route === "direct" ? "Native FSR 3.1 replacement" : game.route === "optiscaler" ? "OptiScaler proxy" : "None detected"}{"\n"}
-        {selectedSummary}{"\n"}
-        Prepared: {game.package_version || "none on this drive"}{"\n"}
-        Installed model: {game.installed_model || "not installed"}{"\n"}
-        {game.reasons.join("\n")}
-      </div></PanelSectionRow>
-      {!!data?.model_catalog?.variants.length && <>
-        <PanelSectionRow><DropdownItem label="HelixSR model" rgOptions={data.model_catalog.variants.map(v => ({ label: `${v.label} · ${v.source}`, data: v.id }))}
-          selectedOption={variant || data.model_catalog.default} disabled={disabled}
-          onChange={option => setVariant(String(option.data))} /></PanelSectionRow>
-        <PanelSectionRow><div className="helix-muted">{data.model_catalog.note}</div></PanelSectionRow>
-      </>}
-      <PanelSectionRow><div className="helix-muted">Downloads, required dependencies and the local network build are handled automatically. Administrator access is not needed for your own game folders.</div></PanelSectionRow>
-      {game.managed && <>
-        {game.menu_labels && <>
-          <PanelSectionRow><ToggleField label="Use HelixSR menu labels" checked={game.menu_labels.enabled}
-            disabled={disabled || !game.menu_labels.available}
-            onChange={enabled => void interact(() => action(enabled ? "labels_enable" : "labels_disable"))} /></PanelSectionRow>
-          <PanelSectionRow><div className="helix-muted">{game.menu_labels.reason} This changes menu text only and does not verify the active upscaler.</div></PanelSectionRow>
-        </>}
-        {game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)}
-          onClick={() => void interact(() => action("disable"))}>Disable HelixSR</ButtonItem></PanelSectionRow>}
-        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)} onClick={() => void interact(() => action("remove"))}>Remove and restore originals</ButtonItem></PanelSectionRow>
-      </>}
-      {game.recovery_available && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running} onClick={() => void interact(() => action("recover"))}>Recover interrupted file transaction</ButtonItem></PanelSectionRow>}
-      {game.source === "Imported" && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.managed}
-        onClick={() => void run(() => forgetGame(game.id)).then(result => { if (result) { setData(cacheLibrary(result)); chooseGame(""); } })}>Forget imported folder</ButtonItem></PanelSectionRow>}
-    </PanelSection>}
-    {game && <PanelSection title="OptiScaler and frame generation">
-      <PanelSectionRow><div style={infoStyle}>
-        OptiScaler installed: {game.optiscaler.present === null ? "not inspected" : game.optiscaler.present ? "yes" : "no detected files"}{"\n"}
-        OptiScaler HelixSR route configured: {game.optiscaler.helix_configured ? "yes" : "no"}{"\n"}
-        OptiScaler runtime: {game.optiscaler.runtime}{"\n"}
-        HelixSR runtime: {game.helix_runtime}{"\n"}
-        Frame generation: {game.framegen_summary}{"\n"}
-        {game.framegen.map(f => `${f.source} · ${f.key}: ${f.value} (${f.meaning})`).join("\n")}{"\n"}
-        HelixSR has no frame generation of its own. Settings and runtime evidence are separate.
-      </div></PanelSectionRow>
-      {game.route === "optiscaler" && <PanelSectionRow><div style={infoStyle}>
-        Target: {game.main_exe || game.target || "unknown"}{"\n"}
-        {(game.optiscaler.setup?.checks || []).join("\n\n")}
-      </div></PanelSectionRow>}
-      {game.route === "optiscaler" && game.appid && <>
-        {!(game.managed && game.enabled) && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false} onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>}
-        <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void interact(() => launchChange(true))}>Restore plugin launch-option change</ButtonItem></PanelSectionRow>
-      </>}
-      <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiagnostics(!diagnostics)}>{diagnostics ? "Hide diagnostics" : "Show diagnostics and logs"}</ButtonItem></PanelSectionRow>
-      {diagnostics && <PanelSectionRow><div style={infoStyle}>
-        Folder: {game.folder}{"\n"}Launch options: {game.launch_options || "none detected"}{"\n"}
-        {(game.awareness_warnings || []).join("\n")}{"\n"}
-        {Object.entries(game.optiscaler.setup?.settings || {}).map(([key, value]) => `${key}=${value}`).join("\n")}{"\n"}
-        {(game.logs || []).map(l => `${l.path}\n${new Date(l.modified * 1000).toLocaleString()}\n${l.excerpt}`).join("\n\n") || "No supported logs found"}
-      </div></PanelSectionRow>}
-    </PanelSection>}
     <PanelSection title="Plugin updates">
       <PanelSectionRow><div className="helix-card" style={{ ...infoStyle, borderLeftColor: pluginUpdate?.update_available ? "#ad8aff" : "#55cd92" }}>
         Current plugin: {pluginUpdate?.current_version || "loading…"}{"\n"}
@@ -713,31 +654,6 @@ function Content() {
         onClick={() => void interact(cancelDownloadedPlugin)}>Cancel downloaded update</ButtonItem></PanelSectionRow>}
       {pluginUpdate?.pending && <PanelSectionRow><div className="helix-muted">{pluginInstallMessage || "Press Update in Decky's confirmation to finish. Close that screen before reopening it here. Restart Decky if installation status is unresolved."}</div></PanelSectionRow>}
       {pluginUpdate?.error && <PanelSectionRow><div className="helix-muted">{pluginUpdate.error}</div></PanelSectionRow>}
-    </PanelSection>
-    <PanelSection title="HelixSR updates">
-      <PanelSectionRow><div className="helix-card" style={infoStyle}>Current HelixSR: {game?.installed_version || "not installed"}{"\n"}
-        Latest HelixSR: {data?.release?.version || "checking required"}</div></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen} onClick={() => void run(() => checkUpdates(true)).then(r => { if (r) setData(d => d ? { ...d, release: r } : d); })}>Check latest HelixSR version</ButtonItem></PanelSectionRow>
-      <PanelSectionRow><div className="helix-muted">Checks the release version. Use the selected game's Install or Update button to apply it.</div></PanelSectionRow>
-      {data?.release?.error && <PanelSectionRow><div className="helix-muted">{data.release.error}</div></PanelSectionRow>}
-      <PanelSectionRow><ButtonItem layout="below" onClick={() => setSetupOptions(!setupOptions)}>{setupOptions ? "Hide preparation settings" : "Preparation settings"}</ButtonItem></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => void interact(async () => openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle="Installation guide" strOKButtonText="Done"
-        strDescription={<div><p>1. Choose a detected game from the Game dropdown. Green means HelixSR is present; purple highlights the install/update action.</p>
-          <p>2. Choose Install HelixSR or Update HelixSR and review the change. Required downloads and the local network build happen automatically.</p>
-          <p>3. Wait for completion, then launch the game with DirectX 12. Choose AMD FSR for a native replacement, or the appropriate DLSS/XeSS/FSR input for OptiScaler.</p>
-          <p>For an OptiScaler Steam game, use Review Proton proxy launch option to save its required override while preserving your other options.</p>
-          <p>For launcher games, scroll to Import games, choose Import Games From, select Heroic or Lutris, then Import Now. Supported installed games appear in the Game dropdown. For other locations, open Manage Games Folders, add each game folder, then Import selected folders.</p>
-          <p>Administrator access is unnecessary for writable folders owned by you.</p>
-          <p>Disable and Remove restore the original game files. Unsupported renderers and protected games cannot be made compatible by administrator access.</p></div>} />))}>
-        Installation guide</ButtonItem></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/dawoodtogoo2020-code/HelixSR-Decky/blob/main/INSTALL_GUIDE.md")}>Open full guide</ButtonItem></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml")}>Report a problem</ButtonItem></PanelSectionRow>
-      {setupOptions && <>
-      <PanelSectionRow><div className="helix-muted">Accept preparation terms in the selected game's installation review. Consent applies to that release, archive and model. Generated network files stay on this device.</div></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser(releaseChoice === "compatible-1.8.1"
-        ? "https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE" : "https://github.com/lonewolf0622/HelixSR/blob/main/LICENSE")}>Read HelixSR license</ButtonItem></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/NVIDIA/DLSS/blob/v310.7.0/LICENSE.txt")}>Read NVIDIA DLSS license</ButtonItem></PanelSectionRow>
-      </>}
     </PanelSection>
     <PanelSection title="Import games">
       <PanelSectionRow><DropdownItem layout="below" label="Import Games From" menuLabel="Import Games From"
@@ -764,6 +680,109 @@ function Content() {
       <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !folders.length} onClick={() => void run(() => importFolders(folders)).then(result => {
         if (result) { setData(cacheLibrary(result)); queueFolders([]); }
       })}>Import selected folders ({folders.length})</ButtonItem></PanelSectionRow>
+      </>}
+    </PanelSection>
+    {game && <PanelSection title="Advanced game settings">
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => setAdvancedOpen(!advancedOpen)}>
+        {advancedOpen ? "Hide advanced settings" : "Show game settings, overlay and diagnostics"}</ButtonItem></PanelSectionRow>
+    </PanelSection>}
+    {game && advancedOpen && <>
+    {game && <PanelSection title="Status overlay">
+      <PanelSectionRow><ToggleField label="Show HelixSR status overlay (experimental)"
+        description="Checks the HUD helper and monitors new session log events. Enable before launching the game."
+        checked={!!overlay?.enabled && overlay.game_id === game.id} disabled={busy || modalOpen}
+        onChange={enabled => void run(() => setStatusOverlay(game.id, enabled, executableRef.current)).then(value => { if (value) publishOverlayStatus(value); })} /></PanelSectionRow>
+      {!!overlay?.enabled && overlay.game_id === game.id && <PanelSectionRow><div className="helix-card" style={infoStyle}>
+        {overlay.overlay.label}{"\n"}{overlay.overlay.detail}{"\n\n"}
+        {overlay.runtime.label}{"\n"}{overlay.runtime.detail}
+      </div></PanelSectionRow>}
+      <PanelSectionRow><div className="helix-muted">A mapped HUD confirms the helper responds; it does not prove the HUD is visible. New dispatch events report neural output, not image quality or active frame generation. Other overlays and game settings are left unchanged.</div></PanelSectionRow>
+    </PanelSection>}
+    {game && <PanelSection title={game.name}>
+      <PanelSectionRow><div className="helix-card" style={infoStyle}>
+        {game.source} · {game.compatibility}{"\n"}
+        {game.managed ? "Recorded route" : "Detected route"}: {game.route === "direct" ? "Native FSR 3.1 replacement" : game.route === "optiscaler" ? "OptiScaler proxy" : "None detected"}{"\n"}
+        {selectedSummary}{"\n"}
+        Prepared: {game.package_version || "none on this drive"}{"\n"}
+        Installed model: {game.installed_model || "not installed"}{"\n"}
+        {game.reasons.join("\n")}
+      </div></PanelSectionRow>
+        {!!data?.model_catalog?.variants.length && <>
+          <PanelSectionRow><DropdownItem label="HelixSR model" rgOptions={data.model_catalog.variants.map(v => ({ label: `${v.label} · ${v.source}`, data: v.id }))}
+          selectedOption={variant || data.model_catalog.default} disabled={disabled}
+          onChange={option => setVariant(String(option.data))} /></PanelSectionRow>
+          <PanelSectionRow><div className="helix-muted">{data.model_catalog.note}</div></PanelSectionRow>
+        </>}
+      {guidance && !guidanceNeedsAttention && <>
+        <PanelSectionRow><div className="helix-card" style={infoStyle}>
+          <strong>Next step: {guidance.headline}</strong>{"\n"}
+          {guidance.steps.join("\n\n")}
+          {guidance.notes.map((note, index) => <p key={index}>{note}</p>)}
+        </div></PanelSectionRow>
+        {guidance.links.map(link => <PanelSectionRow key={link.url}><ButtonItem layout="below" disabled={modalOpen}
+          onClick={() => SteamClient.System.OpenInSystemBrowser(link.url)}>{link.label}</ButtonItem></PanelSectionRow>)}
+      </>}
+      <PanelSectionRow><div className="helix-muted">Downloads, required dependencies and the local network build are handled automatically. Administrator access is not needed for your own game folders.</div></PanelSectionRow>
+      {game.managed && <>
+        {game.menu_labels && <>
+          <PanelSectionRow><ToggleField label="Use HelixSR menu labels" checked={game.menu_labels.enabled}
+            disabled={disabled || !game.menu_labels.available}
+            onChange={enabled => void interact(() => action(enabled ? "labels_enable" : "labels_disable"))} /></PanelSectionRow>
+          <PanelSectionRow><div className="helix-muted">{game.menu_labels.reason} This changes menu text only and does not verify the active upscaler.</div></PanelSectionRow>
+        </>}
+        {game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)}
+          onClick={() => void interact(() => action("disable"))}>Disable HelixSR</ButtonItem></PanelSectionRow>}
+        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)} onClick={() => void interact(() => action("remove"))}>Remove and restore originals</ButtonItem></PanelSectionRow>
+      </>}
+      {game.source === "Imported" && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.managed}
+        onClick={() => void run(() => forgetGame(game.id)).then(result => { if (result) { setData(cacheLibrary(result)); chooseGame(""); } })}>Forget imported folder</ButtonItem></PanelSectionRow>}
+    </PanelSection>}
+    {game && <PanelSection title="OptiScaler and frame generation">
+      <PanelSectionRow><div style={infoStyle}>
+        OptiScaler installed: {game.optiscaler.present === null ? "not inspected" : game.optiscaler.present ? "yes" : "no detected files"}{"\n"}
+        OptiScaler HelixSR route configured: {game.optiscaler.helix_configured ? "yes" : "no"}{"\n"}
+        OptiScaler runtime: {game.optiscaler.runtime}{"\n"}
+        HelixSR runtime: {game.helix_runtime}{"\n"}
+        Frame generation: {game.framegen_summary}{"\n"}
+        {game.framegen.map(f => `${f.source} · ${f.key}: ${f.value} (${f.meaning})`).join("\n")}{"\n"}
+        HelixSR 1.9.3 withdraws HelixSR frame generation. Alternative providers have their own compatibility and settings. Detected settings do not prove active frame generation.
+      </div></PanelSectionRow>
+      {game.route === "optiscaler" && <PanelSectionRow><div style={infoStyle}>
+        Target: {game.main_exe || game.target || "unknown"}{"\n"}
+        {(game.optiscaler.setup?.checks || []).join("\n\n")}
+      </div></PanelSectionRow>}
+      {game.route === "optiscaler" && game.appid && <>
+        {!(game.managed && game.enabled) && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false} onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>}
+        <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void interact(() => launchChange(true))}>Restore plugin launch-option change</ButtonItem></PanelSectionRow>
+      </>}
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => setDiagnostics(!diagnostics)}>{diagnostics ? "Hide diagnostics" : "Show diagnostics and logs"}</ButtonItem></PanelSectionRow>
+      {diagnostics && <PanelSectionRow><div style={infoStyle}>
+        Folder: {game.folder}{"\n"}Launch options: {game.launch_options || "none detected"}{"\n"}
+        {(game.awareness_warnings || []).join("\n")}{"\n"}
+        {Object.entries(game.optiscaler.setup?.settings || {}).map(([key, value]) => `${key}=${value}`).join("\n")}{"\n"}
+        {(game.logs || []).map(l => `${l.path}\n${new Date(l.modified * 1000).toLocaleString()}\n${l.excerpt}`).join("\n\n") || "No supported logs found"}
+      </div></PanelSectionRow>}
+    </PanelSection>}
+    </>}
+    <PanelSection title="Help and licenses">
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => setHelpOpen(!helpOpen)}>
+        {helpOpen ? "Hide help and licenses" : "Show help and licenses"}</ButtonItem></PanelSectionRow>
+      {helpOpen && <>
+      <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => void interact(async () => openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle="Installation guide" strOKButtonText="Done"
+        strDescription={<div><p>1. Choose a detected game from the Game dropdown. Green means HelixSR is present; purple highlights the install/update action.</p>
+          <p>2. Choose Install HelixSR or Update HelixSR and review the change. Required downloads and the local network build happen automatically.</p>
+          <p>3. Wait for completion, then launch the game with DirectX 12. Choose AMD FSR for a native replacement, or the appropriate DLSS/XeSS/FSR input for OptiScaler.</p>
+          <p>For an OptiScaler Steam game, use Review Proton proxy launch option to save its required override while preserving your other options.</p>
+          <p>For launcher games, open Import games, choose Import Games From, select Heroic or Lutris, then Import Now. Supported installed games appear in the Game dropdown. For other locations, open Manage Games Folders, add each game folder, then Import selected folders.</p>
+          <p>Administrator access is unnecessary for writable folders owned by you.</p>
+          <p>Disable and Remove restore the original game files. Unsupported renderers and protected games cannot be made compatible by administrator access.</p></div>} />))}>
+        Installation guide</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/dawoodtogoo2020-code/HelixSR-Decky/blob/main/INSTALL_GUIDE.md")}>Open full guide</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml")}>Report a problem</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><div className="helix-muted">Accept preparation terms in the selected game's installation review. Consent applies to that release, archive and model. Generated network files stay on this device.</div></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser(releaseChoice === "compatible-1.8.1"
+        ? "https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE" : "https://github.com/lonewolf0622/HelixSR/blob/main/LICENSE")}>Read HelixSR license</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/NVIDIA/DLSS/blob/v310.7.0/LICENSE.txt")}>Read NVIDIA DLSS license</ButtonItem></PanelSectionRow>
       </>}
     </PanelSection>
   </div>;

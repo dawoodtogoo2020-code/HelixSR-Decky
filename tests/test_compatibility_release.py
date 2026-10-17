@@ -127,7 +127,7 @@ class LatestGuardTests(unittest.TestCase):
                 self.assertEqual(release, snapshot)
 
     def test_unsupported_newer_versions(self):
-        for version in ("1.9.0", "1.9.3", "1.10.0", "2.0.0", "10.0.0", "1.8.2"):
+        for version in ("1.9.0", "1.10.0", "2.0.0", "10.0.0", "1.8.2"):
             with self.subTest(version=version):
                 with self.assertRaises(ValueError) as ctx:
                     cr.require_supported_latest({"version": version})

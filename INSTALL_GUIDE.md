@@ -1,8 +1,14 @@
 # HelixSR Decky: beginner installation guide
 
+## Finding controls in Decky
+
+Choose **Game** and **Release to install** at the top. HelixSR version checks sit with the game installation controls. Plugin version and updates are grouped immediately below, followed by **Import games**. Expand **Advanced game settings** for model settings, the overlay, optional menu labels, diagnostics, **Disable HelixSR** and **Remove and restore originals**.
+
+HelixSR 1.9.3 does not include its own frame generation. Alternative Scaler providers retain their settings and can be configured in Scaler's Frame Generation menu, subject to game, GPU and dependency requirements. Native FSR replacement installs use the game's available FG controls. A generic multiplier does not apply to every provider. To replace a modern Scaler installation with 1.8.1, remove HelixSR first to restore original files, then review a new installation.
+
 ## Installation error mentioning LICENSE-APACHE-2.0
 
-HelixSR 1.9 changed its license files, converter and Scaler installation layout. Our older preparation adapter cannot install it by ignoring the missing filename. Update to **Decky 0.1.29** or **Desktop 0.1.18**, select your game, set **Release to install → Compatible HelixSR 1.8.1**, then choose Install/Update and review the version and terms. This installs the reviewed 1.8.1 release; it does not install upstream 1.9.3 or its newer Scaler engine. Latest-version checks still report the newest upstream release.
+Decky **0.1.30** and Desktop **0.1.19** support the reviewed official **HelixSR 1.9.3** release and its complete **Scaler 1.0.6** package. Select **Latest upstream**, then Install/Update and review the version and terms. The converter runs unchanged and builds Model E locally. Alternative frame-generation settings are preserved; HelixSR's own frame generation is unavailable. **Compatible HelixSR 1.8.1** remains an explicit option. Unknown releases or replaced 1.9.3 archives require another reviewed app update.
 
 The compatibility download is tied to the reviewed official archive SHA-256 and the [1.8.1 license](https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE). A replaced archive is rejected. Newer or unverified existing installations are blocked from being downgraded; remove them using their owning manager first. Keep locally generated networks and game installation records.
 
@@ -12,7 +18,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Download the [Decky 0.1.29 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.29/HelixSR-Decky-0.1.29.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
+3. Download the [Decky 0.1.30 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.30/HelixSR-Decky-0.1.30.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -129,7 +135,7 @@ For the **Decky plugin itself**:
 
 For **HelixSR inside a game**, and troubleshooting:
 
-1. In **HelixSR updates**, choose **Check for updates**, select a game, then **Update HelixSR** and review the change. Updates apply per game. Close it and wait for completion again. Updating the Decky plugin does not replace a game's HelixSR files.
+1. Select a game and release, choose **Check latest HelixSR version**, then **Update this game's HelixSR** and review the change. Updates apply per game. Close it and wait for completion again. Updating the Decky plugin does not replace a game's HelixSR files.
    The plugin follows the latest official stable HelixSR ZIP even if its size changes or upstream replaces the ZIP without changing the version number. New preparation checks the latest asset metadata, and changed bytes require fresh terms acceptance. A download must match GitHub's advertised size and SHA256. If the archive changes during downloading, check again and retry. If a future release changes its setup layout, preparation stops with a clear error rather than altering game files.
 2. **Disable HelixSR** restores original files while retaining what is needed to enable it again. **Remove and restore originals** removes the managed installation. If used, separately choose **Restore plugin launch-option change**. Removing the Decky plugin itself does not remove game modifications.
 3. For **game running** or incomplete Steam downloads, close it or wait, then refresh. For network failures, reconnect and retry after reviewing the message. For other injector conflicts, resolve the existing mod through its own installer before retrying; do not overwrite unknown DLLs.

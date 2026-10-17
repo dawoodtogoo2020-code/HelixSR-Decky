@@ -29,6 +29,8 @@ from operation_lock import operation_lock, game_locked
 from host_environment import host_environment
 from installation_status import installation_status
 import menu_labels
+import modern_release
+from modern_build import build_script as modern_build_script
 from compatibility_release import (COMPATIBLE_CHOICE, compatible_release, selection,
                                    validate_compatible_release, require_supported_latest)
 from build_runtime import wine_candidates
@@ -486,8 +488,11 @@ class Manager:
         target = Path(rec['target'])
         if not isinstance(rec.get('baseline'), dict) or not isinstance(rec.get('current'), dict):
             raise ValueError('Invalid configuration ownership record')
-        paths = [str((target / name).relative_to(root))
-                 for name in ('OptiScaler.ini', 'fakenvapi.ini')]
+        # Modern Scaler retires fakenvapi.ini by restoring its baseline. Keep
+        # its ownership and saved-edit history, but no longer read it as an
+        # active editable config (it can legitimately be absent).
+        names = ('OptiScaler.ini',) if modern_release.modern(rec) else ('OptiScaler.ini', 'fakenvapi.ini')
+        paths = [str((target / name).relative_to(root)) for name in names]
         mutable = []
         for rel in paths:
             if rel not in rec['current'] or rel not in rec['baseline']:
@@ -558,6 +563,11 @@ class Manager:
             return None
         if 'variant' in record and not valid_variant(record['variant']):
             return None
+        if modern_release.modern(record) and (
+                record.get('release_sha256') != modern_release.RELEASE_SHA256
+                or not valid_variant(record.get('variant'))
+                or record['variant']['recipe_sha256'] != modern_release.RECIPE_SHA256):
+            return None
         if 'variant' in record and (not isinstance(record.get('files'), dict)
                                     or 'helixsr_setup.json' not in record['files']):
             return None
@@ -588,7 +598,7 @@ class Manager:
                 if self._symlink_in_path(package_root):
                     return None
                 resolved, resolved_root = path.resolve(), package_root.resolve()
-                if resolved.parent != resolved_root or not set(PACKAGE_FILES).issubset(files):
+                if resolved.parent != resolved_root or not set(modern_release.payload_files() if modern_release.modern(record) else PACKAGE_FILES).issubset(files):
                     return None
             for name, digest in files.items():
                 if (not isinstance(name, str) or not name or '\x00' in name or '\\' in name or ':' in name
@@ -615,7 +625,8 @@ class Manager:
         if route not in (None, 'direct', 'optiscaler'):
             raise ValueError('Unknown package route')
         path, record = package[1], package[2]
-        required = set(PACKAGE_FILES if route in (None, 'optiscaler') else NETWORK + (DLL,))
+        required = set(modern_release.payload_files() if modern_release.modern(record) else
+                       PACKAGE_FILES if route in (None, 'optiscaler') else NETWORK + (DLL,))
         if record.get('variant'):
             required.add('helixsr_setup.json')
         if not required.issubset(record['files']):
@@ -629,7 +640,10 @@ class Manager:
                        and (path / name).is_file() and sha(path / name) == record['files'][name]
                        for name in record['files'])
             if verified and record.get('variant'):
-                verify_outputs(path)
+                if modern_release.modern(record):
+                    modern_release.verify_outputs(path)
+                else:
+                    verify_outputs(path)
                 api = pe_info(path / DLL)
                 verified = api['arch'] == 'x64' and bool(api['ffx'])
             return verified
@@ -722,6 +736,10 @@ class Manager:
                 for target in map(Path, installed['targets']):
                     pairs.append((str(target.relative_to(root)), DLL))
                     pairs.extend((str((target.parent / name).relative_to(root)), name) for name in NETWORK)
+            elif installed['route'] == 'optiscaler' and modern_release.modern(package_record):
+                game_target = Path(installed['target'])
+                pairs = [(str((game_target / dest).relative_to(root)), source)
+                         for source, dest in modern_release.scaler_pairs()]
             elif installed['route'] == 'optiscaler':
                 game_target = Path(installed['target'])
                 target = game_target / 'HelixSR'
@@ -1246,7 +1264,7 @@ class Manager:
                         release=dict(release), release_choice=choice,
                         license_url=f'https://github.com/{REPO}/blob/v{release["version"]}/LICENSE',
                         license_accepted=self.cfg.get('license') == license_key(release, selected['id']),
-                        files=self.planned_paths(game, data, 'latest'),
+                        files=self.planned_paths(game, data, 'latest', release=release),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
                         warning=('You explicitly selected the reviewed HelixSR 1.8.1 compatibility release. '
                                  'This does not install the latest upstream 1.9 Scaler engine. '
@@ -1407,9 +1425,14 @@ class Manager:
             safe_extract(archive, work / 'unpacked')
             archive.unlink()
             package = work / 'unpacked' / ('HelixSR-' + release['version'])
-            for name in ['LICENSE', 'LICENSE-APACHE-2.0', 'THIRD_PARTY_NOTICES.md', DLL,
+            modern = modern_release.modern(release)
+            layout = (['LICENSE', 'THIRD_PARTY_NOTICES.md', DLL,
+                       'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
+                       'helixsr-scaler/OptiScaler.dll', 'helixsr-scaler/OptiScaler.ini'] if modern else
+                      ['LICENSE', 'LICENSE-APACHE-2.0', 'THIRD_PARTY_NOTICES.md', DLL,
                          'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
-                         'optiscaler/OptiScaler.dll', 'optiscaler/OptiScaler.ini']:
+                         'optiscaler/OptiScaler.dll', 'optiscaler/OptiScaler.ini'])
+            for name in layout:
                 if not (package / name).is_file():
                     raise ValueError('Unexpected upstream package layout: ' + name)
             # Apache-licensed setup adaptation: stop before its interactive game installer.
@@ -1420,7 +1443,7 @@ class Manager:
             model = verify_recipe(package, selected['id'])
             env = dict(os.environ, XDG_DATA_HOME=str(companion / 'dependencies'),
                        TMPDIR=str(work / 'tmp'), PIP_CACHE_DIR=str(companion / 'dependencies/pip'),
-                       HELIXSR_FORCE_PORTABLE='1', PYTHONUNBUFFERED='1')
+                       HELIXSR_FORCE_PORTABLE='1', PYTHONUNBUFFERED='1', PYTHONDONTWRITEBYTECODE='1')
             env = host_environment(env)
             env.pop('HELIXSR_BUILD_WINE', None)
             env.pop('HELIXSR_BUILD_DATA', None)
@@ -1430,7 +1453,10 @@ class Manager:
                 raise ValueError('Cancelled')
             if build_wine:
                 env['HELIXSR_BUILD_WINE'] = str(build_wine)
-            build.write_text(build_only_script(setup, converter, bool(build_wine)), newline='\n')
+            if modern and not build_wine:
+                raise ValueError('No working installed Proton or Wine was found for shader compilation')
+            build.write_text(modern_build_script() if modern else
+                             build_only_script(setup, converter, bool(build_wine)), newline='\n')
             Path(env['TMPDIR']).mkdir()
             logfile = companion / 'records' / ('build-' + job['id'] + '.log')
             logfile.parent.mkdir(parents=True, exist_ok=True)
@@ -1465,7 +1491,10 @@ class Manager:
                 if not (package / name).is_file() or (package / name).stat().st_size < 1024:
                     raise ValueError('Generated HelixSR model files are missing or incomplete. '
                                      'See the build log; this is not an internet connection error.')
-            verify_outputs(package)
+            if modern:
+                modern_release.verify_outputs(package)
+            else:
+                verify_outputs(package)
             api = pe_info(package / DLL)
             if api['arch'] != 'x64' or not api['ffx']:
                 raise ValueError('Prepared HelixSR DLL has an unsupported installation interface')
@@ -1477,7 +1506,7 @@ class Manager:
                 # A changed cache can be rebuilt without overwriting the previous owned path.
                 final = final.with_name(final.name + '-' + job['id'][:8])
             os.replace(package, final)
-            payloads = PACKAGE_FILES + ('helixsr_setup.json',)
+            payloads = modern_release.payload_files() if modern else PACKAGE_FILES + ('helixsr_setup.json',)
             if (final / 'amd-fsr' / AMD_FG).is_file():
                 payloads += ('amd-fsr/' + AMD_FG,)
             record = dict(version=release['version'], path=str(final), release_sha256=release['sha256'],
@@ -1631,10 +1660,28 @@ class Manager:
             files['package_files'] = {n: sha(package[1] / n) for n in package[2]['files']}
         return hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
 
-    def planned_paths(self, game, data, action, package=AUTO_PACKAGE):
+    def planned_paths(self, game, data, action, package=AUTO_PACKAGE, release=None):
         rec, root = self.record(game), Path(game['folder'])
         if package is AUTO_PACKAGE:
             package = self.package(game, data['route'])
+        payload = release or (package[2] if package else {})
+        modern = modern_release.modern(payload)
+        if (data['route'] == 'optiscaler' and modern_release.modern(rec) and payload and not modern
+                and action in ('install', 'update', 'enable', 'latest')):
+            raise ValueError('Updating modern Scaler to legacy HelixSR is unsupported. '
+                             'Remove HelixSR to restore original files first, then install the compatibility release.')
+        if modern and data['route'] == 'optiscaler' and action in ('install', 'update', 'enable', 'latest'):
+            target = Path(data['target'])
+            names = [dest for _, dest in modern_release.scaler_pairs()] + ['OptiScaler.ini', 'HelixSR/helixsr-install.json']
+            paths = list(rec.get('baseline', {}))
+            for name in names:
+                rel = str((target / name).relative_to(root))
+                if rel not in paths:
+                    path = checked_path(root, rel)
+                    if path.exists() or path.is_symlink():
+                        raise ValueError('New upstream file conflicts with an unmanaged file: ' + rel)
+                    paths.append(rel)
+            return paths
         if rec:
             paths = list(rec['baseline'])
             if action == 'labels_enable':
@@ -2027,6 +2074,29 @@ class Manager:
                 self.write_managed_json(target.parent / 'helixsr-install.json',
                             {'route': 'direct', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
                              'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')})
+        elif modern_release.modern(package_record):
+            target = Path(rec['target'])
+            settings_path = package_path / 'helixsr-scaler/OptiScaler.ini'
+            settings_bytes = settings_path.read_bytes()
+            if hashlib.sha256(settings_bytes).hexdigest() != package_record['files']['helixsr-scaler/OptiScaler.ini']:
+                raise ValueError('Prepared package changed during installation')
+            template = settings_bytes.decode('utf-8')
+            source = self.retained_config(rec, str((target / 'OptiScaler.ini').relative_to(root)))
+            configured = modern_release.configuration(template if source is None else source, template)
+            pairs = modern_release.scaler_pairs()
+            modern_paths = {str((target / dest).relative_to(root)) for _, dest in pairs}
+            modern_paths |= {str((target / name).relative_to(root)) for name in ('OptiScaler.ini', 'HelixSR/helixsr-install.json')}
+            # Retire only old owned payloads through the same journal and saved originals.
+            obsolete = {rel: digest for rel, digest in rec['baseline'].items()
+                        if rel not in modern_paths and rel not in (menu_labels.WITCHER_XML,)}
+            if obsolete:
+                self.restore_baseline(game, {'baseline': obsolete})
+            for source, dest in pairs:
+                self.copy_atomic(package_path / source, target / dest, package_record['files'][source])
+            self.write_managed(target / 'OptiScaler.ini', configured)
+            self.write_managed_json(target / 'HelixSR/helixsr-install.json',
+                        {'route': 'optiscaler', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
+                         'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')})
         else:
             target = Path(rec['target'])
             settings_path = package_path / 'optiscaler/OptiScaler.ini'

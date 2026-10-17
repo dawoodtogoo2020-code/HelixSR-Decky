@@ -44,6 +44,7 @@ def build():
          '--name', 'helixsr-desktop', '--distpath', str(build_root / 'dist'),
          '--workpath', str(build_root / 'work'), '--specpath', str(build_root),
          '--paths', str(ROOT), '--paths', str(ROOT / 'py_modules'),
+         '--add-data', str(ROOT / 'py_modules/modern_build.py') + ':bootstrap',
          '--hidden-import', 'desktop.backend', '--hidden-import', 'desktop.app_updates',
          '--hidden-import', 'desktop.probe',
          '--hidden-import', 'desktop.system', '--hidden-import', 'manager', '--hidden-import', 'model_variants',

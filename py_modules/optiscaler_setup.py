@@ -1,5 +1,6 @@
 """Read-only checks and shared instructions for the installed proxy route."""
 import configparser
+import json
 import os
 import stat
 from pathlib import Path
@@ -134,13 +135,27 @@ def setup_report(target, route, options, proxy_files=()):
     configured = route == 'optiscaler' and values.get('Dx12Upscaler', '').lower() == 'fsr31' and paths_match and not error
     required = ('dxgi.dll', 'fakenvapi.dll', 'fakenvapi.ini', 'HelixSR/helixsr.dll',
                 'HelixSR/helixsr_upscaler.dll', 'HelixSR/helixsr_weights.bin', 'HelixSR/helixsr_kernels.pak')
+    modern = False
+    if directory:
+        marker = directory / 'HelixSR/helixsr-install.json'
+        try:
+            if not marker.is_symlink() and marker.stat().st_size <= 4096:
+                modern = json.loads(marker.read_text()).get('helixsr') == '1.9.3'
+        except (OSError, ValueError, AttributeError):
+            pass
+    if modern:
+        from modern_release import scaler_pairs
+        required = tuple(dest for _, dest in scaler_pairs())
+        paths_match = (directory / 'HelixSR/helixsr.dll').is_file()
+        configured = route == 'optiscaler' and values.get('Dx12Upscaler', '').lower() == 'dlss' and paths_match and not error
     missing = [name for name in required if not directory or not (directory / name).is_file()]
     launch = override_status(options)
     key = values.get('ShortcutKey', 'auto')
     shortcut = 'Insert (default)' if key.lower() == 'auto' else 'overlay shortcut disabled' if key == '-1' else 'configured ShortcutKey=' + key
     checks = []
     if route == 'optiscaler':
-        checks.append('Install adds OptiScaler, fakenvapi and HelixSR automatically for this route.')
+        checks.append('Install adds HelixSR Scaler and its complete runtime assets automatically.' if modern else
+                      'Install adds OptiScaler, fakenvapi and HelixSR automatically for this route.')
         if missing:
             checks.append('Missing setup files: ' + ', '.join(missing))
         if error:
@@ -159,7 +174,8 @@ def setup_report(target, route, options, proxy_files=()):
             checks.append('An existing nvapi64.dll may affect DLSS input. It is not replaced; review OptiScaler.log and NvapiPath.')
         if values.get('NvapiPath', 'auto').lower() != 'auto':
             checks.append('Custom NvapiPath is configured. Verify it points to your intended per-game NVAPI provider.')
-        checks.append('Run the game in DX12. Open OptiScaler using ' + shortcut + '. Select Upscaling → Upscalers → FFX: FSR HelixSR (3.1.5).')
+        checks.append(('Run the game in DX12. Select DLSS (or a supported FSR/XeSS input). Open HelixSR Scaler using ' + shortcut + '; HelixSR uses the DLSS backend.' if modern else
+                       'Run the game in DX12. Open OptiScaler using ' + shortcut + '. Select Upscaling → Upscalers → FFX: FSR HelixSR (3.1.5).'))
         checks.append('If DLSS is unavailable, use a supported FSR or XeSS input if the game offers one. Input name alone does not identify the output backend. Otherwise collect a fresh OptiScaler.log.')
         checks.append('Check a fresh helixsr.log for neural output, then check gameplay for artifacts or crashes. Installed files and a mapped proxy alone do not prove rendering.')
     elif route == 'direct':
