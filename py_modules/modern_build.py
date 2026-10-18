@@ -175,17 +175,25 @@ WINEPREFIX="$HELIXSR_BUILD_DATA/wineprefix" WINEDEBUG=-all exec "$HELIXSR_BUILD_
 
 
 def build_script():
-    if getattr(sys, 'frozen', False):
-        # PyInstaller module __file__ points to bytecode; sys.executable is the
-        # GUI bootloader. Bundle our source explicitly and use host Python.
-        resource = Path(sys._MEIPASS) / 'bootstrap/modern_build.py'
+    frozen = getattr(sys, 'frozen', False)
+    # A frozen Decky host still loads this module from adjacent source, while
+    # frozen Desktop's __file__ points to bytecode. Never read bytecode.
+    adjacent = Path(__file__)
+    resource = None
+    if adjacent.suffix == '.py' and adjacent.is_file():
+        resource = adjacent
+    elif frozen:
+        bundle = getattr(sys, '_MEIPASS', None)
+        if bundle:
+            resource = Path(bundle) / 'bootstrap/modern_build.py'
+    if frozen:
+        # sys.executable is the frozen bootloader; use host Python instead.
         interpreter = shutil.which('python3', path=os.defpath)
         if not interpreter:
             raise ValueError('Install system Python 3 before preparing HelixSR')
     else:
-        resource = Path(__file__)
         interpreter = sys.executable
-    if not resource.is_file():
+    if resource is None or resource.suffix != '.py' or not resource.is_file():
         raise ValueError('HelixSR build bootstrap resource is missing; reinstall the application')
     source = resource.read_text(encoding='utf-8')
     return ('#!/usr/bin/env bash\nset -euo pipefail\n'

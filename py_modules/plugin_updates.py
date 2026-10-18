@@ -99,6 +99,9 @@ def validate_zip(path, version):
                             ('cpython-3.11.17-LICENSE.txt', 'cpython-3.11.17-PROVENANCE.json'))
         if semver(version) >= (0, 1, 29):
             required.add(f'{FOLDER}/py_modules/compatibility_release.py')
+        if semver(version) >= (0, 1, 30):
+            required.update(f'{FOLDER}/py_modules/{name}.py' for name in
+                            ('modern_build', 'modern_release'))
         if not required <= seen:
             raise ValueError('Incomplete plugin ZIP')
         for name in ('plugin.json', 'package.json'):
