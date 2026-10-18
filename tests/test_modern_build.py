@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import shlex
 import subprocess
 import tarfile
@@ -146,9 +147,36 @@ class ModernBuildTests(unittest.TestCase):
         result = subprocess.run([host_python, '-c', embedded], capture_output=True, text=True, check=True)
         self.assertEqual(result.stdout.strip(), 'host bootstrap executed')
 
+    def test_frozen_plugin_host_uses_adjacent_source_not_host_bundle(self):
+        resource = self.write(self.root, 'plugin/modern_build.py', b'print("plugin bootstrap")\n')
+        for bundled in (False, True):
+            if bundled:
+                self.write(self.root, 'bootstrap/modern_build.py', b'raise RuntimeError("wrong bundle")\n')
+            with self.subTest(bundled=bundled), \
+                    patch.object(build.sys, 'frozen', True, create=True), \
+                    patch.object(build.sys, '_MEIPASS', str(self.root), create=True), \
+                    patch.object(build.sys, 'executable', '/decky/PluginLoader'), \
+                    patch.object(build, '__file__', str(resource)), \
+                    patch.object(build.shutil, 'which', return_value='/usr/bin/python3') as which:
+                script = build.build_script()
+                which.assert_called_once_with('python3', path=os.defpath)
+                self.assertIn('/usr/bin/python3 - "$HERE"', script)
+                self.assertNotIn('/decky/PluginLoader', script)
+                embedded = script.split("<<'PY_HELIX_BOOTSTRAP'\n", 1)[1].rsplit('\nPY_HELIX_BOOTSTRAP', 1)[0]
+                self.assertEqual(embedded, resource.read_text())
+
+    def test_frozen_bytecode_without_bundle_fails_with_resource_error(self):
+        bytecode = self.write(self.root, 'modern_build.pyc', b'not Python source')
+        with patch.object(build, 'sys', SimpleNamespace(frozen=True, executable='/decky/PluginLoader')), \
+                patch.object(build, '__file__', str(bytecode)), \
+                patch.object(build.shutil, 'which', return_value='/usr/bin/python3'):
+            with self.assertRaisesRegex(ValueError, 'bootstrap resource is missing'):
+                build.build_script()
+
     def test_frozen_missing_interpreter_or_resource_fails_before_build(self):
         with patch.object(build.sys, 'frozen', True, create=True), \
-                patch.object(build.sys, '_MEIPASS', str(self.root), create=True):
+                patch.object(build.sys, '_MEIPASS', str(self.root), create=True), \
+                patch.object(build, '__file__', str(self.root / 'missing-module.pyc')):
             with patch.object(build.shutil, 'which', return_value=None):
                 with self.assertRaisesRegex(ValueError, 'Install system Python 3'):
                     build.build_script()
