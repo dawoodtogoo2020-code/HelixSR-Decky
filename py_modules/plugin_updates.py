@@ -65,7 +65,7 @@ def release_info(item):
 def validate_zip(path, version):
     """Validate the whole archive before Decky can replace the installed plugin."""
     with zipfile.ZipFile(path) as archive:
-        seen, total = set(), 0
+        seen, files, total = set(), set(), 0
         entries = archive.infolist()
         if not 1 <= len(entries) <= 1000:
             raise ValueError('Invalid plugin ZIP member count')
@@ -82,6 +82,8 @@ def validate_zip(path, version):
                     or item.compress_size and item.file_size / item.compress_size > 1000):
                 raise ValueError('Unsafe plugin ZIP')
             seen.add(canonical.rstrip('/'))
+            if not item.is_dir() and stat.S_IFMT(item.external_attr >> 16) in (0, stat.S_IFREG):
+                files.add(canonical)
         required = {f'{FOLDER}/{name}' for name in ('main.py', 'plugin.json', 'package.json', 'dist/index.js')}
         required.update(f'{FOLDER}/py_modules/{name}.py' for name in ('manager', 'library', 'awareness'))
         if semver(version) >= (0, 1, 1):
@@ -102,7 +104,7 @@ def validate_zip(path, version):
         if semver(version) >= (0, 1, 30):
             required.update(f'{FOLDER}/py_modules/{name}.py' for name in
                             ('modern_build', 'modern_release'))
-        if not required <= seen:
+        if not required <= files:
             raise ValueError('Incomplete plugin ZIP')
         for name in ('plugin.json', 'package.json'):
             entry = archive.getinfo(f'{FOLDER}/{name}')

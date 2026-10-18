@@ -132,6 +132,17 @@ class ReleaseValidationTests(PluginUpdateFixtures):
                               omit=(f'{plugin_updates.FOLDER}/py_modules/{name}.py',))
                 with self.subTest(version=version, omitted=name), self.assertRaisesRegex(ValueError, 'Incomplete'):
                     plugin_updates.validate_zip(self.root / 'fixture.zip', version)
+                for suffix, mode in (('/', stat.S_IFDIR), ('', stat.S_IFDIR), ('', stat.S_IFIFO)):
+                    archive_bytes(self.root, version, extra=extra,
+                                  omit=(f'{plugin_updates.FOLDER}/py_modules/{name}.py',))
+                    entry = zipfile.ZipInfo(f'{plugin_updates.FOLDER}/py_modules/{name}.py{suffix}')
+                    entry.create_system = 3
+                    entry.external_attr = (mode | 0o755) << 16
+                    with zipfile.ZipFile(self.root / 'fixture.zip', 'a') as archive:
+                        archive.writestr(entry, b'')
+                    with self.subTest(version=version, name=name, suffix=suffix, mode=mode), \
+                            self.assertRaisesRegex(ValueError, 'Incomplete'):
+                        plugin_updates.validate_zip(self.root / 'fixture.zip', version)
 
     def test_new_release_requires_bundled_parser_and_its_notices(self):
         modules = ('optiscaler_setup', 'launch_receipts', 'operation_lock', 'host_environment',
