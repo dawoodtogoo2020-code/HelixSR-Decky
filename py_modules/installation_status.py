@@ -48,10 +48,10 @@ def _issue(reason, game=None):
     """Classify a manager diagnostic without altering its original wording."""
     lower = reason.lower()
     if 'uses directx 11 only' in lower:
-        steps = ['Use the game\'s built-in upscaling instead. A plugin setting or DX12 launch option cannot add a renderer the game does not have.']
+        steps = ["This plugin's validated installation route requires DirectX 12. Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling, but this plugin has not enabled that route. A plugin setting or launch option cannot change the game's renderer."]
         if (game or {}).get('managed'):
             steps.append('Close the game, then use Disable HelixSR or Remove and restore originals. Existing file, Steam build and download checks must still pass.')
-        return ('unsupported_renderer', 'DirectX 11 is unsupported', steps)
+        return ('unsupported_renderer', 'DX11 route not verified', steps)
     if reason == RUNNING_REASON:
         return ('game_running', 'Game running',
                 ['Close the game normally before changing its files, then refresh.'])

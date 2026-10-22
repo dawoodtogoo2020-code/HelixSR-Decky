@@ -1,14 +1,15 @@
-import { DropdownItem, PanelSectionRow } from '@decky/ui';
+import { ButtonItem, DropdownItem, PanelSectionRow } from '@decky/ui';
 
 export type HelixSettingsState = {
   available: boolean; reason?: string; revision?: string; provider?: string; model?: string;
   quick_flow?: string; multiplier?: number; upscaler?: string; int8?: string; wave_size?: string;
 };
 
-export function HelixSettings({ settings, disabled, save }: {
+export function HelixSettings({ settings, disabled, save, advanced = false, toggleAdvanced }: {
   settings: HelixSettingsState; disabled: boolean; save: (changes: Record<string, string | number>) => void;
+  advanced?: boolean; toggleAdvanced?: () => void;
 }) {
-  if (!settings.available) return <PanelSectionRow><div>{settings.reason}</div></PanelSectionRow>;
+  if (!settings.available) return <PanelSectionRow><div className="helix-muted">{settings.reason}</div></PanelSectionRow>;
   const select = (label: string, key: string, value: string | number | undefined,
     options: [string, string | number][], change?: (value: any) => Record<string, string | number>) =>
     <PanelSectionRow><DropdownItem label={label} disabled={disabled} selectedOption={value}
@@ -30,12 +31,12 @@ export function HelixSettings({ settings, disabled, save }: {
     </>}
     {settings.provider !== 'off' && select('Frame multiplier', 'multiplier', settings.multiplier,
       settings.provider === 'xess' ? [['2×', 2], ['3×', 3]] : [['2×', 2]])}
-    {select('INT8 math', 'int8', settings.int8, [['Automatic', 'auto'], ['On', 'on'], ['Off', 'off']])}
-    {select('Wave size', 'wave_size', settings.wave_size, [['Automatic', 'auto'], ['32', '32'], ['64', '64']])}
-    <PanelSectionRow><div className="helix-muted">Close the game to save settings, then restart it.
-      HelixSR frame generation requires a DirectX 12 game with DLSS frame generation enabled in the game.
-      Light and Full are frame generation models; the upscaling network remains Model E.
-      3× is available through XeSS FG. Configured settings do not prove active frame generation.
-      FSR 3/4 choices are also available in Scaler’s in-game menu when supported.</div></PanelSectionRow>
+    <PanelSectionRow><div className="helix-muted">Close the game to save. Restart to apply. Frame generation needs DX12 and the game's DLSS frame generation option. Configured settings do not confirm runtime output.</div></PanelSectionRow>
+    {toggleAdvanced && <PanelSectionRow><ButtonItem layout="below" onClick={toggleAdvanced}>{advanced ? 'Hide advanced tuning' : 'Advanced tuning'}</ButtonItem></PanelSectionRow>}
+    {advanced && <>
+      {select('INT8 math', 'int8', settings.int8, [['Automatic', 'auto'], ['On', 'on'], ['Off', 'off']])}
+      {select('Wave size', 'wave_size', settings.wave_size, [['Automatic', 'auto'], ['32', '32'], ['64', '64']])}
+      <PanelSectionRow><div className="helix-muted">Light and Full are frame generation models. The upscaler remains Model E. XeSS FG supports 3×.</div></PanelSectionRow>
+    </>}
   </>;
 }

@@ -33,7 +33,7 @@ def setup_guidance(game):
         action, headline = 'install', 'HelixSR is not installed for this game'
         steps = ['Choose Install HelixSR for this game, then confirm the file changes. Wait for installation to finish.']
         if game.get('dx12_confirmation_needed'):
-            steps.insert(0, 'Confirm the game actually runs in DirectX 12 using the checkbox below. A launch option cannot add DX12 to a DX11-only game.')
+            steps.insert(0, "Confirm the game actually runs in DirectX 12 for this plugin's current installation route. The checkbox and launch options cannot add DX12 to a DX11-only game.")
     elif game.get('legacy') and not managed:
         action, headline = 'adopt', 'Existing HelixSR installation needs importing'
         steps = ['Review the existing installation before managing or updating its files.']
@@ -45,10 +45,10 @@ def setup_guidance(game):
         if override != 'correct':
             action, headline = 'launch', 'Files installed. Finish Proton launch setup'
             steps = ['Review the Proton proxy launch option below. Keep other launch options and any extra game-specific loader requirements.',
-                     'Then launch with DirectX 12 and select a supported DLSS, FSR or XeSS input. The input name is not the output backend.']
+                     "For this plugin's current Scaler route, launch in DirectX 12 and select a supported DLSS, FSR or XeSS input. The input name is not the output backend."]
         else:
             action, headline = 'play', 'Files installed. Check the in-game settings next'
-            steps = ['Launch with DirectX 12 and select a supported DLSS, FSR or XeSS input. Check OptiScaler is using FFX: FSR HelixSR (3.1.5).']
+            steps = ["For this plugin's current Scaler route, launch in DirectX 12 and select a supported DLSS, FSR or XeSS input. Check OptiScaler is using FFX: FSR HelixSR (3.1.5)."]
     else:
         action, headline = 'play', 'Files installed. Select AMD FSR in the game'
         steps = ['This native FSR replacement does not need an OptiScaler proxy launch option.']

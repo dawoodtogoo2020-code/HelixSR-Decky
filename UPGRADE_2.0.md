@@ -1,8 +1,8 @@
 # HelixSR 2.0 controls
 
-Scan for HelixSR updates, select Latest upstream, and review Install/Update. Preparation uses the unchanged official 2.0 setup and verifies the embedded Model E network plus both frame-generation models. NVIDIA-derived files stay on the device and are never included in this plugin's download.
+Select the reviewed HelixSR 2.0.0 release, or scan with Latest upstream, then review Install/Update. Open Plugin updates for the selected release notes. Preparation uses the unchanged official 2.0 setup and verifies the embedded Model E network plus both frame-generation models. NVIDIA-derived files stay on the device and are never included in this plugin's download.
 
-For Scaler installations, open **OptiScaler and frame generation** in Decky, or **Upscaling and frame generation settings** in Desktop. Close the game before saving and restart it afterwards.
+For Scaler installations, open **Game settings**, then **Upscaling and frame generation** in Decky, or **Upscaling and frame generation settings** in Desktop. Close the game before saving and restart it afterwards.
 
 | Control | Supported choices |
 | --- | --- |
@@ -22,3 +22,9 @@ Settings use the existing journal, ownership checks, atomic writes and restorati
 Scanning detects future official releases automatically. It does not establish that a changed converter, network or file layout is compatible. Unreviewed releases report that an application update is needed and leave the installed game unchanged. A substituted archive at the same version is rejected by its pinned identity.
 
 This update adds regression coverage for installation migrations and settings. It does not guarantee every game is bug-free. Report the game, route, installed versions and current logs if gameplay fails.
+
+## Steam Deck validation limits
+
+The plugin currently validates DX12 installation routes. Upstream 2.0 Scaler also supports DX11 and Vulkan upscaling, but those hooks have not been validated by this integration. The DX12 confirmation records your confirmation of the game mode; it does not select a renderer in the game.
+
+PRAGMATA has not passed HelixSR upscaling or generated-frame gameplay validation on this Deck. Prior tests produced black/frozen rendering with HelixSR SR. AMD FSR plus HelixSR FG reached an animated title screen, which does not prove active frame generation. Use the game settings controls only with this distinction in mind.

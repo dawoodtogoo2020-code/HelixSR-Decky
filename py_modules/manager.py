@@ -23,6 +23,7 @@ import ssl
 from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from library import discover, discover_launcher, safe_root, scan_tree, text
+from discovery_records import normalize_imports
 from awareness import awareness, active_processes, text_tail, optiscaler_proxy
 from game_guidance import setup_guidance
 from operation_lock import operation_lock, game_locked
@@ -46,7 +47,8 @@ def manifest_path(record):
 import helix_settings
 from modern_build import build_script as modern_build_script
 from compatibility_release import (COMPATIBLE_CHOICE, compatible_release, selection,
-                                   validate_compatible_release, require_supported_latest)
+                                   validate_compatible_release, require_supported_latest,
+                                   reviewed_release, release_choices, release_status)
 from build_runtime import wine_candidates
 from github_release import web_latest_release
 from model_variants import (DEFAULT_VARIANT, catalog, package_selection, same_release,
@@ -786,13 +788,16 @@ class Manager:
             return False
 
     def refresh(self):
+        started = time.monotonic()
         entries, warnings = discover(self.home, self.cfg.get('imports', []))
-        self.entries = {x['id']: x for x in entries}
         games = []
         for game in entries:
             games.append(self.assess_safe(game, detailed=False))
-        release = load_release(self.settings)
+        self.entries = {x['id']: x for x in entries}
+        release = release_status(load_release(self.settings))
         return dict(games=games, warnings=warnings, release=release,
+                    release_choices=release_choices(), scanned_at=time.time(),
+                    scan_seconds=round(time.monotonic() - started, 3),
                     model_catalog=catalog(),
                     license_accepted=bool(self.cfg.get('license')) and self.cfg.get('license') == license_key(release),
                     jobs=list(self.jobs.values()))
@@ -908,7 +913,7 @@ class Manager:
         reasons, blocked = [], []
         dx11_title = DX11_ONLY_STEAM_APPS.get(str(game.get('appid', ''))) if game.get('source') == 'Steam' else None
         if dx11_title:
-            reasons.append(f'{dx11_title} uses DirectX 11 only. HelixSR requires DirectX 12, and OptiScaler cannot change the game\'s renderer.')
+            reasons.append(f'{dx11_title} uses DirectX 11 only. This plugin currently installs HelixSR only through its validated DirectX 12 route. Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling, but that route is not enabled here.')
         if platform.machine().lower() not in ('x86_64', 'amd64'):
             blocked.append('HelixSR requires an x86_64 host')
         if os.name == 'posix' and os.geteuid() == 0:
@@ -1131,19 +1136,25 @@ class Manager:
                 raise ValueError('No Windows game executable found in folder: ' + str(p))
             additions.append({'folder': str(p), 'name': str(name or p.name)[:200]})
         # Validate the whole selection before saving any import.
-        merged = {x['folder']: x for x in self.cfg['imports']}
+        existing, warnings = normalize_imports(self.cfg.get('imports'))
+        merged = {x['folder']: x for x in existing}
         merged.update({x['folder']: x for x in additions})
         self.cfg['imports'] = list(merged.values())
         self.save()
-        return self.refresh()
+        result = self.refresh()
+        result['warnings'] = list(dict.fromkeys(warnings + result['warnings']))
+        return result
 
     def forget(self, gid):
         g = self.get_game(gid)
         if self.record(g):
             raise ValueError('Remove managed HelixSR before forgetting its folder')
-        self.cfg['imports'] = [x for x in self.cfg['imports'] if x['folder'] != g['folder']]
+        existing, warnings = normalize_imports(self.cfg.get('imports'))
+        self.cfg['imports'] = [x for x in existing if x['folder'] != g['folder']]
         self.save()
-        return self.refresh()
+        result = self.refresh()
+        result['warnings'] = list(dict.fromkeys(warnings + result['warnings']))
+        return result
 
     def accept_license(self, accepted, token=None):
         reviewed = None
@@ -1171,8 +1182,8 @@ class Manager:
 
     def release_for_choice(self, choice=None, force=False):
         """Latest discovery stays independent from an explicitly selected archive."""
-        if selection(choice) == COMPATIBLE_CHOICE:
-            return validate_compatible_release(compatible_release())
+        if selection(choice) != 'latest':
+            return require_supported_latest(reviewed_release(choice))
         release = self.check_update(force)
         if release.get('error') or not release.get('version'):
             raise ValueError(release.get('error') or 'Check upstream updates first')
@@ -1314,7 +1325,7 @@ class Manager:
                 raise ValueError(release.get('error') or 'Check upstream updates first')
             game = self.get_game(gid)
             data = self.assess(game, executable=executable)
-            if choice == COMPATIBLE_CHOICE and (data.get('managed') or data.get('legacy')):
+            if choice != 'latest' and (data.get('managed') or data.get('legacy')):
                 installed = data.get('installed_version')
                 try:
                     newer = version(installed) > version(release['version'])
@@ -1370,7 +1381,7 @@ class Manager:
             if kind not in ('prepare', 'install_latest'):
                 raise ValueError('Unsupported background operation')
             choice = selection(preview.get('release_choice') if preview else None)
-            release = self.reviewed_install_release(preview) if preview and choice == COMPATIBLE_CHOICE else load_release(self.settings)
+            release = self.reviewed_install_release(preview) if preview and choice != 'latest' else load_release(self.settings)
             if preview and not same_release(release, preview['release']):
                 raise ValueError('Upstream release changed since review; review Install or Update again')
             selected = select_variant(preview.get('variant_id') if preview else None)

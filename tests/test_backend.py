@@ -1508,8 +1508,10 @@ class TransactionTests(Fixtures):
         status = data['installation_status']
         self.assertEqual(status['label'], 'Unsupported')
         self.assertIn('DirectX 11', status['summary'])
-        self.assertIn('OptiScaler cannot', status['summary'])
-        self.assertIn('built-in upscaling', status['issues'][0]['steps'][0])
+        self.assertIn('plugin currently installs HelixSR only through its validated DirectX 12 route', status['summary'])
+        self.assertIn('Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling', status['summary'])
+        self.assertEqual(status['issues'][0]['title'], 'DX11 route not verified')
+        self.assertIn('Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling', status['issues'][0]['steps'][0])
         self.assertFalse(status['can_modify'])
         self.assertFalse(status['can_restore'])
         for action in ('install', 'update', 'enable', 'adopt'):

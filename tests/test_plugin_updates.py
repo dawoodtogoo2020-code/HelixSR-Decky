@@ -124,8 +124,10 @@ class ReleaseValidationTests(PluginUpdateFixtures):
         plugin_updates.validate_zip(self.root / 'fixture.zip', '0.1.29')
         modern = ('modern_build', 'modern_release')
         extra.update({f'{plugin_updates.FOLDER}/py_modules/{name}.py': b'# fixture\n' for name in modern})
-        for version in ('0.1.30', '0.1.31'):
+        for version in ('0.1.30', '0.1.31', '0.1.32'):
             required = modern if version == '0.1.30' else modern + ('helix20_release', 'helix_settings')
+            if version == '0.1.32':
+                required += ('discovery_records',)
             extra.update({f'{plugin_updates.FOLDER}/py_modules/{name}.py': b'# fixture\n' for name in required})
             archive_bytes(self.root, version, extra=extra)
             plugin_updates.validate_zip(self.root / 'fixture.zip', version)

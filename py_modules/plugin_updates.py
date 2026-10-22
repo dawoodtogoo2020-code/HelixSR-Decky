@@ -107,6 +107,8 @@ def validate_zip(path, version):
         if semver(version) >= (0, 1, 31):
             required.update(f'{FOLDER}/py_modules/{name}.py' for name in
                             ('helix20_release', 'helix_settings'))
+        if semver(version) >= (0, 1, 32):
+            required.add(f'{FOLDER}/py_modules/discovery_records.py')
         if not required <= files:
             raise ValueError('Incomplete plugin ZIP')
         for name in ('plugin.json', 'package.json'):
