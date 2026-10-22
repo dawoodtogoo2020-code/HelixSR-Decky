@@ -451,6 +451,32 @@ function enableSettings(h, extra = {}) {
   }});
 }
 
+test("game settings and advanced tuning keep the user's disclosure choice across panel remounts", async () => {
+  const h = harness(); enableSettings(h); await h.ready();
+  assert.equal(h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings").length, 0,
+    "game settings start collapsed");
+  h.openAdvanced();
+  let settings = h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings")[0];
+  assert.equal(settings.props.advanced, false, "tuning starts collapsed");
+  assert.ok(settingsDropdown(h, "QuickFlow"), "Full model controls are visible before remount");
+  settings.props.toggleAdvanced(); h.render();
+  assert.ok(settingsDropdown(h, "INT8 math"), "advanced tuning is visible before remount");
+
+  h.unmount(); h.mount(); await flush(); h.render(); await flush();
+  settings = h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings")[0];
+  assert.ok(settings, "game settings remain open after remount");
+  assert.equal(settings.props.advanced, true, "advanced tuning remains open after remount");
+  assert.ok(settingsDropdown(h, "QuickFlow"), "Full model controls remain reachable after remount");
+  assert.ok(settingsDropdown(h, "INT8 math"));
+
+  settings.props.toggleAdvanced(); h.render();
+  const close = h.walk(h.render(), n => n.type === "ButtonItem" && h.text(n) === "Hide game settings")[0];
+  close.props.onClick(); h.render();
+  h.unmount(); h.mount(); await flush(); h.render(); await flush();
+  assert.equal(h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings").length, 0,
+    "explicitly closed game settings stay closed after remount");
+});
+
 test("Helix settings provider, model, and multiplier callbacks preserve the current revision", async () => {
   async function change(label, data, settings = {}) {
     const h = harness({ set_game_settings: () => h.game });

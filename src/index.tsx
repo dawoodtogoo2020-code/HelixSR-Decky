@@ -92,6 +92,8 @@ const previewAction = callable<[string, string, boolean, string?], Preview>("pre
 const applyAction = callable<[string], { message: string }>("apply_action");
 const previewLatest = callable<[string, boolean, string?, string?, string?], Preview>("preview_latest");
 let selectedReleaseChoice = "latest";
+let rememberedGameSettingsOpen = false;
+let rememberedTuningOpen = false;
 const installLatest = callable<[string], Job>("install_latest");
 type OverlayStatus = { enabled: boolean; game_id: string | null;
   overlay: {state: string; label: string; detail: string; responding: boolean; visible_verified: boolean};
@@ -266,8 +268,8 @@ function Content() {
   const [diagnostics, setDiagnostics] = useState(false);
   const [setupDetailsOpen, setSetupDetailsOpen] = useState(false);
   const [discoveryNotes, setDiscoveryNotes] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [settingsAdvanced, setSettingsAdvanced] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(rememberedGameSettingsOpen);
+  const [settingsAdvanced, setSettingsAdvanced] = useState(rememberedTuningOpen);
   const [updatesOpen, setUpdatesOpen] = useState(false);
   const [addGamesOpen, setAddGamesOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -682,7 +684,9 @@ function Content() {
       {error && <PanelSectionRow><div role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>{error}</div></PanelSectionRow>}
     </PanelSection>
     {game && <PanelSection title="Game settings">
-      <PanelSectionRow><ButtonItem layout="below" onClick={() => setAdvancedOpen(!advancedOpen)}>
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => {
+        rememberedGameSettingsOpen = !advancedOpen; setAdvancedOpen(rememberedGameSettingsOpen);
+      }}>
         {advancedOpen ? "Hide game settings" : "Show game settings"}</ButtonItem></PanelSectionRow>
     </PanelSection>}
     {game && advancedOpen && <>
@@ -699,7 +703,9 @@ function Content() {
       {game.helix_settings && <HelixSettings settings={game.helix_settings}
         disabled={disabled || game.installation_status?.can_modify === false}
         save={changes => void interact(() => saveHelixSettings(changes))}
-        advanced={settingsAdvanced} toggleAdvanced={() => setSettingsAdvanced(!settingsAdvanced)} />}
+        advanced={settingsAdvanced} toggleAdvanced={() => {
+          rememberedTuningOpen = !settingsAdvanced; setSettingsAdvanced(rememberedTuningOpen);
+        }} />}
       {diagnostics && <PanelSectionRow><div style={infoStyle}>
         OptiScaler installed: {game.optiscaler.present === null ? "not inspected" : game.optiscaler.present ? "yes" : "no detected files"}{"\n"}
         OptiScaler HelixSR route configured: {game.optiscaler.helix_configured ? "yes" : "no"}{"\n"}
