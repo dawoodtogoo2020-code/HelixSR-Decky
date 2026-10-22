@@ -29,7 +29,7 @@ def read_settings(source):
                 quick_flow=get('HelixSR', 'QuickFlow', 'off').replace('auto', 'off'),
                 multiplier=multiplier if provider == 'xess' else 2,
                 upscaler=('fsr' if get('Upscalers', 'Dx12Upscaler', 'auto') in ('auto', 'ffx')
-                          and get('FSR', 'UpscalerIndex', 'auto') == '2' else
+                          and get('FSR', 'UpscalerIndex', 'auto') == '1' else
                           'helixsr' if get('Upscalers', 'Dx12Upscaler', 'auto') in ('auto', 'ffx')
                           and get('FSR', 'UpscalerIndex', 'auto') in ('auto', '0') else 'unsupported'),
                 int8=get('HelixSR', 'Int8', 'auto'), wave_size=get('HelixSR', 'WaveSize', 'auto'),
@@ -93,7 +93,7 @@ def update_settings(source, changes):
     edits.extend(mapping[k] for k in changes if k in mapping)
     if 'upscaler' in changes:
         edits.extend([('Libraries', 'FfxDx12SRPath', 'auto'),
-                      ('FSR', 'UpscalerIndex', '0' if state['upscaler'] == 'helixsr' else '2')])
+                      ('FSR', 'UpscalerIndex', '0' if state['upscaler'] == 'helixsr' else '1')])
     bom = '\ufeff' if source.startswith('\ufeff') else ''
     result = source.removeprefix('\ufeff')
     before = parse_config(source)

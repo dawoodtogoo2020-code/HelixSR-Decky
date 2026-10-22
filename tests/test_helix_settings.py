@@ -42,13 +42,13 @@ class HelixSettingsTests(unittest.TestCase):
         self.assertIn('FGNvngxReplacement=Other', updated)
         self.assertIn('Int8=on', updated)
 
-    def test_upscaler_switches_between_model_e_and_integrated_fsr31_without_losing_custom_state(self):
+    def test_upscaler_switches_between_model_e_and_integrated_amd_fsr_without_losing_custom_state(self):
         source = SOURCE + '[Libraries]\nFfxDx12SRPath=Z:\\old-wrapper.dll\n[FSR]\nUpscalerIndex=0\nCustomTone=keep\n'
         fsr = helix_settings.update_settings(source, {'upscaler': 'fsr'})
         self.assertEqual(helix_settings.read_settings(fsr)['upscaler'], 'fsr')
         self.assertIn('Dx12Upscaler=ffx', fsr)
         self.assertIn('FfxDx12SRPath=auto', fsr)
-        self.assertIn('UpscalerIndex=2', fsr)
+        self.assertIn('UpscalerIndex=1', fsr)
         self.assertIn('CustomTone=keep', fsr)
         self.assertIn('[User]\r\nEnabled=keep-this\r\nCustom=unchanged\r\n', fsr)
         model_e = helix_settings.update_settings(fsr, {'upscaler': 'helixsr'})

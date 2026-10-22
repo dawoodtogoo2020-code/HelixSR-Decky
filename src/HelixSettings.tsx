@@ -17,7 +17,7 @@ export function HelixSettings({ settings, disabled, save }: {
   return <>
     {select('Upscaler', 'upscaler', settings.upscaler,
       [...(settings.upscaler === 'unsupported' ? [['Existing custom upscaler', 'unsupported'] as [string, string]] : []),
-       ['HelixSR Model E', 'helixsr'], ['AMD FSR 3.1', 'fsr']])}
+       ['HelixSR Model E', 'helixsr'], ['AMD FSR', 'fsr']])}
     {select('Frame generation', 'provider', settings.provider,
       [...(settings.provider === 'unsupported' ? [['Existing custom provider', 'unsupported'] as [string, string]] : []),
        ['Off', 'off'], ['HelixSR DLSS FG', 'helixsr'], ['AMD FSR FG', 'fsr'], ['Intel XeSS FG', 'xess']],

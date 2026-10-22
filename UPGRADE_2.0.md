@@ -6,7 +6,7 @@ For Scaler installations, open **OptiScaler and frame generation** in Decky, or 
 
 | Control | Supported choices |
 | --- | --- |
-| Upscaler | HelixSR Model E or AMD FSR 3.1; additional FSR backends remain in Scaler's own menu |
+| Upscaler | HelixSR Model E or AMD FSR; selects the first AMD backend supported by the GPU; additional choices remain in Scaler's own menu |
 | Frame generation provider | Off, HelixSR DLSS FG, AMD FSR FG, Intel XeSS FG |
 | HelixSR FG model | Light or Full |
 | QuickFlow | Off, Fast or Fastest with Full only |

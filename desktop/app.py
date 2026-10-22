@@ -666,7 +666,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(note)
         fields = {}
         choices = {
-            'upscaler': ('Upscaler', [('HelixSR Model E', 'helixsr'), ('AMD FSR 3.1', 'fsr')]),
+            'upscaler': ('Upscaler', [('HelixSR Model E', 'helixsr'), ('AMD FSR', 'fsr')]),
             'provider': ('Frame generation', [('Off', 'off'), ('HelixSR DLSS FG', 'helixsr'), ('AMD FSR FG', 'fsr'), ('Intel XeSS FG', 'xess')]),
             'model': ('FG model', [('Light', 'light'), ('Full', 'full')]),
             'quick_flow': ('QuickFlow (Full only)', [('Off', 'off'), ('Fast', 'fast'), ('Fastest', 'fastest')]),
