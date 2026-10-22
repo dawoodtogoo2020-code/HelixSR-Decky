@@ -443,11 +443,12 @@ class DesktopWidgetTests(unittest.TestCase):
         game = self.backend.game
         game.update(name='God of War (2018)', compatibility='unsupported', managed=True,
                     enabled=True, renderer_unsupported=True,
-                    reasons=['God of War (2018) uses DirectX 11 only. HelixSR requires DirectX 12, and OptiScaler cannot change the game\'s renderer.'])
+                    reasons=['God of War (2018) uses DirectX 11 only. This plugin has not verified that Scaler route.'])
         game['installation_status'] = installation_status(game)
         self.window._details_received('a', game)
         self.assertIn('DirectX 11', self.window.blockers.text())
-        self.assertIn('built-in upscaling', self.window.blockers.text())
+        self.assertIn("This plugin's validated installation route requires DirectX 12", self.window.blockers.text())
+        self.assertIn('DirectX 11 upscaling', self.window.blockers.text())
         self.assertTrue(self.window.dx12.isHidden())
         self.assertFalse(self.window.install.isEnabled())
         self.assertFalse(self.window.actions['enable'].isEnabled())
