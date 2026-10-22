@@ -4,11 +4,11 @@
 
 Choose **Game** and **Release to install** at the top. HelixSR version checks sit with the game installation controls. Plugin version and updates are grouped immediately below, followed by **Import games**. Expand **Advanced game settings** for model settings, the overlay, optional menu labels, diagnostics, **Disable HelixSR** and **Remove and restore originals**.
 
-HelixSR 1.9.3 does not include its own frame generation. Alternative Scaler providers retain their settings and can be configured in Scaler's Frame Generation menu, subject to game, GPU and dependency requirements. Native FSR replacement installs use the game's available FG controls. A generic multiplier does not apply to every provider. To replace a modern Scaler installation with 1.8.1, remove HelixSR first to restore original files, then review a new installation.
+HelixSR 2.0 restores DLSS frame generation through Scaler. Select Light or Full, provider and supported multiplier in the application. HelixSR FG requires a DirectX 12 game with DLSS FG enabled in-game. 3× is exposed only for XeSS FG. Native FSR replacement remains upscaling-only. Remove and restore originals before changing between native and Scaler routes.
 
 ## Installation error mentioning LICENSE-APACHE-2.0
 
-Decky **0.1.30** and Desktop **0.1.19** support the reviewed official **HelixSR 1.9.3** release and its complete **Scaler 1.0.6** package. Select **Latest upstream**, then Install/Update and review the version and terms. The converter runs unchanged and builds Model E locally. Alternative frame-generation settings are preserved; HelixSR's own frame generation is unavailable. **Compatible HelixSR 1.8.1** remains an explicit option. Unknown releases or replaced 1.9.3 archives require another reviewed app update.
+Decky **0.1.31** and Desktop **0.1.20** add the reviewed official **HelixSR 2.0.0** release and **Scaler 1.1.0**. Select **Latest upstream**, scan, then review Install/Update. The unchanged official converter builds the upscaling network and both Light/Full frame-generation models locally. Per-game Scaler settings are editable in the plugin and desktop app. **Compatible HelixSR 1.8.1** remains available explicitly. Future releases are detected by scanning; an unfamiliar version or replaced archive requires a reviewed app update before installation. See [2.0 settings and compatibility](UPGRADE_2.0.md).
 
 The compatibility download is tied to the reviewed official archive SHA-256 and the [1.8.1 license](https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE). A replaced archive is rejected. Newer or unverified existing installations are blocked from being downgraded; remove them using their owning manager first. Keep locally generated networks and game installation records.
 

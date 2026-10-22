@@ -84,7 +84,10 @@ function harness(overrides = {}) {
     }).outputText;
     const require = spec => {
       if (mocks[spec]) return mocks[spec];
-      if (spec.startsWith(".")) return load(path.resolve(path.dirname(filename), spec + ".ts"));
+      if (spec.startsWith(".")) {
+        const base = path.resolve(path.dirname(filename), spec);
+        return load(fs.existsSync(base + '.ts') ? base + '.ts' : base + '.tsx');
+      }
       throw Error(`Unexpected dependency ${spec}`);
     };
     const fn = vm.runInContext(`(function(require,module,exports){${compiled}\n})`, context, { filename });
@@ -383,4 +386,53 @@ test("primary controls precede collapsed advanced settings", async () => {
   assert.equal(h.walk(tree, n => n.type === "ToggleField" && /status overlay/.test(n.props.label)).length, 0);
   h.openAdvanced();
   assert.equal(h.walk(h.render(), n => n.type === "ToggleField" && /status overlay/.test(n.props.label)).length, 1);
+});
+
+function renderedHelixSettings(h) {
+  const node = h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings")[0];
+  assert.ok(node, "Helix settings component is present in Advanced game settings");
+  // HelixSettings is a pure nested function component. Render it directly so
+  // these tests exercise its actual dropdown callbacks through the panel save path.
+  return node.type(node.props);
+}
+function settingsDropdown(h, label) {
+  const node = h.walk(renderedHelixSettings(h), n => n.type === "DropdownItem" && n.props.label === label)[0];
+  assert.ok(node, `settings dropdown ${label} is visible`);
+  return node;
+}
+function enableSettings(h, extra = {}) {
+  Object.assign(h.game, { managed: true, enabled: true, route: "optiscaler", helix_settings: {
+    available: true, revision: "settings-rev-7", provider: "helixsr", model: "full", quick_flow: "fast",
+    multiplier: 2, upscaler: "helixsr", int8: "auto", wave_size: "auto", ...extra
+  }});
+}
+
+test("Helix settings provider, model, and multiplier callbacks preserve the current revision", async () => {
+  async function change(label, data, settings = {}) {
+    const h = harness({ set_game_settings: () => h.game });
+    enableSettings(h, settings); await h.ready(); h.openAdvanced();
+    const control = settingsDropdown(h, label);
+    control.props.onChange({ data }); await flush();
+    return { h, control };
+  }
+  const model = await change("Frame generation model", "light");
+  assert.deepEqual(JSON.parse(JSON.stringify(model.h.calls.at(-1))), { route: "set_game_settings", args: ["pragmata", { model: "light", quick_flow: "off" }, "settings-rev-7"] });
+  const provider = await change("Frame generation", "xess");
+  assert.deepEqual(JSON.parse(JSON.stringify(provider.h.calls.at(-1))), { route: "set_game_settings", args: ["pragmata", { provider: "xess", multiplier: 2 }, "settings-rev-7"] });
+  const multiplier = await change("Frame multiplier", 3, { provider: "xess" });
+  assert.deepEqual(JSON.parse(JSON.stringify(multiplier.control.props.rgOptions.map(option => option.data))), [2, 3]);
+  assert.deepEqual(JSON.parse(JSON.stringify(multiplier.h.calls.at(-1))), { route: "set_game_settings", args: ["pragmata", { multiplier: 3 }, "settings-rev-7"] });
+});
+
+test("Helix settings exposes save failures and disables edits during a running job", async () => {
+  const h = harness({ library: () => ({ ...h.library(), jobs: [job()] }),
+    set_game_settings: () => { throw Error("Settings changed; refresh before saving"); } });
+  enableSettings(h); await h.ready(); h.openAdvanced();
+  assert.equal(settingsDropdown(h, "Upscaler").props.disabled, true, "running install locks settings");
+  // The backend may reject a save after a stale revision even if the UI was enabled.
+  const editable = harness({ set_game_settings: () => { throw Error("Settings changed; refresh before saving"); } });
+  enableSettings(editable); await editable.ready(); editable.openAdvanced();
+  settingsDropdown(editable, "Upscaler").props.onChange({ data: "fsr" }); await flush();
+  assert.match(editable.text(editable.render()), /Settings changed; refresh before saving/);
+  assert.ok(editable.toasts.some(toast => /action could not complete/.test(toast.title)));
 });

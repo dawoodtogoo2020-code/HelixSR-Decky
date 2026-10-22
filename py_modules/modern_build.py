@@ -21,6 +21,10 @@ NUMPY_VERSION = '2.5.3'
 NUMPY_WHEEL = 'numpy-2.5.3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl'
 NUMPY_URL = 'https://files.pythonhosted.org/packages/65/af/aa78d1a88805456e212b65461354cd943197fb9acecc4c90fd12295123a3/' + NUMPY_WHEEL
 NUMPY_SHA256 = 'b7e18c623bb5c95acb3b3328861272816ba199fb531921c5d6d0b675f1fde9e3'
+HELIX20_DLL_SIZE = 7997952
+HELIX20_DLL_SHA256 = '82b612a73759117d4203f0ca76f18b325e1c6f3c61c64481c94750abce392a09'
+HELIX20_SETUP_SHA256 = 'a86e795271a7adf7707f47371de3aa6815c2b5c14d9b8f1d52e32e7a85930e7c'
+HELIX20_FG_SETUP_SHA256 = '094c7bb09156310e1ab18bde95eb96ecf9fc730615d8d2f66a73a7ebe519bf4a'
 
 
 def digest(path):
@@ -150,6 +154,30 @@ def prepare_dxc(data):
                        ['bin/x64/' + name for name in ('dxc.exe', 'dxcompiler.dll', 'dxil.dll')], populate)
 
 
+def helix20_layout(here):
+    """Recognise only the reviewed 2.0 setup layout before changing arguments."""
+    here = Path(here)
+    dll = here / 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll'
+    setup = here / 'setup/helixsr_setup.py'
+    fg_setup = here / 'setup/fg/fg_setup.py'
+    try:
+        return (not any(path.is_symlink() for path in (dll, setup, fg_setup))
+                and dll.stat().st_size == HELIX20_DLL_SIZE
+                and digest(dll) == HELIX20_DLL_SHA256
+                and digest(setup) == HELIX20_SETUP_SHA256
+                and digest(fg_setup) == HELIX20_FG_SETUP_SHA256)
+    except OSError:
+        return False
+
+
+def setup_command(here, python, launcher):
+    command = [str(python), '-B', str(Path(here) / 'setup/helixsr_setup.py'), str(here),
+               '--dxc', str(launcher), '--yes']
+    if not helix20_layout(here):
+        command += ['--separate-files', '--no-fg']
+    return command
+
+
 def run(here):
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1')
     data = Path(env['XDG_DATA_HOME']) / 'HelixSR'
@@ -168,8 +196,7 @@ WINEPREFIX="$HELIXSR_BUILD_DATA/wineprefix" WINEDEBUG=-all exec "$HELIXSR_BUILD_
 ''')
     launcher.chmod(0o700)
     try:
-        subprocess.run([str(python), '-B', str(here / 'setup/helixsr_setup.py'), str(here),
-                        '--dxc', str(launcher), '--yes', '--separate-files', '--no-fg'], env=env, check=True)
+        subprocess.run(setup_command(here, python, launcher), env=env, check=True)
     finally:
         launcher.unlink(missing_ok=True)
 

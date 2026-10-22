@@ -125,9 +125,11 @@ class ReleaseValidationTests(PluginUpdateFixtures):
         modern = ('modern_build', 'modern_release')
         extra.update({f'{plugin_updates.FOLDER}/py_modules/{name}.py': b'# fixture\n' for name in modern})
         for version in ('0.1.30', '0.1.31'):
+            required = modern if version == '0.1.30' else modern + ('helix20_release', 'helix_settings')
+            extra.update({f'{plugin_updates.FOLDER}/py_modules/{name}.py': b'# fixture\n' for name in required})
             archive_bytes(self.root, version, extra=extra)
             plugin_updates.validate_zip(self.root / 'fixture.zip', version)
-            for name in modern:
+            for name in required:
                 archive_bytes(self.root, version, extra=extra,
                               omit=(f'{plugin_updates.FOLDER}/py_modules/{name}.py',))
                 with self.subTest(version=version, omitted=name), self.assertRaisesRegex(ValueError, 'Incomplete'):

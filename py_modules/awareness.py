@@ -169,12 +169,17 @@ def awareness(game, tree, home, route, target=None):
                 opti_files.append(str(p))
             if lower in ('config.ini', 'user.settings', 'dx12user.settings', 'engine.ini', 'gameusersettings.ini', 'optiscaler.ini'):
                 src = text(p, 256 << 10)
-                for k, value in re.findall(r'(?im)^\s*([^;#\r\n=]*(?:framegen|framegeneration|dlssg|xessfg|fginput|fgoutput)[^=\r\n]*)\s*=\s*([^\r\n;]+)', src):
+                for k, value in re.findall(r'(?im)^\s*([^;#\r\n=]*(?:framegen|framegeneration|dlssg|xessfg|fginput|fgoutput|fgnvngxreplacement|fgpreset|quickflow)[^=\r\n]*)\s*=\s*([^\r\n;]+)', src):
                     source = 'OptiScaler' if lower == 'optiscaler.ini' else 'Native game'
                     fg.append(evidence(source, k.strip(), value.strip(), p))
         # Log candidates belong to a directory, not each asset inside it. Avoid
         # thousands of identical existence/symlink checks in large game folders.
-        for lp in (d / 'helixsr.log', d / 'HelixSR/helixsr.log', d / 'OptiScaler.log'):
+        candidates = [d / 'helixsr.log', d / 'OptiScaler.log']
+        # HelixSR's managed subfolders live beside the game executable. Do not
+        # probe those subfolders again for every directory in the scanned tree.
+        if d in (Path(game['folder']), Path(target) if target else None):
+            candidates.extend((d / 'HelixSR/helixsr.log', d / 'HelixSR-fsrfg/helixsr.log'))
+        for lp in candidates:
             if str(lp) not in [x['path'] for x in logs] and safe_log(lp, game['folder']):
                 logs.append(dict(path=str(lp), modified=lp.stat().st_mtime,
                                  excerpt=text_tail(lp)))
@@ -252,11 +257,20 @@ def awareness(game, tree, home, route, target=None):
         evidence_state = 'game running; current HelixSR output unverified'
     setup = setup_report(target, route, options, opti_files)
     configured_helix = setup['configured']
+    if setup.get('framegen_evidence') != 'not provided by this release':
+        item = evidence('HelixSR 2.0', 'Frame generation provider', setup['framegen_evidence'],
+                        Path(target or game['folder']) / 'OptiScaler.ini',
+                        'configuration only; runtime activation unverified')
+        item['enabled'] = setup.get('framegen_configured')
+        fg.append(item)
+    helix20_fg = any(item['source'] == 'HelixSR 2.0' for item in fg)
     return dict(optiscaler=dict(present=bool(opti_files or configs), dlls=opti_files,
                                configs=[str(p) for p in configs], involved=route == 'optiscaler' or configured_helix,
                                helix_configured=configured_helix, runtime=opti_runtime, setup=setup),
                 framegen=fg,
-                framegen_summary=('Frame-generation configuration unavailable; state unknown'
+                framegen_summary=('HelixSR frame-generation configuration found; runtime activation unverified'
+                                  if helix20_fg else
+                                  'Frame-generation configuration unavailable; state unknown'
                                   if awareness_warnings and not fg else
                                   'See source-specific evidence below; some metadata is invalid'
                                   if awareness_warnings else

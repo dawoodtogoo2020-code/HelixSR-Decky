@@ -97,6 +97,26 @@ class AwarenessMetadataTests(unittest.TestCase):
         self.assertTrue(evidence[('LSFG-VK', 'multiplier')])
         self.assertFalse(result['awareness_warnings'])
 
+    def test_helix20_frame_generation_settings_are_reported_as_configuration_only(self):
+        import json
+        write(self.game / 'OptiScaler.ini', '[Upscalers]\nDx12Upscaler=auto\n[FrameGen]\n'
+              'FGInput=nvngxfg\nFGNvngxReplacement=HelixSR\n')
+        write(self.game / 'HelixSR/helixsr-install.json', json.dumps({'helixsr': '2.0.0'}))
+        write(self.game / 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll', 'fixture')
+        write(self.game / 'HelixSR-fsrfg/helixsr.log', 'old frame generation line')
+        game = dict(id='steam:42', name='Example', folder=str(self.game), source='Steam', appid='42')
+        tree = [(self.game, ['Example.exe', 'OptiScaler.ini']),
+                (self.game / 'HelixSR-fsrfg', ['amd_fidelityfx_dx12.dll', 'helixsr.log'])]
+        with patch('awareness.active_processes', return_value=[]):
+            result = awareness.awareness(game, tree, self.home, 'optiscaler', self.game)
+        configured = [item for item in result['framegen'] if item['source'] == 'HelixSR 2.0']
+        self.assertEqual(len(configured), 1)
+        self.assertTrue(configured[0]['enabled'])
+        self.assertEqual(configured[0]['meaning'], 'configuration only; runtime activation unverified')
+        self.assertEqual(result['framegen_summary'],
+                         'HelixSR frame-generation configuration found; runtime activation unverified')
+        self.assertEqual(result['helix_runtime'], 'historical log available; current runtime unverified')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

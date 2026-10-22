@@ -100,6 +100,31 @@ class SetupTests(unittest.TestCase):
         self.assertFalse(report['configured'])
         self.assertIn('Repeated setting', '\n'.join(report['checks']))
 
+    def test_20_layout_and_frame_generation_are_configuration_evidence_only(self):
+        import json
+        from helix20_release import scaler_pairs
+        for _, destination in scaler_pairs():
+            path = self.root / destination
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'payload')
+        marker = self.root / 'HelixSR/helixsr-install.json'
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({'helixsr': '2.0.0'}))
+        self.config.write_text('[Upscalers]\nDx12Upscaler=auto\n[FrameGen]\n'
+                               'FGInput=nvngxfg\nFGNvngxReplacement=HelixSR\n')
+        report = self.report()
+        self.assertTrue(report['configured'])
+        self.assertTrue(report['framegen_configured'])
+        self.assertEqual(report['framegen_evidence'], 'configured; runtime unverified')
+        self.assertFalse(report['missing'])
+        self.assertIn('do not prove frame generation ran', '\n'.join(report['checks']))
+
+        self.config.write_text(self.config.read_text().replace('FGInput=nvngxfg', 'FGInput=xefg'))
+        report = self.report()
+        self.assertTrue(report['configured'])
+        self.assertFalse(report['framegen_configured'])
+        self.assertEqual(report['framegen_evidence'], 'not selected; runtime unknown')
+
 
 if __name__ == '__main__':
     unittest.main()

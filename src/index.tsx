@@ -11,6 +11,7 @@ import { librarySelectable, libraryStatus } from "./libraryStatus";
 import { LibraryRead } from "./libraryRead";
 import { InstallSession, JobTracker } from "./installSession";
 import { readLaunchOptions } from "./launchDetails";
+import { HelixSettings, HelixSettingsState } from "./HelixSettings";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -45,6 +46,7 @@ function pollPluginStatus() {
 
 type FG = { source: string; key: string; value: string; enabled: boolean | null; meaning: string; path: string };
 type Game = { id: string; name: string; folder: string; source: string; compatibility: string;
+  helix_settings?: HelixSettingsState;
   installation_status?: { state: "ready" | "running" | "review" | "unsupported" | "recovery"; label: string; summary: string;
     running: boolean; selectable: boolean; can_modify: boolean; can_restore?: boolean; issues: {code: string; title: string; reason: string; steps: string[]; blocking: boolean}[] };
   appid?: string;
@@ -75,6 +77,8 @@ type Preview = { token: string; name: string; action: string; route: string; fil
 const library = callable<[], Library>("library");
 const libraryRead = new LibraryRead(library);
 const details = callable<[string, string?], Game>("game_details");
+const setGameSettings = callable<[string, Record<string, string | number>, string], Game>("set_game_settings");
+const setInstallationRoute = callable<[string, string], Game>("set_installation_route");
 const checkUpdates = callable<[boolean], Release>("check_updates");
 const forgetGame = callable<[string], Library>("forget_game");
 const importFolders = callable<[string[]], Library>("import_folders");
@@ -319,7 +323,12 @@ function Content() {
   async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
     setBusy(true); setError("");
     try { return await fn(); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); return undefined; }
+    catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      toaster.toast({ title: 'HelixSR action could not complete', body: message, duration: 10000 });
+      return undefined;
+    }
     finally { setBusy(false); }
   }
   async function refresh() {
@@ -475,6 +484,15 @@ function Content() {
         if (result) toaster.toast({ title: "HelixSR Decky", body: result.message });
         await refresh();
       }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
+  }
+  async function saveHelixSettings(changes: Record<string, string | number>) {
+    if (!game?.helix_settings?.revision) return;
+    const id = game.id;
+    const updated = await run(() => setGameSettings(id, changes, game.helix_settings!.revision!));
+    if (updated && mountedRef.current && selectedRef.current === id) {
+      setGame(updated);
+      toaster.toast({ title: 'HelixSR settings saved', body: 'Restart the game to apply the change.' });
+    }
   }
   async function launchChange(restore = false) {
     if (!game?.appid) return;
@@ -738,6 +756,18 @@ function Content() {
         onClick={() => void run(() => forgetGame(game.id)).then(result => { if (result) { setData(cacheLibrary(result)); chooseGame(""); } })}>Forget imported folder</ButtonItem></PanelSectionRow>}
     </PanelSection>}
     {game && <PanelSection title="OptiScaler and frame generation">
+      {!game.managed && !game.legacy && <PanelSectionRow><ButtonItem layout="below" disabled={disabled}
+        onClick={() => void interact(async () => {
+          const id = game.id;
+          const updated = await run(() => setInstallationRoute(id, game.route === 'direct' ? 'optiscaler' : 'auto'));
+          if (updated && selectedRef.current === id) setGame(updated);
+        })}>{game.route === 'direct' ? 'Use Scaler for frame generation and settings' : 'Use automatic installation route'}</ButtonItem></PanelSectionRow>}
+      {game.managed && game.route === 'direct' && <PanelSectionRow><div className="helix-muted">
+        Native FSR replacement provides upscaling. For Scaler settings and DLSS frame generation, remove HelixSR to restore originals,
+        choose the Scaler route, then install again. The game must support DLSS frame generation.</div></PanelSectionRow>}
+      {game.helix_settings && <HelixSettings settings={game.helix_settings}
+        disabled={disabled || game.installation_status?.can_modify === false}
+        save={changes => void interact(() => saveHelixSettings(changes))} />}
       <PanelSectionRow><div style={infoStyle}>
         OptiScaler installed: {game.optiscaler.present === null ? "not inspected" : game.optiscaler.present ? "yes" : "no detected files"}{"\n"}
         OptiScaler HelixSR route configured: {game.optiscaler.helix_configured ? "yes" : "no"}{"\n"}
@@ -745,7 +775,7 @@ function Content() {
         HelixSR runtime: {game.helix_runtime}{"\n"}
         Frame generation: {game.framegen_summary}{"\n"}
         {game.framegen.map(f => `${f.source} · ${f.key}: ${f.value} (${f.meaning})`).join("\n")}{"\n"}
-        HelixSR 1.9.3 withdraws HelixSR frame generation. Alternative providers have their own compatibility and settings. Detected settings do not prove active frame generation.
+        HelixSR 2.0 restores DLSS frame generation. Provider support depends on the game and GPU. Detected settings do not prove active frame generation.
       </div></PanelSectionRow>
       {game.route === "optiscaler" && <PanelSectionRow><div style={infoStyle}>
         Target: {game.main_exe || game.target || "unknown"}{"\n"}

@@ -127,8 +127,29 @@ class ModernBuildTests(unittest.TestCase):
         script = build.build_script()
         self.assertIn('--separate-files', script)
         self.assertIn('--no-fg', script)
+        self.assertIn('helix20_layout', script)
         embedded = script.split("<<'PY_HELIX_BOOTSTRAP'\n", 1)[1].rsplit('\nPY_HELIX_BOOTSTRAP', 1)[0]
         compile(embedded, '<bootstrap>', 'exec')
+
+    def test_verified_20_layout_builds_embedded_network_and_full_frame_generation(self):
+        dll = self.write(self.root, 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll', b'MZ-2.0')
+        setup = self.write(self.root, 'setup/helixsr_setup.py', b'official network setup')
+        fg = self.write(self.root, 'setup/fg/fg_setup.py', b'official frame generation setup')
+        with patch.object(build, 'HELIX20_DLL_SIZE', dll.stat().st_size), \
+                patch.object(build, 'HELIX20_DLL_SHA256', build.digest(dll)), \
+                patch.object(build, 'HELIX20_SETUP_SHA256', build.digest(setup)), \
+                patch.object(build, 'HELIX20_FG_SETUP_SHA256', build.digest(fg)):
+            self.assertTrue(build.helix20_layout(self.root))
+            command = build.setup_command(self.root, Path('/python'), Path('/dxc-launch'))
+        self.assertEqual(command[-3:], ['--dxc', str(Path('/dxc-launch')), '--yes'])
+        self.assertNotIn('--separate-files', command)
+        self.assertNotIn('--no-fg', command)
+
+    def test_unverified_or_19_layout_keeps_separate_network_without_frame_generation(self):
+        self.write(self.root, 'setup/helixsr_setup.py', b'legacy setup')
+        command = build.setup_command(self.root, Path('/python'), Path('/dxc-launch'))
+        self.assertFalse(build.helix20_layout(self.root))
+        self.assertEqual(command[-2:], ['--separate-files', '--no-fg'])
 
     def test_frozen_bootstrap_uses_bundled_source_and_real_interpreter(self):
         resource = self.write(self.root, 'bootstrap/modern_build.py', b'print("host bootstrap executed")\n')

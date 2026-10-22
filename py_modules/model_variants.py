@@ -8,6 +8,7 @@ import hashlib
 import json
 import struct
 import modern_release
+import helix20_release
 
 DEFAULT_VARIANT = 'helixsr-model-e'
 ADAPTER = 'separate-network-v1'
@@ -59,6 +60,7 @@ REVIEWED_RECIPES = {
     # Official 1.8.1 replacement: installer-only converter edits; separate output unchanged.
     '93930e9c131c82fe7810181cc8e6bc81cf18e9203737a9d28d769be5983acaef': DEFAULT_VARIANT,
     modern_release.RECIPE_SHA256: DEFAULT_VARIANT,
+    helix20_release.RECIPE_SHA256: DEFAULT_VARIANT,
 }
 VARIANTS = {
     DEFAULT_VARIANT: dict(id=DEFAULT_VARIANT, label='HelixSR Model E',
@@ -98,6 +100,8 @@ def recipe_digest(package):
 
 def verify_recipe(package, variant_id=None):
     selected = select_variant(variant_id)
+    if (package / 'HelixSR-fsrfg').is_dir():
+        return helix20_release.verify_recipe(package)
     if (package / 'helixsr-scaler').is_dir():
         return modern_release.verify_recipe(package)
     digest = recipe_digest(package)
@@ -129,6 +133,8 @@ KERNEL_NAMES = tuple(('px_' + name).encode() for name in (
 
 
 def verify_outputs(package):
+    if (package / 'HelixSR-fsrfg').is_dir():
+        return helix20_release.verify_outputs(package)
     weights = package / 'helixsr_weights.bin'
     manifest = package / 'helixsr_setup.json'
     if not manifest.is_file() or manifest.stat().st_size > 4096:

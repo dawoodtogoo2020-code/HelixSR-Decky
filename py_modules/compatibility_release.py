@@ -88,15 +88,19 @@ def require_supported_latest(release):
     if not isinstance(release, Mapping):
         raise ValueError("Latest HelixSR release metadata must be a mapping.")
     version = release.get("version")
+    if version == "2.0.0":
+        from helix20_release import validate_release
+        validate_release(release)
+        return release
     if version == "1.9.3":
         from modern_release import validate_release
         validate_release(release)
         return release
     if parse_version(version) > _COMPATIBLE_TUPLE:
         raise ValueError(
-            f"Latest HelixSR {version} is not supported: HelixSR 1.9 and later "
-            "changed the installer, converter manifest and Scaler layout, which "
-            "this manager has not reviewed. Select 'Compatible HelixSR "
+            f"Latest HelixSR {version} was detected but its package format is not yet reviewed. "
+            "Check for a plugin update before installing it. Your installed files are unchanged. "
+            "Select 'Compatible HelixSR "
             f"{COMPATIBLE_VERSION}' explicitly to install the reviewed release."
         )
     return release

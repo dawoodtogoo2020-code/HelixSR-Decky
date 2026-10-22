@@ -87,6 +87,14 @@ class Plugin:
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.assess_safe, self.manager.get_game(gid), executable=executable)
 
+    async def set_game_settings(self, gid, changes, revision):
+        async with self.api_lock:
+            return await asyncio.to_thread(self.manager.set_game_settings, gid, changes, revision)
+
+    async def set_installation_route(self, gid, route):
+        async with self.api_lock:
+            return await asyncio.to_thread(self.manager.set_installation_route, gid, route)
+
     async def overlay_status(self):
         return self.status_monitor.status()
 

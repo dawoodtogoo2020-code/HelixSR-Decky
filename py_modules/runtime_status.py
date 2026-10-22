@@ -112,10 +112,14 @@ class RuntimeEvidence:
         if target:
             directories.add(target)
         self.paths = sorted({d / suffix for d in directories
-                             for suffix in ('helixsr.log', 'HelixSR/helixsr.log')}, key=str)
+                             for suffix in ('helixsr.log', 'HelixSR/helixsr.log',
+                                            'HelixSR-fsrfg/helixsr.log')}, key=str)
         self.modules = [Path(p) for p in game.get('targets', [])]
         if game.get('route') == 'optiscaler' and target:
-            self.modules += [target / 'HelixSR/helixsr.dll', target / 'HelixSR/helixsr_upscaler.dll']
+            if (game.get('installed_version') or game.get('version')) == '2.0.0':
+                self.modules.append(target / 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll')
+            else:
+                self.modules += [target / 'HelixSR/helixsr.dll', target / 'HelixSR/helixsr_upscaler.dll']
         self.session = None
         self.cursors = {}
         self.event = None
