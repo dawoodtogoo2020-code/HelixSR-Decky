@@ -2,6 +2,7 @@
 from pathlib import PurePosixPath
 
 DD2_GUIDE = 'https://github.com/optiscaler/OptiScaler/wiki/Dragons-Dogma-2'
+PRAGMATA_GUIDE = 'https://github.com/optiscaler/OptiScaler/wiki/PRAGMATA'
 
 
 def setup_guidance(game):
@@ -18,6 +19,11 @@ def setup_guidance(game):
     if dd2 and route == 'optiscaler':
         notes.append("Dragon's Dogma 2 needs extra setup: OptiScaler's guide requires the DD2 build of REFramework (dinput8.dll). This app does not install or verify REFramework. Follow the linked game guide, including its Linux loader instructions, before launching. Do not replace an existing mod blindly. This is not a verified Steam Deck gameplay result.")
         links.append(dict(label="Dragon's Dogma 2 setup guide", url=DD2_GUIDE))
+    pragmata = (game.get('source') == 'Steam' and str(game.get('appid')) == '3357650') or (
+        exe == 'pragmata.exe' and str(game.get('name', '')).casefold() == 'pragmata')
+    if pragmata and route == 'optiscaler':
+        notes.append('PRAGMATA requires a compatible REFramework build for Scaler. Without it the game can exit during startup. This app does not install or verify that dependency. Follow the linked game guide and enable its dinput8 loader alongside dxgi on Proton. Keep existing mods and launch options. Game updates can require a newer REFramework build.')
+        links.append(dict(label='PRAGMATA setup guide', url=PRAGMATA_GUIDE))
     if game.get('awareness_deferred'):
         action, headline, steps = 'inspect', 'Checking this game before installation', ['Wait for the selected game details to finish loading.']
     elif not ready or game.get('recovery_available'):
