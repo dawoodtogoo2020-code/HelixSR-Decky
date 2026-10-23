@@ -123,6 +123,16 @@ class DesktopBackend:
             self._open()
             return self.manager.check_update(bool(force))
 
+    def set_game_settings(self, gid, changes, revision):
+        with self.lock:
+            self._write()
+            return self.manager.set_game_settings(gid, changes, revision)
+
+    def set_installation_route(self, gid, route):
+        with self.lock:
+            self._write()
+            return self.manager.set_installation_route(gid, route)
+
     def accept_license(self, accepted, token=None):
         if type(accepted) is not bool:
             raise ValueError('License acceptance requires a boolean')

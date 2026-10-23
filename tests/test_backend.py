@@ -1508,8 +1508,10 @@ class TransactionTests(Fixtures):
         status = data['installation_status']
         self.assertEqual(status['label'], 'Unsupported')
         self.assertIn('DirectX 11', status['summary'])
-        self.assertIn('OptiScaler cannot', status['summary'])
-        self.assertIn('built-in upscaling', status['issues'][0]['steps'][0])
+        self.assertIn('plugin currently installs HelixSR only through its validated DirectX 12 route', status['summary'])
+        self.assertIn('Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling', status['summary'])
+        self.assertEqual(status['issues'][0]['title'], 'DX11 route not verified')
+        self.assertIn('Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling', status['issues'][0]['steps'][0])
         self.assertFalse(status['can_modify'])
         self.assertFalse(status['can_restore'])
         for action in ('install', 'update', 'enable', 'adopt'):
@@ -1572,6 +1574,39 @@ class TransactionTests(Fixtures):
         data = self.m.assess(self.game)
         self.assertEqual(Path(data['main_exe']).name, 'Game.exe')
         self.assertTrue(data['dx12_confirmation_needed'])
+
+    def test_dx12_confirmation_is_recorded_for_the_exact_optiscaler_executable(self):
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        write(self.root / 'Example.exe', pe())
+        self.package()
+        with self.assertRaisesRegex(ValueError, 'Confirm that this game is set to DirectX 12'):
+            self.m.preview(self.game['id'], 'install')
+        preview = self.m.preview(self.game['id'], 'install', dx12_confirmed=True)
+        self.m.execute(preview['token'])
+        record = self.m.record(self.game)
+        self.assertEqual(record['dx12_confirmation']['selected_executable'], 'Example.exe')
+        self.assertEqual(record['dx12_confirmation']['executable_sha256'], manager.sha(self.root / 'Example.exe'))
+        self.assertFalse(self.m.assess(self.game)['dx12_confirmation_needed'])
+        self.m.preview(self.game['id'], 'update')
+        write(self.root / 'Example.exe', pe() + b'changed executable bytes')
+        self.assertTrue(self.m.assess(self.game)['dx12_confirmation_needed'])
+        with self.assertRaisesRegex(ValueError, 'Confirm that this game is set to DirectX 12'):
+            self.m.preview(self.game['id'], 'update')
+        preview = self.m.preview(self.game['id'], 'update', dx12_confirmed=True)
+        self.m.execute(preview['token'])
+        record = self.m.record(self.game)
+        self.assertEqual(record['dx12_confirmation']['executable_sha256'], manager.sha(self.root / 'Example.exe'))
+        self.assertFalse(self.m.assess(self.game)['dx12_confirmation_needed'])
+        record.pop('dx12_confirmation')
+        manager.atomic_json(self.m.record_path(self.game), record)
+        self.assertTrue(self.m.assess(self.game)['dx12_confirmation_needed'])
+
+    def test_confirmed_executable_hash_uses_the_stat_identity_cache(self):
+        executable = self.root / 'Example.exe'
+        with patch('manager.sha', wraps=manager.sha) as digest:
+            self.assertEqual(manager.confirmed_executable_sha(executable), manager.confirmed_executable_sha(executable))
+        self.assertEqual(digest.call_count, 1)
 
     def test_unused_dx12_is_not_automatically_selected_without_example(self):
         self.native.unlink()

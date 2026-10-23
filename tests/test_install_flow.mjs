@@ -55,7 +55,7 @@ function harness(overrides = {}) {
       effects.push(() => { old?.cleanup?.(); mount.hooks[index].cleanup = callback(); });
     }
   }
-  const jsx = (type, props) => ({ type, props: props || {} });
+  const jsx = (type, props, key) => ({ type, props: props || {}, key });
   const ui = Object.fromEntries(["ButtonItem", "DropdownItem", "PanelSection", "PanelSectionRow",
     "TextField", "ToggleField", "ConfirmModal"].map(name => [name, name]));
   ui.staticClasses = {};
@@ -84,7 +84,10 @@ function harness(overrides = {}) {
     }).outputText;
     const require = spec => {
       if (mocks[spec]) return mocks[spec];
-      if (spec.startsWith(".")) return load(path.resolve(path.dirname(filename), spec + ".ts"));
+      if (spec.startsWith(".")) {
+        const base = path.resolve(path.dirname(filename), spec);
+        return load(fs.existsSync(base + '.ts') ? base + '.ts' : base + '.tsx');
+      }
       throw Error(`Unexpected dependency ${spec}`);
     };
     const fn = vm.runInContext(`(function(require,module,exports){${compiled}\n})`, context, { filename });
@@ -125,7 +128,7 @@ function harness(overrides = {}) {
   }
   async function ready() { mount(); await flush(); render(); await flush(); render(); }
   function openAdvanced() {
-    const button = walk(render(), node => node.type === "ButtonItem" && text(node) === "Show game settings, overlay and diagnostics")[0];
+    const button = walk(render(), node => node.type === "ButtonItem" && text(node) === "Show game settings")[0];
     if (button) button.props.onClick();
     render();
   }
@@ -372,15 +375,136 @@ test("explicit compatible release survives remount and confirms its exact versio
 });
 
 
-test("primary controls precede collapsed advanced settings", async () => {
+test("primary controls precede collapsed game settings, updates, and import", async () => {
   const h = harness(); await h.ready();
   const tree = h.render();
   const dropdowns = h.walk(tree, n => n.type === "DropdownItem");
   assert.deepEqual(dropdowns.slice(0, 2).map(n => n.props.label), ["Game", "Release to install"]);
   const sections = h.walk(tree, n => n.type === "PanelSection").map(n => n.props.title);
+  assert.ok(sections.indexOf("Game settings") < sections.indexOf("Plugin updates"));
   assert.ok(sections.indexOf("Plugin updates") < sections.indexOf("Import games"));
-  assert.ok(sections.indexOf("Import games") < sections.indexOf("Advanced game settings"));
   assert.equal(h.walk(tree, n => n.type === "ToggleField" && /status overlay/.test(n.props.label)).length, 0);
   h.openAdvanced();
-  assert.equal(h.walk(h.render(), n => n.type === "ToggleField" && /status overlay/.test(n.props.label)).length, 1);
+  const expanded = h.render();
+  assert.equal(h.walk(expanded, n => n.type === "ToggleField" && /status overlay/.test(n.props.label)).length, 1);
+  const expandedSections = h.walk(expanded, n => n.type === "PanelSection").map(n => n.props.title);
+  assert.ok(expandedSections.indexOf("Upscaling and frame generation") < expandedSections.indexOf("Status overlay"));
+  assert.ok(expandedSections.indexOf("Status overlay") < expandedSections.indexOf("Game actions"));
+});
+
+test("setup details stay compact while blocking issues remain visible", async () => {
+  const h = harness();
+  h.game.dx12_confirmation_needed = true;
+  h.game.setup_guidance = { headline: "Set up DX12", steps: ["Choose DX12 in the game", "Install REFramework after launch"],
+    notes: ["Extra setup note"], links: [{label: "Setup guide", url: "https://example.com/setup"}] };
+  h.game.installation_status = {state: "review", label: "Needs review", summary: "Check compatibility",
+    running: false, selectable: true, can_modify: false, issues: [
+      {code: "protected", title: "Blocking issue", reason: "Review game files", steps: ["Resolve files"], blocking: true},
+      {code: "dx12_unconfirmed", title: "DX12 issue", reason: "Confirm DX12", steps: ["Choose DX12"], blocking: false}
+    ]};
+  await h.ready();
+  let tree = h.render();
+  assert.match(h.text(tree), /Choose DX12 in the game/);
+  assert.match(h.text(tree), /Blocking issue/);
+  assert.doesNotMatch(h.text(tree), /DX12 issue|Install REFramework after launch|Extra setup note|Setup guide/);
+  const details = h.walk(tree, n => n.type === "ButtonItem" && h.text(n) === "Setup details")[0];
+  assert.ok(details);
+  details.props.onClick();
+  tree = h.render();
+  assert.match(h.text(tree), /Install REFramework after launch|Extra setup note|Setup guide/);
+});
+
+test("selected game dropdown refreshes its label after external enable", async () => {
+  let enabled = false;
+  const h = harness({
+    library: () => ({...h.library(), games: [{...h.game, managed: true, enabled: false, installed_version: "2.0.0"}]}),
+    game_details: () => ({...h.game, managed: true, enabled, installed_version: "2.0.0"})
+  });
+  await h.ready();
+  const dropdown = () => h.walk(h.render(), n => n.type === "DropdownItem" && n.props.label === "Game")[0];
+  const before = dropdown();
+  assert.match(h.text(before.props.rgOptions[0].label), /Disabled/);
+  enabled = true;
+  const refresh = h.walk(h.render(), n => n.type === "ButtonItem" && /Refresh library and status/.test(h.text(n)))[0];
+  refresh.props.onClick(); await flush(); h.render(); await flush();
+  const after = dropdown();
+  assert.match(h.text(after.props.rgOptions[0].label), /Enabled/);
+  assert.notEqual(after.key, before.key, "Decky dropdown remounts when the selected status changes");
+});
+
+function renderedHelixSettings(h) {
+  const node = h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings")[0];
+  assert.ok(node, "Helix settings component is present in Game settings");
+  // HelixSettings is a pure nested function component. Render it directly so
+  // these tests exercise its actual dropdown callbacks through the panel save path.
+  return node.type(node.props);
+}
+function settingsDropdown(h, label) {
+  const node = h.walk(renderedHelixSettings(h), n => n.type === "DropdownItem" && n.props.label === label)[0];
+  assert.ok(node, `settings dropdown ${label} is visible`);
+  return node;
+}
+function enableSettings(h, extra = {}) {
+  Object.assign(h.game, { managed: true, enabled: true, route: "optiscaler", helix_settings: {
+    available: true, revision: "settings-rev-7", provider: "helixsr", model: "full", quick_flow: "fast",
+    multiplier: 2, upscaler: "helixsr", int8: "auto", wave_size: "auto", ...extra
+  }});
+}
+
+test("FG controls stay visible while optional game settings and tuning retain disclosure choices", async () => {
+  const h = harness(); enableSettings(h); await h.ready();
+  assert.equal(h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings").length, 1,
+    "frame generation is discoverable without opening optional settings");
+  h.openAdvanced();
+  let settings = h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings")[0];
+  assert.equal(settings.props.advanced, false, "tuning starts collapsed");
+  assert.ok(settingsDropdown(h, "QuickFlow"), "Full model controls are visible before remount");
+  settings.props.toggleAdvanced(); h.render();
+  assert.ok(settingsDropdown(h, "INT8 math"), "advanced tuning is visible before remount");
+
+  h.unmount(); h.mount(); await flush(); h.render(); await flush();
+  settings = h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings")[0];
+  assert.ok(settings, "game settings remain open after remount");
+  assert.equal(settings.props.advanced, true, "advanced tuning remains open after remount");
+  assert.ok(settingsDropdown(h, "QuickFlow"), "Full model controls remain reachable after remount");
+  assert.ok(settingsDropdown(h, "INT8 math"));
+
+  settings.props.toggleAdvanced(); h.render();
+  const close = h.walk(h.render(), n => n.type === "ButtonItem" && h.text(n) === "Hide game settings")[0];
+  close.props.onClick(); h.render();
+  h.unmount(); h.mount(); await flush(); h.render(); await flush();
+  assert.equal(h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings").length, 1,
+    "closing optional settings does not hide frame generation");
+  assert.equal(h.walk(renderedHelixSettings(h), n => n.type === "DropdownItem" && n.props.label === "INT8 math").length, 0,
+    "advanced tuning remains collapsed after remount");
+});
+
+test("Helix settings provider, model, and multiplier callbacks preserve the current revision", async () => {
+  async function change(label, data, settings = {}) {
+    const h = harness({ set_game_settings: () => h.game });
+    enableSettings(h, settings); await h.ready(); h.openAdvanced();
+    const control = settingsDropdown(h, label);
+    control.props.onChange({ data }); await flush();
+    return { h, control };
+  }
+  const model = await change("Frame generation model", "light");
+  assert.deepEqual(JSON.parse(JSON.stringify(model.h.calls.at(-1))), { route: "set_game_settings", args: ["pragmata", { model: "light", quick_flow: "off" }, "settings-rev-7"] });
+  const provider = await change("Frame generation", "xess");
+  assert.deepEqual(JSON.parse(JSON.stringify(provider.h.calls.at(-1))), { route: "set_game_settings", args: ["pragmata", { provider: "xess", multiplier: 2 }, "settings-rev-7"] });
+  const multiplier = await change("Frame multiplier", 3, { provider: "xess" });
+  assert.deepEqual(JSON.parse(JSON.stringify(multiplier.control.props.rgOptions.map(option => option.data))), [2, 3]);
+  assert.deepEqual(JSON.parse(JSON.stringify(multiplier.h.calls.at(-1))), { route: "set_game_settings", args: ["pragmata", { multiplier: 3 }, "settings-rev-7"] });
+});
+
+test("Helix settings exposes save failures and disables edits during a running job", async () => {
+  const h = harness({ library: () => ({ ...h.library(), jobs: [job()] }),
+    set_game_settings: () => { throw Error("Settings changed; refresh before saving"); } });
+  enableSettings(h); await h.ready(); h.openAdvanced();
+  assert.equal(settingsDropdown(h, "Upscaler").props.disabled, true, "running install locks settings");
+  // The backend may reject a save after a stale revision even if the UI was enabled.
+  const editable = harness({ set_game_settings: () => { throw Error("Settings changed; refresh before saving"); } });
+  enableSettings(editable); await editable.ready(); editable.openAdvanced();
+  settingsDropdown(editable, "Upscaler").props.onChange({ data: "fsr" }); await flush();
+  assert.match(editable.text(editable.render()), /Settings changed; refresh before saving/);
+  assert.ok(editable.toasts.some(toast => /action could not complete/.test(toast.title)));
 });

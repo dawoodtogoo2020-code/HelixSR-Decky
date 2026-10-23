@@ -9,6 +9,7 @@ from plugin_updates import PluginUpdates
 from launch_receipts import LaunchReceipts
 from status_monitor import StatusMonitor
 from plugin_shutdown import shutdown_plugin
+from compatibility_release import release_status
 
 
 class Plugin:
@@ -80,12 +81,27 @@ class Plugin:
             return await asyncio.to_thread(self.plugin_updates.resume)
 
     async def library(self):
+        # All callers share one scan, including callers returning after a UI timeout.
+        task = getattr(self, 'library_task', None)
+        if task is None or task.done():
+            task = self.library_task = asyncio.create_task(self._read_library())
+        return await asyncio.shield(task)
+
+    async def _read_library(self):
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.refresh)
 
     async def game_details(self, gid, executable=None):
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.assess_safe, self.manager.get_game(gid), executable=executable)
+
+    async def set_game_settings(self, gid, changes, revision):
+        async with self.api_lock:
+            return await asyncio.to_thread(self.manager.set_game_settings, gid, changes, revision)
+
+    async def set_installation_route(self, gid, route):
+        async with self.api_lock:
+            return await asyncio.to_thread(self.manager.set_installation_route, gid, route)
 
     async def overlay_status(self):
         return self.status_monitor.status()
@@ -115,7 +131,7 @@ class Plugin:
             return await asyncio.to_thread(self.manager.forget, gid)
 
     async def check_updates(self, force=True):
-        return await asyncio.to_thread(self.manager.check_update, force)
+        return release_status(await asyncio.to_thread(self.manager.check_update, force))
 
     async def set_license(self, accepted, token=None):
         async with self.api_lock:

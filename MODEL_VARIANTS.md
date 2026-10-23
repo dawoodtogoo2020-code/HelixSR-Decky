@@ -1,6 +1,6 @@
 # HelixSR models and future variants
 
-Decky **0.1.30** and Desktop **0.1.19** support the reviewed official **HelixSR 1.9.3** release and its complete **Scaler 1.0.6** package. Select **Latest upstream**, then Install/Update and review the version and terms. The converter runs unchanged and builds Model E locally. Alternative frame-generation settings are preserved; HelixSR's own frame generation is unavailable. **Compatible HelixSR 1.8.1** remains an explicit option. Unknown releases or replaced 1.9.3 archives require another reviewed app update.
+Decky **0.1.31** and Desktop **0.1.20** add the reviewed official **HelixSR 2.0.0** release and **Scaler 1.1.0**. Select **Latest upstream**, scan, then review Install/Update. The unchanged official converter builds the upscaling network and both Light/Full frame-generation models locally. Per-game Scaler settings are editable in the plugin and desktop app. **Compatible HelixSR 1.8.1** remains available explicitly. Future releases are detected by scanning; an unfamiliar version or replaced archive requires a reviewed app update before installation. See [2.0 settings and compatibility](UPGRADE_2.0.md).
 
 Both interfaces use the same model registry and installation engine. The **HelixSR model** dropdown shows reviewed, supported choices. The selected game's details show the installed model; older installations whose source cannot be proven show **Model unverified**.
 

@@ -6,6 +6,18 @@ import { PluginInstaller } from "../src/pluginInstaller.ts";
 import { canRestore, gameStatus, installReadiness, nextStep } from "../src/gameStatus.ts";
 import { librarySelectable, libraryStatus } from "../src/libraryStatus.ts";
 import { LibraryRead } from "../src/libraryRead.ts";
+import { overlayShortcut } from "../src/overlayShortcut.ts";
+
+test("overlay shortcut guide uses the configured key and does not invent disabled or custom mappings", () => {
+  assert.equal(overlayShortcut("auto").key, "Insert");
+  assert.equal(overlayShortcut("0x2D").key, "Insert");
+  assert.equal(overlayShortcut("45").key, "Insert");
+  assert.equal(overlayShortcut("121").key, "F10");
+  assert.equal(overlayShortcut("0x24").key, "Home");
+  assert.equal(overlayShortcut("-1").key, null);
+  assert.equal(overlayShortcut("garbage").key, null);
+  assert.equal(overlayShortcut("0xff").key, null);
+});
 
 test("hung library read times out without queuing duplicate scans and can recover", async () => {
   let resolve, calls = 0;

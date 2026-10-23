@@ -4,11 +4,11 @@
 
 Choose **Game** and **Release to install** at the top. HelixSR version checks sit with the game installation controls. Plugin version and updates are grouped immediately below, followed by **Import games**. Expand **Advanced game settings** for model settings, the overlay, optional menu labels, diagnostics, **Disable HelixSR** and **Remove and restore originals**.
 
-HelixSR 1.9.3 does not include its own frame generation. Alternative Scaler providers retain their settings and can be configured in Scaler's Frame Generation menu, subject to game, GPU and dependency requirements. Native FSR replacement installs use the game's available FG controls. A generic multiplier does not apply to every provider. To replace a modern Scaler installation with 1.8.1, remove HelixSR first to restore original files, then review a new installation.
+HelixSR 2.0 restores DLSS frame generation through Scaler. Select Light or Full, provider and supported multiplier in the application. HelixSR FG requires a DirectX 12 game with DLSS FG enabled in-game. 3× is exposed only for XeSS FG. Native FSR replacement remains upscaling-only. Remove and restore originals before changing between native and Scaler routes.
 
 ## Installation error mentioning LICENSE-APACHE-2.0
 
-Decky **0.1.30** and Desktop **0.1.19** support the reviewed official **HelixSR 1.9.3** release and its complete **Scaler 1.0.6** package. Select **Latest upstream**, then Install/Update and review the version and terms. The converter runs unchanged and builds Model E locally. Alternative frame-generation settings are preserved; HelixSR's own frame generation is unavailable. **Compatible HelixSR 1.8.1** remains an explicit option. Unknown releases or replaced 1.9.3 archives require another reviewed app update.
+Decky **0.1.35** supports the reviewed official **HelixSR 2.0.0** release and **Scaler 1.1.0**. It adds a 30-second deadline for game-details reads so a stalled request releases the game picker and Refresh button. Late results cannot replace a newer selection, and retries share pending reads. Upscaler, FG provider, multiplier, advanced tuning, Scaler menu guidance and DX12 confirmation from 0.1.34 remain available. Reviewed HelixSR 2.0.0, 1.9.3 and 1.8.1 can be selected independently of the latest-release check. Frame-generation controls do not establish gameplay compatibility; see [settings and validation limits](UPGRADE_2.0.md).
 
 The compatibility download is tied to the reviewed official archive SHA-256 and the [1.8.1 license](https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE). A replaced archive is rejected. Newer or unverified existing installations are blocked from being downgraded; remove them using their owning manager first. Keep locally generated networks and game installation records.
 
@@ -18,7 +18,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Download the [Decky 0.1.30 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.30/HelixSR-Decky-0.1.30.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
+3. Download the [Decky 0.1.35 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.35/HelixSR-Decky-0.1.35.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -98,7 +98,7 @@ The **HelixSR model** dropdown in the selected game's details shows supported ne
 2. For **Native FSR 3.1 replacement**, choose **AMD FSR** in the game. That selection reaches the replaced native upscaler.
 3. For **OptiScaler proxy**, select the supported input shown for that game, commonly **DLSS**, or a supported XeSS/FSR input. OptiScaler forwards that input into HelixSR. The DLSS option is the game input; HelixSR executes DLSS Model E through its own shaders rather than NVIDIA's native runtime.
 4. For a Steam OptiScaler game, use **Review Proton proxy launch option** if required. Review the proposed `WINEDLLOVERRIDES="dxgi=n,b"` change and confirm it once. The plugin preserves your other launch options and verifies the saved change. For Heroic or Lutris, apply the shown override in that launcher's settings instead.
-5. Check the image, useful game audio, controller operation and stability during play. **Show diagnostics and logs** distinguishes configuration from recent runtime evidence. HelixSR supplies no frame generation of its own; native FG, LSFG-VK and MAKO remain separate settings.
+5. Check the image, useful game audio, controller operation and stability during play. **Show diagnostics and logs** distinguishes configuration from recent runtime evidence. HelixSR 2.0 offers experimental frame generation through Scaler. A selected provider or higher FPS counter does not prove usable generated frames. Avoid combining multiple FG providers.
 
 ## 6. Control Ultimate Edition
 
