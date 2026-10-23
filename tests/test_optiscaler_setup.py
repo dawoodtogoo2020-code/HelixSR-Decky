@@ -119,6 +119,13 @@ class SetupTests(unittest.TestCase):
         self.assertFalse(report['missing'])
         self.assertIn('do not prove frame generation ran', '\n'.join(report['checks']))
 
+        selected = self.config.read_text()
+        self.config.write_text(selected + 'Enabled=false\n[Other]\nEnabled=true\n')
+        disabled = self.report()
+        self.assertFalse(disabled['framegen_configured'])
+        self.assertEqual(disabled['framegen_evidence'], 'not selected; runtime unknown')
+        self.config.write_text(selected)
+
         self.config.write_text(self.config.read_text().replace('FGInput=nvngxfg', 'FGInput=xefg'))
         report = self.report()
         self.assertTrue(report['configured'])

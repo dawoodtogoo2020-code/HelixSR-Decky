@@ -114,8 +114,22 @@ class AwarenessMetadataTests(unittest.TestCase):
         self.assertTrue(configured[0]['enabled'])
         self.assertEqual(configured[0]['meaning'], 'configuration only; runtime activation unverified')
         self.assertEqual(result['framegen_summary'],
-                         'HelixSR frame-generation configuration found; runtime activation unverified')
+                         'HelixSR FG selected; generated-frame output unverified')
         self.assertEqual(result['helix_runtime'], 'historical log available; current runtime unverified')
+        config = self.game / 'OptiScaler.ini'
+        config.write_text(config.read_text() + 'Enabled=false\n')
+        with patch('awareness.active_processes', return_value=[]):
+            result = awareness.awareness(game, tree, self.home, 'optiscaler', self.game)
+        self.assertEqual(result['framegen_summary'], 'HelixSR FG not selected; see per-provider settings below')
+        self.assertFalse(next(item for item in result['framegen'] if item['source'] == 'HelixSR 2.0')['enabled'])
+        config.write_text('[FrameGen]\nEnabled=true\nEnabled=false\n')
+        with patch('awareness.active_processes', return_value=[]):
+            result = awareness.awareness(game, tree, self.home, 'optiscaler', self.game)
+        self.assertEqual(result['framegen_summary'], 'HelixSR FG configuration unavailable; state unknown')
+        self.assertIsNone(next(item for item in result['framegen'] if item['source'] == 'HelixSR 2.0')['enabled'])
+        with patch('optiscaler_setup.os.open', side_effect=PermissionError('unreadable')), patch('awareness.active_processes', return_value=[]):
+            result = awareness.awareness(game, tree, self.home, 'optiscaler', self.game)
+        self.assertEqual(result['framegen_summary'], 'HelixSR FG configuration unavailable; state unknown')
 
 
 if __name__ == '__main__':

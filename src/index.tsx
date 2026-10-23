@@ -12,6 +12,7 @@ import { LibraryRead } from "./libraryRead";
 import { InstallSession, JobTracker } from "./installSession";
 import { readLaunchOptions } from "./launchDetails";
 import { HelixSettings, HelixSettingsState } from "./HelixSettings";
+import { overlayShortcut } from "./overlayShortcut";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -683,13 +684,6 @@ function Content() {
       </div></PanelSectionRow>)}
       {error && <PanelSectionRow><div role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>{error}</div></PanelSectionRow>}
     </PanelSection>
-    {game && <PanelSection title="Game settings">
-      <PanelSectionRow><ButtonItem layout="below" onClick={() => {
-        rememberedGameSettingsOpen = !advancedOpen; setAdvancedOpen(rememberedGameSettingsOpen);
-      }}>
-        {advancedOpen ? "Hide game settings" : "Show game settings"}</ButtonItem></PanelSectionRow>
-    </PanelSection>}
-    {game && advancedOpen && <>
     {game && <PanelSection title="Upscaling and frame generation">
       {!game.managed && !game.legacy && <PanelSectionRow><ButtonItem layout="below" disabled={disabled}
         onClick={() => void interact(async () => {
@@ -706,6 +700,9 @@ function Content() {
         advanced={settingsAdvanced} toggleAdvanced={() => {
           rememberedTuningOpen = !settingsAdvanced; setSettingsAdvanced(rememberedTuningOpen);
         }} />}
+      {String(game.appid) === '3357650' && game.route === 'optiscaler' && <PanelSectionRow><div className="helix-muted">
+        Pragmata on the tested Steam Deck: Light FG flickers. Full removed flicker in a short gameplay test but did not improve performance; FSR FG worsened frame pacing. FG Off is recommended. XeSS FG remains untested.
+      </div></PanelSectionRow>}
       {diagnostics && <PanelSectionRow><div style={infoStyle}>
         OptiScaler installed: {game.optiscaler.present === null ? "not inspected" : game.optiscaler.present ? "yes" : "no detected files"}{"\n"}
         OptiScaler HelixSR route configured: {game.optiscaler.helix_configured ? "yes" : "no"}{"\n"}
@@ -730,6 +727,13 @@ function Content() {
         {(game.logs || []).map(l => `${l.path}\n${new Date(l.modified * 1000).toLocaleString()}\n${l.excerpt}`).join("\n\n") || "No supported logs found"}
       </div></PanelSectionRow>}
     </PanelSection>}
+    {game && <PanelSection title="More game settings">
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => {
+        rememberedGameSettingsOpen = !advancedOpen; setAdvancedOpen(rememberedGameSettingsOpen);
+      }}>
+        {advancedOpen ? "Hide game settings" : "Show game settings"}</ButtonItem></PanelSectionRow>
+    </PanelSection>}
+    {game && advancedOpen && <>
     {game && <PanelSection title="Status overlay">
       <PanelSectionRow><ToggleField label="Show HelixSR status overlay (experimental)"
         description="Checks the HUD helper and monitors new session log events. Enable before launching the game."
@@ -846,6 +850,26 @@ function Content() {
       </>}
       </>}
     </PanelSection>
+    {game && <PanelSection title="In-game menu">
+      {game.optiscaler.present && game.optiscaler.setup ? <>
+        <PanelSectionRow><div className="helix-card" style={infoStyle}>
+          <strong>Configured keyboard shortcut · {overlayShortcut(game.optiscaler.setup.settings.ShortcutKey).label}</strong>{"\n"}
+          {overlayShortcut(game.optiscaler.setup.settings.ShortcutKey).key
+            ? `L4 · ${overlayShortcut(game.optiscaler.setup.settings.ShortcutKey).key} after mapping in Steam Input`
+            : "Check the Scaler menu shortcut before assigning L4."}
+        </div></PanelSectionRow>
+        <PanelSectionRow><div className="helix-muted">While the game is running, close Steam's panels and press the shortcut to show or hide the interactive HelixSR / Scaler settings menu. This menu lets you adjust settings; the performance HUD only displays status. A loaded Scaler is required.</div></PanelSectionRow>
+        {overlayShortcut(game.optiscaler.setup.settings.ShortcutKey).key && <PanelSectionRow><div className="helix-muted">
+          In the game's controller settings, enable Back Grip Buttons, select L4, then Keyboard → {overlayShortcut(game.optiscaler.setup.settings.ShortcutKey).key}. Review any existing L4 action first. This is a per-game binding.
+        </div></PanelSectionRow>}
+        {game.appid && <PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen}
+          onClick={() => void run(async () => SteamClient.Apps.ShowControllerConfigurator(Number(game.appid)))}>
+          Set up L4 in controller settings</ButtonItem></PanelSectionRow>}
+        {!game.appid && <PanelSectionRow><div className="helix-muted">Open the controller layout for this game's Steam shortcut to assign L4.</div></PanelSectionRow>}
+        <PanelSectionRow><div className="helix-muted">Decky reads the configured keyboard shortcut. It does not verify your Steam Input binding or physical L4 presses. Test L4 twice in gameplay: the settings menu should open, then close.</div></PanelSectionRow>
+        <PanelSectionRow><div className="helix-muted">If REFramework also uses Insert, change its Configuration → Menu Key to another key such as Home, keeping L4 mapped to Scaler's shortcut. Decky settings shown above take effect after restarting the game.</div></PanelSectionRow>
+      </> : <PanelSectionRow><div className="helix-muted">The in-game settings menu is available with the Scaler route. For a direct replacement, use the plugin and the game's graphics settings.</div></PanelSectionRow>}
+    </PanelSection>}
     <PanelSection title="Diagnostics and help">
       <PanelSectionRow><ButtonItem layout="below" onClick={() => setHelpOpen(!helpOpen)}>
         {helpOpen ? "Hide diagnostics and help" : "Show diagnostics and help"}</ButtonItem></PanelSectionRow>

@@ -87,6 +87,8 @@ def configuration(path):
             raise ValueError('Configuration is too large or invalid')
         parser = parse_config(raw.decode('utf-8-sig'))
         values = {}
+        if parser.has_option('FrameGen', 'Enabled'):
+            values['FrameGenEnabled'] = parser.get('FrameGen', 'Enabled').strip()
         for section in parser.sections():
             for key in KEYS:
                 if parser.has_option(section, key):
@@ -159,8 +161,9 @@ def setup_report(target, route, options, proxy_files=()):
         required = tuple(dest for _, dest in scaler_pairs())
         paths_match = (directory / 'HelixSR/helixsr.dll').is_file()
         configured = route == 'optiscaler' and values.get('Dx12Upscaler', '').lower() == 'dlss' and paths_match and not error
-    fg_configured = (modern20 and values.get('FGInput', '').lower() == 'nvngxfg'
-                     and values.get('FGNvngxReplacement', '').lower() == 'helixsr')
+    fg_configured = None if modern20 and error else (modern20 and values.get('FGInput', '').lower() == 'nvngxfg'
+                     and values.get('FGNvngxReplacement', '').lower() == 'helixsr'
+                     and values.get('FrameGenEnabled', 'auto').lower() not in ('false', 'off', '0'))
     missing = [name for name in required if not directory or not (directory / name).is_file()]
     launch = override_status(options)
     key = values.get('ShortcutKey', 'auto')
@@ -209,5 +212,6 @@ def setup_report(target, route, options, proxy_files=()):
                 provider_paths_match=paths_match, override=launch, overlay_shortcut=shortcut,
                 settings=values, missing=missing, checks=checks, guide=GUIDE,
                 framegen_configured=fg_configured,
-                framegen_evidence=('configured; runtime unverified' if fg_configured else
+                framegen_evidence=('configuration unavailable; state unknown' if fg_configured is None else
+                                   'configured; runtime unverified' if fg_configured else
                                    'not selected; runtime unknown' if modern20 else 'not provided by this release'))

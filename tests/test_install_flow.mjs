@@ -451,10 +451,10 @@ function enableSettings(h, extra = {}) {
   }});
 }
 
-test("game settings and advanced tuning keep the user's disclosure choice across panel remounts", async () => {
+test("FG controls stay visible while optional game settings and tuning retain disclosure choices", async () => {
   const h = harness(); enableSettings(h); await h.ready();
-  assert.equal(h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings").length, 0,
-    "game settings start collapsed");
+  assert.equal(h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings").length, 1,
+    "frame generation is discoverable without opening optional settings");
   h.openAdvanced();
   let settings = h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings")[0];
   assert.equal(settings.props.advanced, false, "tuning starts collapsed");
@@ -473,8 +473,10 @@ test("game settings and advanced tuning keep the user's disclosure choice across
   const close = h.walk(h.render(), n => n.type === "ButtonItem" && h.text(n) === "Hide game settings")[0];
   close.props.onClick(); h.render();
   h.unmount(); h.mount(); await flush(); h.render(); await flush();
-  assert.equal(h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings").length, 0,
-    "explicitly closed game settings stay closed after remount");
+  assert.equal(h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings").length, 1,
+    "closing optional settings does not hide frame generation");
+  assert.equal(h.walk(renderedHelixSettings(h), n => n.type === "DropdownItem" && n.props.label === "INT8 math").length, 0,
+    "advanced tuning remains collapsed after remount");
 });
 
 test("Helix settings provider, model, and multiplier callbacks preserve the current revision", async () => {

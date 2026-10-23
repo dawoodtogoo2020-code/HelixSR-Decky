@@ -268,7 +268,11 @@ def awareness(game, tree, home, route, target=None):
                                configs=[str(p) for p in configs], involved=route == 'optiscaler' or configured_helix,
                                helix_configured=configured_helix, runtime=opti_runtime, setup=setup),
                 framegen=fg,
-                framegen_summary=('HelixSR frame-generation configuration found; runtime activation unverified'
+                framegen_summary=('HelixSR FG configuration unavailable; state unknown'
+                                  if helix20_fg and setup.get('framegen_configured') is None else
+                                  'HelixSR FG selected; generated-frame output unverified'
+                                  if helix20_fg and setup.get('framegen_configured') else
+                                  'HelixSR FG not selected; see per-provider settings below'
                                   if helix20_fg else
                                   'Frame-generation configuration unavailable; state unknown'
                                   if awareness_warnings and not fg else

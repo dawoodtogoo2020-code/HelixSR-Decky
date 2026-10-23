@@ -13,6 +13,32 @@ SOURCE = '''; user comment\r\n[FrameGen]\r\nEnabled=true\r\nFGInput=nvngxfg\r\nF
 
 
 class HelixSettingsTests(unittest.TestCase):
+    def test_disabled_aliases_report_off_consistently(self):
+        for value in ('false', 'off', '0'):
+            with self.subTest(value=value):
+                self.assertEqual(helix_settings.read_settings(SOURCE.replace('Enabled=true', 'Enabled=' + value))['provider'], 'off')
+
+    def test_upscaler_fg_routes_preserve_dormant_nvngx_replacement(self):
+        source = SOURCE.replace('FGNvngxReplacement=HelixSR', 'FGNvngxReplacement=Arturs')
+        for provider, output in (('fsr', 'fsrfg'), ('xess', 'xefg')):
+            with self.subTest(provider=provider):
+                updated = helix_settings.update_settings(source, {'provider': provider, 'multiplier': 2})
+                self.assertEqual(helix_settings.read_settings(updated)['provider'], provider)
+                self.assertIn('Enabled=true', updated)
+                self.assertIn('FGInput=upscaler', updated)
+                self.assertIn('FGOutput=' + output, updated)
+                self.assertIn('FGNvngxReplacement=Arturs', updated)
+
+    def test_off_recovers_from_hidden_invalid_helix_tuning(self):
+        source = SOURCE.replace('FGPreset=full', 'FGPreset=c').replace('QuickFlow=off', 'QuickFlow=fast')
+        for provider in ('off', 'fsr', 'xess'):
+            with self.subTest(provider=provider):
+                updated = helix_settings.update_settings(source, {'provider': provider, 'multiplier': 2})
+                self.assertEqual(helix_settings.read_settings(updated)['provider'], provider)
+                self.assertIn('QuickFlow=fast', updated)
+        with self.assertRaisesRegex(ValueError, 'QuickFlow requires Full'):
+            helix_settings.update_settings(source, {'provider': 'helixsr'})
+
     def test_rejects_unknown_fields_and_exact_types_including_bool_multiplier(self):
         for changes in ({'unknown': 'x'}, {'multiplier': True}, {'multiplier': '3'},
                         {'provider': 1}, ['provider']):

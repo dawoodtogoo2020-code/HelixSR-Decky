@@ -29,9 +29,15 @@ export function HelixSettings({ settings, disabled, save, advanced = false, togg
       {settings.model === 'full' && select('QuickFlow', 'quick_flow', settings.quick_flow,
         [['Off', 'off'], ['Fast', 'fast'], ['Fastest', 'fastest']])}
     </>}
-    {settings.provider !== 'off' && select('Frame multiplier', 'multiplier', settings.multiplier,
+    {['helixsr', 'fsr', 'xess'].includes(settings.provider || '') && select('Frame multiplier', 'multiplier', settings.multiplier,
       settings.provider === 'xess' ? [['2×', 2], ['3×', 3]] : [['2×', 2]])}
-    <PanelSectionRow><div className="helix-muted">Close the game to save. Restart to apply. Frame generation needs DX12 and the game's DLSS frame generation option. Configured settings do not confirm runtime output.</div></PanelSectionRow>
+    <PanelSectionRow><div className="helix-muted">
+      {settings.provider === 'off' ? 'Plugin frame generation is off. In-game and external frame generation are separate.' :
+       settings.provider === 'helixsr' ? 'Requires DX12 and DLSS frame generation enabled in the game. If that option is missing, this route cannot generate frames.' :
+       settings.provider === 'fsr' || settings.provider === 'xess' ? 'Uses the active upscaler for frame generation. Keep the game\'s own frame generation off. HUD artifacts and compatibility depend on the game.' :
+       'A custom frame-generation route is configured. Select a provider to replace it.'}
+      {' '}Close the game to save. Restart to apply. Saved settings do not confirm generated frames.
+    </div></PanelSectionRow>
     {toggleAdvanced && <PanelSectionRow><ButtonItem layout="below" onClick={toggleAdvanced}>{advanced ? 'Hide advanced tuning' : 'Advanced tuning'}</ButtonItem></PanelSectionRow>}
     {advanced && <>
       {select('INT8 math', 'int8', settings.int8, [['Automatic', 'auto'], ['On', 'on'], ['Off', 'off']])}

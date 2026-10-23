@@ -149,6 +149,18 @@ def sha(path):
     return h.hexdigest()
 
 
+def confirmed_executable_sha(path):
+    """Hash a confirmed executable once per stable on-disk identity."""
+    p = Path(path)
+    info = p.stat()
+    return _confirmed_executable_sha(str(p), info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
+@lru_cache(maxsize=64)
+def _confirmed_executable_sha(path, device, inode, size, modified):
+    return sha(path)
+
+
 def atomic_json(path, value):
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -466,6 +478,16 @@ class Manager:
 
     def record(self, game):
         return load_json(self.record_path(game))
+
+    @staticmethod
+    def has_confirmed_dx12(rec, executable, selected_executable):
+        """Accept only an explicit install-time confirmation for this exact binary."""
+        confirmation = rec.get('dx12_confirmation') if isinstance(rec, dict) else None
+        if not isinstance(confirmation, dict) or not executable or not selected_executable:
+            return False
+        expected = confirmation.get('executable_sha256')
+        return (confirmation.get('selected_executable') == selected_executable
+                and isinstance(expected, str) and expected == confirmed_executable_sha(executable))
 
     def checked_menu_path(self, game, relative):
         return checked_path(safe_root(game['folder']), relative)
@@ -927,7 +949,9 @@ class Manager:
                     blocked.append(f'{p.name}: expected x64 FidelityFX API not found')
         if main and pe_info(main)['arch'] != 'x64' and not rec:
             blocked.append('Main executable is not x64 Windows PE (32-bit, native Linux or unknown architecture)')
-        if not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']):
+        confirmed_dx12 = self.has_confirmed_dx12(
+            rec, main, main.relative_to(root).as_posix() if main else None)
+        if not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']) and not confirmed_dx12:
             reasons.append('DX12 is not confirmed by executable imports; confirm the game runs DX12 before installation')
         directory_names = [str(d.relative_to(root)).lower() for d, _ in tree]
         if any(anti_cheat_name(n) for _, n in names) or any(anti_cheat_name(n) for n in directory_names):
@@ -1060,7 +1084,9 @@ class Manager:
                     installed_variant=rec.get('variant', {}).get('id') if valid_variant(rec.get('variant')) else None,
                     recovery_available=self.recovery_available(game), steam_build_review=steam_build_review,
                     restore_eligible=restore_eligible,
-                    dx12_confirmation_needed=not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']),
+                    dx12_confirmation_needed=(not dx11_title and route == 'optiscaler'
+                                              and not (main and pe_info(main)['dx12'])
+                                              and not confirmed_dx12),
                     **aware)
         if not detailed:
             data.pop('logs', None)
@@ -1413,7 +1439,8 @@ class Manager:
                                 raise ValueError('Verified prepared package unavailable after preparation')
                             result = self.mutate(game, data,
                                                  'update' if self.record(game) else 'install',
-                                                 prepared_package)
+                                                 prepared_package,
+                                                 dx12_confirmed=preview.get('dx12', False))
                             job['result'] = result
                         job['state'], job['message'] = 'completed', result['message']
                     else:
@@ -1852,10 +1879,10 @@ class Manager:
         if (not self.action_compatible(data, preview['action'])
                 or self.fingerprint(game, data, package=package) != preview['fingerprint']):
             raise ValueError('Game changed since preview; refresh and review again')
-        return self.mutate(game, data, preview['action'], package)
+        return self.mutate(game, data, preview['action'], package, dx12_confirmed=preview.get('dx12', False))
 
     @game_locked
-    def mutate(self, game, data, action, package=AUTO_PACKAGE, settings=None):
+    def mutate(self, game, data, action, package=AUTO_PACKAGE, settings=None, dx12_confirmed=False):
         root, companion = Path(game['folder']), self.companion(game)
         tx = companion / 'transaction'
         if tx.exists():
@@ -1981,6 +2008,11 @@ class Manager:
                     self.install_payload(game, data, previous, package, previous_version=(journal.get('previous') or {}).get('version'))
                 else:
                     self.install_payload(game, data, previous, package)
+            if (action in ('install', 'update') and data['route'] == 'optiscaler'
+                    and dx12_confirmed):
+                previous['dx12_confirmation'] = dict(
+                    selected_executable=data['selected_executable'],
+                    executable_sha256=confirmed_executable_sha(data['main_exe']))
             previous['current'] = {rel: sha(root / rel) if (root / rel).is_file() else None for rel in paths}
             previous['updated_at'], previous['game_build'] = time.time(), game.get('build')
             if game.get('manifest'):

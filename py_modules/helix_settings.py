@@ -9,7 +9,7 @@ def read_settings(source):
     inp, out = get('FrameGen', 'FGInput', 'auto'), get('FrameGen', 'FGOutput', 'auto')
     replacement = get('FrameGen', 'FGNvngxReplacement', 'auto')
     enabled = get('FrameGen', 'Enabled', 'auto')
-    if enabled == 'false' or inp == 'nofg' or (inp == 'auto' and out == 'auto'):
+    if enabled in ('false', 'off', '0') or inp == 'nofg' or (inp == 'auto' and out == 'auto'):
         provider = 'off'
     elif inp == 'nvngxfg' and replacement == 'helixsr':
         provider = 'helixsr'
@@ -72,7 +72,7 @@ def update_settings(source, changes):
             raise ValueError('Unsupported HelixSR setting: ' + k)
     state = read_settings(source)
     state.update(changes)
-    if state['quick_flow'] != 'off' and state['model'] != 'full':
+    if (state['provider'] == 'helixsr' or {'model', 'quick_flow'} & changes.keys()) and state['quick_flow'] != 'off' and state['model'] != 'full':
         raise ValueError('QuickFlow requires Full frame generation')
     if state['multiplier'] != 2 and state['provider'] != 'xess':
         raise ValueError('3x is supported only by the XeSS provider')
@@ -80,8 +80,8 @@ def update_settings(source, changes):
     if 'provider' in changes:
         routes = {'off': ('false', 'nofg', None, None),
                   'helixsr': ('true', 'nvngxfg', 'auto', 'HelixSR'),
-                  'fsr': ('true', 'upscaler', 'fsrfg', 'FFX'),
-                  'xess': ('true', 'upscaler', 'xefg', 'None')}
+                  'fsr': ('true', 'upscaler', 'fsrfg', None),
+                  'xess': ('true', 'upscaler', 'xefg', None)}
         edits.extend(('FrameGen', k, v) for k, v in zip(
             ('Enabled', 'FGInput', 'FGOutput', 'FGNvngxReplacement'), routes[state['provider']]) if v is not None)
     mapping = {'model': ('HelixSR', 'FGPreset', 'c' if state['model'] == 'light' else 'full'),
