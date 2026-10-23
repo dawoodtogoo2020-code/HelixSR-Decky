@@ -703,7 +703,7 @@ function Content() {
           rememberedTuningOpen = !settingsAdvanced; setSettingsAdvanced(rememberedTuningOpen);
         }} />}
       {String(game.appid) === '3357650' && game.route === 'optiscaler' && <PanelSectionRow><div className="helix-muted">
-        Pragmata on the tested Steam Deck: Light FG flickers. Full removed flicker in a short gameplay test but did not improve performance; FSR FG worsened frame pacing. FG Off is recommended. XeSS FG remains untested.
+        Pragmata on the tested Steam Deck: Light FG flickers. Full removed flicker in a short gameplay test but did not improve performance; FSR FG worsened frame pacing. FG Off is recommended. One XeSS 2× trial with native FG off and no GPU spoof failed before gameplay with Fatal D3D error 22 (DXGI_ERROR_INVALID_CALL, 0x887a0001).
       </div></PanelSectionRow>}
       {diagnostics && <PanelSectionRow><div style={infoStyle}>
         OptiScaler installed: {game.optiscaler.present === null ? "not inspected" : game.optiscaler.present ? "yes" : "no detected files"}{"\n"}
