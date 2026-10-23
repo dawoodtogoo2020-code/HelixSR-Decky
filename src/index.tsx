@@ -9,6 +9,7 @@ import { canRestore, gameStatus, installReadiness, nextStep } from "./gameStatus
 import { executableSession } from "./executableSession";
 import { librarySelectable, libraryStatus } from "./libraryStatus";
 import { LibraryRead } from "./libraryRead";
+import { GameDetailsRead } from "./gameDetailsRead";
 import { InstallSession, JobTracker } from "./installSession";
 import { readLaunchOptions } from "./launchDetails";
 import { HelixSettings, HelixSettingsState } from "./HelixSettings";
@@ -80,6 +81,7 @@ type Preview = { token: string; name: string; action: string; route: string; fil
 const library = callable<[], Library>("library");
 const libraryRead = new LibraryRead(library);
 const details = callable<[string, string?], Game>("game_details");
+const gameDetailsRead = new GameDetailsRead(details);
 const setGameSettings = callable<[string, Record<string, string | number>, string], Game>("set_game_settings");
 const setInstallationRoute = callable<[string, string], Game>("set_installation_route");
 const checkUpdates = callable<[boolean], Release>("check_updates");
@@ -384,7 +386,7 @@ function Content() {
     const requestedExecutable = executableRef.current;
     if (current && submission.pending) { setGame(current); return () => { active = false; }; }
     if (libraryLoading) return () => { active = false; };
-    if (selected && current) void run(() => details(selected, requestedExecutable)).then(g => {
+    if (selected && current) void run(() => gameDetailsRead.get(selected, requestedExecutable)).then(g => {
       if (g && active && selectedRef.current === selected && executableRef.current === requestedExecutable) setGame(g);
     });
     return () => { active = false; };
@@ -410,7 +412,7 @@ function Content() {
     executableRef.current = path;
     executableSession.choose(id, path);
     setDx12(false);
-    const updated = await run(() => details(id, path));
+    const updated = await run(() => gameDetailsRead.get(id, path));
     if (!mountedRef.current || selectedRef.current !== id || executableRef.current !== path) return;
     if (updated) setGame(updated);
     else { executableSession.clear(id); executableRef.current = undefined; setGame(undefined); }
