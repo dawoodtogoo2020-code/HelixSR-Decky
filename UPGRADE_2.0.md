@@ -1,6 +1,14 @@
 # HelixSR 2.0 controls
 
-Select the reviewed HelixSR 2.0.0 release, or scan with Latest upstream, then review Install/Update. Open Plugin updates for the selected release notes. Preparation uses the unchanged official 2.0 setup and verifies the embedded Model E network plus both frame-generation models. NVIDIA-derived files stay on the device and are never included in this plugin's download.
+HelixSR 2.0.0 is selected by default in Decky. Review Install/Update to see what will change for the selected game. Preparation uses the unchanged official 2.0 setup and verifies the embedded Model E network plus both frame-generation models. NVIDIA-derived files stay on the device and are never included in this plugin's download.
+
+## Release choices and review
+
+**HelixSR 2.0.0 (recommended)** is the current supported package. **1.9.3** and **1.8.1** remain available as older releases for existing setups and specific compatibility needs. You do not need to install all three. Selecting an older release does not bypass the downgrade checks on an existing installation.
+
+**Latest upstream (check for newer)** follows the official upstream release feed. A newly published package may need a plugin update before it can be installed. Keeping 2.0.0 selected avoids making an ordinary installation depend on that discovery request.
+
+Package review means the plugin has an adapter for the official archive, its file layout, local preparation and installation steps, with a pinned size and SHA256. It is not a human approval queue and does not certify every game's rendering or performance. The installation confirmation is your opportunity to inspect the proposed changes. A game's **Needs review** warning is a separate file-state or setup issue; its details explain the next action.
 
 For Scaler installations, open **Game settings**, then **Upscaling and frame generation** in Decky, or **Upscaling and frame generation settings** in Desktop. Close the game before saving and restart it afterwards.
 

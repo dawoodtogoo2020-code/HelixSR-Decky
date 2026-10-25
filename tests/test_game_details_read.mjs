@@ -13,7 +13,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 test('details deadline releases the actual panel action busy state and reports recovery', async () => {
   const source = fs.readFileSync(new URL('../src/index.tsx', import.meta.url), 'utf8');
   const start = source.indexOf('  async function run<T>');
-  const end = source.indexOf('  async function refresh()', start);
+  const end = source.indexOf('  async function refresh(', start);
   assert(start >= 0 && end > start);
   const action = source.slice(start, end).replace(
     'async function run<T>(fn: () => Promise<T>): Promise<T | undefined>', 'async function run(fn)');

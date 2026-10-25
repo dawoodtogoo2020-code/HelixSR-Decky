@@ -135,7 +135,7 @@ class LatestGuardTests(unittest.TestCase):
                 self.assertIn(version, message)
                 self.assertIn("not yet reviewed", message)
                 self.assertIn("Check for a plugin update", message)
-                self.assertIn("Compatible HelixSR 1.8.1", message)
+                self.assertIn("HelixSR 2.0.0 (recommended)", message)
 
     def test_malformed_versions(self):
         bad = [

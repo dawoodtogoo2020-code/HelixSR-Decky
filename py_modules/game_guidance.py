@@ -26,6 +26,9 @@ def setup_guidance(game):
         links.append(dict(label='PRAGMATA setup guide', url=PRAGMATA_GUIDE))
     if game.get('awareness_deferred'):
         action, headline, steps = 'inspect', 'Checking this game before installation', ['Wait for the selected game details to finish loading.']
+    elif report.get('can_repair'):
+        action, headline = 'repair', 'HelixSR files are missing'
+        steps = ['Use Repair HelixSR files, review the missing-file list, then confirm the repair. The app will use only the exact recorded package and will not overwrite changed files.']
     elif not ready or game.get('recovery_available'):
         action, headline = 'review', report.get('label') or 'Review required'
         steps = ['Resolve the reasons shown below, then refresh this game. Selecting it does not install HelixSR.']

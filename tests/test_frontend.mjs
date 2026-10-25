@@ -7,6 +7,7 @@ import { canRestore, gameStatus, installReadiness, nextStep } from "../src/gameS
 import { librarySelectable, libraryStatus } from "../src/libraryStatus.ts";
 import { LibraryRead } from "../src/libraryRead.ts";
 import { overlayShortcut } from "../src/overlayShortcut.ts";
+import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceLabel } from "../src/releaseChoices.ts";
 
 test("overlay shortcut guide uses the configured key and does not invent disabled or custom mappings", () => {
   assert.equal(overlayShortcut("auto").key, "Insert");
@@ -29,8 +30,17 @@ test("hung library read times out without queuing duplicate scans and can recove
   const waiting = reader.get();
   resolve("completed scan");
   assert.equal(await waiting, "completed scan");
-  assert.equal(await reader.get(), "fresh");
+  assert.equal(await reader.get(), "completed scan");
+  assert.equal(await reader.refresh(), "fresh");
   assert.equal(calls, 2);
+});
+
+test("reviewed 2.0.0 is the default and older releases are clearly distinguished", () => {
+  assert.equal(DEFAULT_RELEASE_CHOICE, "reviewed-2.0.0");
+  assert.match(releaseChoiceLabel({id: DEFAULT_RELEASE_CHOICE, label: "backend label", version: "2.0.0"}), /recommended/);
+  assert.match(releaseChoiceLabel({id: "reviewed-1.9.3", label: "backend label", version: "1.9.3"}), /older release/);
+  assert.match(releaseChoiceExplanation("latest"), /blocked unless that exact release has been reviewed/);
+  assert.match(releaseChoiceExplanation("reviewed-1.9.3"), /Older reviewed release/);
 });
 
 test("library errors remain visible and a later refresh starts a fresh read", async () => {

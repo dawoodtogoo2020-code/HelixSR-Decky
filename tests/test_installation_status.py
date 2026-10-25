@@ -81,6 +81,16 @@ class InstallationStatusTests(unittest.TestCase):
         self.assertFalse(status['can_modify'])
         self.assertIn('not a game ownership or administrator check', status['issues'][0]['steps'][0])
 
+    def test_safe_missing_file_repair_explains_steam_verify_and_exposes_action(self):
+        reason = 'Managed files changed; ownership needs review before further changes: plugin.dll (current state: missing)'
+        status = installation_status(self.game(compatibility='blocked', managed=True, enabled=True,
+            repair_eligible=True, repair_files=['plugin.dll'], reasons=[reason]))
+        self.assertTrue(status['can_repair'])
+        self.assertEqual(status['issues'][0]['code'], 'managed_files_missing')
+        steps = '\n'.join(status['issues'][0]['steps'])
+        self.assertIn('Steam verification checks files owned by the game', steps)
+        self.assertIn('exact checksum-verified package', steps)
+
     def test_steam_build_review_shows_ids_and_relative_file_states_without_unblocking(self):
         reason = 'Steam build changed; installation needs review'
         report = dict(recorded_build='123456', current_build='789012', files=[

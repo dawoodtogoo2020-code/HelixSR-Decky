@@ -193,7 +193,7 @@ test("an unresponsive backend ends loading, exposes an error, and shares its pen
   assert.equal(refresh.props.disabled, false);
   refresh.props.onClick(); await flush();
   h.unmount(); h.mount(); await flush();
-  assert.equal(h.count("library"), 1);
+  assert.equal(h.count("library"), 2);
   pending.resolve(h.library()); await flush(); h.render(); await flush();
   assert.match(h.text(h.render()), /1 games found/);
   assert.doesNotMatch(h.text(h.render()), /Library scan failed/);
@@ -233,6 +233,25 @@ test("menu labels stay off until review applies and the backend refresh confirms
   modal.element.props.onOK(); modal.options.fnOnClose(); await flush(); h.render(); await flush(); h.render();
   assert.equal(h.count("apply_action"), 1);
   assert.equal(h.menuToggle().props.checked, true);
+});
+
+test("eligible missing managed files use the existing reviewed repair action", async () => {
+  const reason = "Managed HelixSR files are missing: nvngx.dll";
+  const h = harness();
+  Object.assign(h.game, {managed: true, enabled: false, repair_eligible: true, repair_files: ["nvngx.dll"],
+    installation_status: {state: "review", label: "Repair available", selectable: true,
+      can_modify: false, can_restore: true, can_repair: true, running: false, summary: reason,
+      issues: [{code: "managed_files_missing", title: "HelixSR files missing", reason,
+        steps: ["Choose Repair HelixSR files."], blocking: true}]}});
+  await h.ready();
+  const tree = h.render();
+  assert.equal((h.text(tree).match(/Managed HelixSR files are missing/g) || []).length, 1);
+  const button = h.walk(tree, node => node.type === "ButtonItem" && /Repair HelixSR files/.test(h.text(node)))[0];
+  assert.ok(button, h.text(tree));
+  assert.equal(button.props.disabled, false);
+  button.props.onClick(); await flush();
+  assert.equal(h.calls.filter(call => call.route === "preview_action").at(-1).args[1], "repair");
+  assert.equal(h.count("apply_action"), 0);
 });
 
 test("unsupported menu profiles are disabled with an explanation", async () => {
@@ -312,18 +331,47 @@ test("first confirmation starts once and survives panel remount during both RPCs
   assert.equal(h.toasts.filter(toast => /Starting HelixSR/.test(toast.title)).length, 1);
 });
 
-test("late empty library response cannot erase the submitted job or stop polling", async () => {
-  const late = deferred(), install = deferred(); let reads = 0;
-  const h = harness({ library: () => ++reads === 1 ? h.library() : late.promise,
-    install_latest: () => install.promise });
+test("panel remount reuses the library snapshot and cannot erase the submitted job", async () => {
+  const install = deferred();
+  const h = harness({ install_latest: () => install.promise });
   await h.ready(); const modal = await h.openInstall(); h.unmount(); h.mount(); await flush();
-  // This scan was started before confirmation. It cannot erase a newer job.
-  assert.equal(h.count("library"), 2);
+  assert.equal(h.count("library"), 1);
   modal.element.props.onOK(); modal.options.fnOnClose(); await flush();
-  install.resolve(job()); await flush(); late.resolve(h.library()); await flush();
+  install.resolve(job()); await flush();
   assert.match(h.text(h.render()), /Building local network/);
   assert.ok([...h.intervals.values()].some(interval => interval.ms === 2000));
   assert.equal(h.count("install_latest"), 1);
+});
+
+test("a terminal job observed while unmounted invalidates the snapshot for the next mount", async () => {
+  const h = harness({ job_status: () => [job("completed")] });
+  await h.ready();
+  const modal = await h.openInstall();
+  modal.element.props.onOK(); modal.options.fnOnClose(); await flush();
+  assert.ok([...h.intervals.values()].some(interval => interval.ms === 2000));
+  h.unmount();
+  const scansBefore = h.count("library");
+  [...h.intervals.values()].filter(interval => interval.ms === 2000).forEach(interval => interval.callback());
+  await flush();
+  h.mount(); await flush(); h.render(); await flush();
+  assert.equal(h.count("library"), scansBefore + 1);
+});
+
+test("checked release metadata survives a panel remount without a library scan", async () => {
+  const checked = {version: "2.1.0", supported: false, support_reason: "Not reviewed"};
+  const h = harness({check_updates: () => checked});
+  await h.ready();
+  const updates = h.walk(h.render(), node => node.type === "ButtonItem" && /Game release and plugin updates/.test(h.text(node)))[0];
+  updates.props.onClick();
+  const check = h.walk(h.render(), node => node.type === "ButtonItem" && /Check latest HelixSR version/.test(h.text(node)))[0];
+  check.props.onClick(); await flush(); h.render();
+  assert.match(h.text(h.render()), /Latest found:\s+2\.1\.0/);
+  const scansBefore = h.count("library");
+  h.unmount(); h.mount(); await flush(); h.render();
+  assert.equal(h.count("library"), scansBefore);
+  const reopened = h.walk(h.render(), node => node.type === "ButtonItem" && /Game release and plugin updates/.test(h.text(node)))[0];
+  reopened.props.onClick();
+  assert.match(h.text(h.render()), /Latest found:\s+2\.1\.0/);
 });
 
 test("submission failure stays visible after remount and never launches an unaccepted job", async () => {

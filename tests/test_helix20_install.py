@@ -147,6 +147,30 @@ class Helix20InstallTests(Fixtures):
         self.assertFalse(any((self.root / name).exists() for name in manager.NETWORK))
         self.assertEqual(self.m.record(self.game)['version'], '2.0.0')
 
+    def test_native_direct_missing_runtime_repairs_exact_20_payload(self):
+        package, _ = self.modern20_package()
+        self.action('install')
+        expected = (package / helix20_release.OUTPUT_DLL).read_bytes()
+        self.native.unlink()
+        details = self.m.assess(self.game)
+        self.assertTrue(details['repair_eligible'])
+        self.assertEqual(details['repair_files'], ['amd_fidelityfx_upscaler_dx12.dll'])
+        self.action('repair')
+        self.assertEqual(self.native.read_bytes(), expected)
+
+    def test_scaler_missing_added_runtime_repairs_exact_20_payload(self):
+        self.scaler_game()
+        package, _ = self.modern20_package()
+        self.action('install')
+        runtime = self.root / helix20_release.AMD_UPSCALER_RUNTIME
+        expected = (package / helix20_release.AMD_UPSCALER_SOURCE).read_bytes()
+        runtime.unlink()
+        details = self.m.assess(self.game)
+        self.assertTrue(details['repair_eligible'])
+        self.assertEqual(details['repair_files'], [str(Path(helix20_release.AMD_UPSCALER_RUNTIME))])
+        self.action('repair')
+        self.assertEqual(runtime.read_bytes(), expected)
+
 
 if __name__ == '__main__':
     import unittest

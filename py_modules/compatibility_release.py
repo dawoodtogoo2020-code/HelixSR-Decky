@@ -8,6 +8,7 @@ COMPATIBLE_CHOICE = "compatible-1.8.1"
 COMPATIBLE_VERSION = "1.8.1"
 COMPATIBLE_METADATA_SOURCE = "reviewed-compatibility-release"
 REVIEWED_CHOICES = ('reviewed-2.0.0', 'reviewed-1.9.3', COMPATIBLE_CHOICE)
+RECOMMENDED_CHOICE = 'reviewed-2.0.0'
 
 _UNSUPPORTED_FROM = (1, 9, 0)
 _COMPATIBLE_TUPLE = (1, 8, 1)
@@ -64,12 +65,16 @@ def reviewed_release(choice):
 
 def release_choices():
     """Display choices without downloading or changing an installation."""
-    choices = [dict(id=LATEST_CHOICE, label='Latest upstream', version=None,
-                    page='https://github.com/lonewolf0622/HelixSR/releases')]
+    choices = []
     for choice in REVIEWED_CHOICES:
         release = reviewed_release(choice)
-        choices.append(dict(id=choice, label=f"HelixSR {release['version']} (reviewed)",
-                            version=release['version'], page=release['page']))
+        recommended = choice == RECOMMENDED_CHOICE
+        suffix = 'recommended' if recommended else 'older release'
+        choices.append(dict(id=choice, label=f"HelixSR {release['version']} ({suffix})",
+                            version=release['version'], page=release['page'],
+                            recommended=recommended))
+    choices.append(dict(id=LATEST_CHOICE, label='Latest upstream (check for newer)', version=None,
+                        page='https://github.com/lonewolf0622/HelixSR/releases', recommended=False))
     return choices
 
 
@@ -118,7 +123,7 @@ def parse_version(value):
 
 
 def require_supported_latest(release):
-    """Reject latest releases newer than the reviewed 1.8.1 recipe.
+    """Reject releases whose package identity and preparation are unsupported.
 
     Supported releases are returned unchanged; existing recipe and output
     guards in the manager still apply afterwards.
@@ -138,7 +143,6 @@ def require_supported_latest(release):
         raise ValueError(
             f"Latest HelixSR {version} was detected but its package format is not yet reviewed. "
             "Check for a plugin update before installing it. Your installed files are unchanged. "
-            "Select 'Compatible HelixSR "
-            f"{COMPATIBLE_VERSION}' explicitly to install the reviewed release."
+            "Select 'HelixSR 2.0.0 (recommended)' to use the supported package."
         )
     return release

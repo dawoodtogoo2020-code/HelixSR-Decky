@@ -14,6 +14,7 @@ import { InstallSession, JobTracker } from "./installSession";
 import { readLaunchOptions } from "./launchDetails";
 import { HelixSettings, HelixSettingsState } from "./HelixSettings";
 import { overlayShortcut } from "./overlayShortcut";
+import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceLabel } from "./releaseChoices";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -50,13 +51,14 @@ type FG = { source: string; key: string; value: string; enabled: boolean | null;
 type Game = { id: string; name: string; folder: string; source: string; compatibility: string;
   helix_settings?: HelixSettingsState;
   installation_status?: { state: "ready" | "running" | "review" | "unsupported" | "recovery"; label: string; summary: string;
-    running: boolean; selectable: boolean; can_modify: boolean; can_restore?: boolean; issues: {code: string; title: string; reason: string; steps: string[]; blocking: boolean}[] };
+    running: boolean; selectable: boolean; can_modify: boolean; can_restore?: boolean; can_repair?: boolean; issues: {code: string; title: string; reason: string; steps: string[]; blocking: boolean}[] };
   appid?: string;
   reasons: string[]; route: string | null; inputs: string[]; managed: boolean; enabled: boolean;
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
   main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
   executable_choices?: { path: string; dx12: boolean }[]; selected_executable?: string; executable_selection_needed?: boolean;
   menu_labels?: { available: boolean; supported: boolean; enabled: boolean; reason: string; label: string; experimental: boolean };
+  repair_eligible?: boolean; repair_files?: string[];
   awareness_warnings?: string[];
   awareness_deferred?: boolean;
   setup_guidance?: {action: string; headline: string; steps: string[]; notes: string[]; links: {label: string; url: string}[]};
@@ -73,13 +75,17 @@ type LauncherImport = { launcher: string; found: number; added: number; candidat
   unavailable: number; game_ids: string[]; warnings: string[] };
 type Library = { games: Game[]; warnings: string[]; release: Release; license_accepted: boolean; jobs: Job[];
   launcher_import?: LauncherImport; model_catalog?: ModelCatalog; release_choices?: ReleaseChoice[] };
-let cachedLibrary: Library | undefined;
-function cacheLibrary(next: Library) { cachedLibrary = next; return next; }
 type Preview = { token: string; name: string; action: string; route: string; files: string[];
   warning: string; select_upscaler: string; model?: string; variant_id?: string; release_version?: string;
   license_url?: string; license_accepted?: boolean; selected_executable?: string };
 const library = callable<[], Library>("library");
 const libraryRead = new LibraryRead(library);
+let cachedLibrary: Library | undefined;
+function cacheLibrary(next: Library) { cachedLibrary = next; libraryRead.remember(next); return next; }
+function invalidateLibraryCache() { cachedLibrary = undefined; libraryRead.invalidate(); }
+function cacheRelease(current: Library | undefined, release: Release) {
+  return current ? cacheLibrary({ ...current, release }) : current;
+}
 const details = callable<[string, string?], Game>("game_details");
 const gameDetailsRead = new GameDetailsRead(details);
 const setGameSettings = callable<[string, Record<string, string | number>, string], Game>("set_game_settings");
@@ -94,7 +100,7 @@ const cancelJob = callable<[string], boolean>("cancel_job");
 const previewAction = callable<[string, string, boolean, string?], Preview>("preview_action");
 const applyAction = callable<[string], { message: string }>("apply_action");
 const previewLatest = callable<[string, boolean, string?, string?, string?], Preview>("preview_latest");
-let selectedReleaseChoice = "latest";
+let selectedReleaseChoice = DEFAULT_RELEASE_CHOICE;
 let rememberedGameSettingsOpen = false;
 let rememberedTuningOpen = false;
 const installLatest = callable<[string], Job>("install_latest");
@@ -230,6 +236,7 @@ function watchJobs(next: Job[], expectedRevision?: number, submittedId?: string)
   next = jobTracker.jobs;
   const finished = watchedJobs.some(old => old.state === "running" && next.some(j => j.id === old.id && j.state !== "running"))
     || next.some(j => j.id === submittedId && j.state !== "running");
+  if (finished) invalidateLibraryCache();
   next.forEach(j => {
     if (j.state === "running" || notifiedJobs.has(j.id)) return;
     notifiedJobs.add(j.id);
@@ -346,11 +353,11 @@ function Content() {
     }
     finally { setBusy(false); }
   }
-  async function refresh() {
+  async function refresh(force = false) {
     const jobRevision = jobTracker.revision;
     setLibraryLoading(true); setLibraryError("");
     const result = await run(async () => {
-      try { return await libraryRead.get(); }
+      try { return await (force ? libraryRead.refresh() : libraryRead.get()); }
       catch (e) { setLibraryError(e instanceof Error ? e.message : String(e)); throw e; }
       finally { setLibraryLoading(false); }
     });
@@ -395,7 +402,7 @@ function Content() {
     setVariant(game?.installed_variant || data?.model_catalog?.default);
   }, [game?.id, game?.installed_variant, data?.model_catalog?.default]);
   useEffect(() => {
-    const changed = (next: Job[], finished: boolean) => { setJobs(next); if (finished) void refresh(); };
+    const changed = (next: Job[], finished: boolean) => { setJobs(next); if (finished) void refresh(true); };
     jobListeners.add(changed); setJobs(watchedJobs);
     return () => { jobListeners.delete(changed); };
   }, []);
@@ -461,7 +468,7 @@ function Content() {
       const currentRelease = await review(() => checkUpdates(true));
       if (!currentRelease) return;
       if (!currentRelease.version || currentRelease.error) { setInstallError(currentRelease.error || "Could not check the release. Select Check release to retry."); return; }
-      setData(d => d ? { ...d, release: currentRelease } : d);
+      setData(d => cacheRelease(d, currentRelease));
       if (currentRelease.supported === false) {
         setInstallError(currentRelease.support_reason || `HelixSR ${currentRelease.version} is not supported yet. Choose a reviewed release below.`);
         setUpdatesOpen(true);
@@ -487,7 +494,7 @@ function Content() {
           toaster.toast({ title: "Starting HelixSR installation", body: `${p.name}: starting the reviewed request. Please wait; you do not need to press Install again.`, duration: 6000 });
           await setLicense(true, p.token);
           const job = await installLatest(p.token);
-          if (cachedLibrary && releaseChoice === "latest") cachedLibrary = { ...cachedLibrary, license_accepted: true };
+          if (cachedLibrary && releaseChoice === "latest") cacheLibrary({ ...cachedLibrary, license_accepted: true });
           watchJobs([...watchedJobs.filter(old => old.id !== job.id), job], undefined, job.id);
         }).then(ok => {
           if (!ok && installSession.snapshot.error && !pluginDisposed)
@@ -501,16 +508,17 @@ function Content() {
     const p = await run(() => previewAction(game.id, name, dx12, executable));
     if (!p) return;
     const actionTitle = name === "labels_enable" ? "Enable Helix SR menu labels"
-      : name === "labels_disable" ? "Restore original menu labels" : name.toUpperCase();
+      : name === "labels_disable" ? "Restore original menu labels"
+      : name === "repair" ? "Repair HelixSR files" : name.toUpperCase();
     openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`${actionTitle}: ${p.name}`}
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
         <p>{p.warning}</p><p>Route: {p.route}. In game: select {p.select_upscaler}.</p>
         {p.selected_executable && <p>Game executable: {p.selected_executable}</p>}
         <p>Files: {p.files.join(", ")}</p>
-      </div>} strOKButtonText="Apply reviewed change" strCancelButtonText="Cancel"
+      </div>} strOKButtonText={name === "repair" ? "Repair missing files" : "Apply reviewed change"} strCancelButtonText="Cancel"
       onOK={() => { if (!beginReview()) return; void run(() => applyAction(p.token)).then(async result => {
         if (result) toaster.toast({ title: "HelixSR Decky", body: result.message });
-        await refresh();
+        await refresh(true);
       }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
   }
   async function saveHelixSettings(changes: Record<string, string | number>) {
@@ -557,7 +565,7 @@ function Content() {
         if (saved !== after) throw new Error("Steam did not confirm saved launch options");
         await finalizeLaunch(game.id, intent.nonce, saved);
         toaster.toast({ title: "HelixSR Decky", body: "Steam launch options saved and verified" });
-        await refresh();
+        await refresh(true);
       }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
   }
   async function updatePlugin(resume = false) {
@@ -593,11 +601,18 @@ function Content() {
     ? "HelixSR installation is starting…"
     : selectedJob ? "HelixSR installation is in progress. Wait for completion before launching."
     : selectedStatus?.summary;
+  const summaryRepeatedInIssue = !!selectedSummary && !!game?.installation_status?.issues.some(issue => selectedSummary.includes(issue.reason));
   const installState = game ? installReadiness(game, dx12) : undefined;
+  const repairReady = !!game?.repair_eligible && !!game?.installation_status?.can_repair;
+  const installReasonRepeatedInIssue = !!installState?.reason && !!game?.installation_status?.issues.some(issue => installState.reason.includes(issue.reason));
   const latestUnsupported = releaseChoice === "latest" && data?.release?.supported === false;
   const releaseOptions = data?.release_choices?.length
-    ? data.release_choices.map(choice => ({ label: choice.label, data: choice.id }))
-    : [{ label: "Latest upstream", data: "latest" }, { label: "Compatible HelixSR 1.8.1", data: "compatible-1.8.1" }];
+    ? data.release_choices.map(choice => ({ label: releaseChoiceLabel(choice), data: choice.id }))
+    : [
+      { label: "HelixSR 2.0.0 (recommended)", data: DEFAULT_RELEASE_CHOICE },
+      { label: "Latest upstream", data: "latest" },
+      { label: "HelixSR 1.8.1 (older release)", data: "compatible-1.8.1" },
+    ];
   const guidance = submission.pending ? undefined : nextStep(game?.setup_guidance, jobs.find(job => job.state === "running"));
   const guidanceNeedsAttention = selectedStatus?.review || installState?.allowed === false;
   const hasMoreSetup = !!guidance && (guidance.steps.length > 1 || guidance.notes.length > 0 || guidance.links.length > 0);
@@ -625,20 +640,21 @@ function Content() {
           onChange={option => chooseGame(String(option.data))} />
       </PanelSectionRow></div>
       {game && <PanelSectionRow><div className="helix-muted" style={{ color: selectedStatus?.color }} role="status">
-        {selectedStatus?.label}{selectedSummary && selectedSummary !== selectedStatus?.label ? ` · ${selectedSummary}` : ""}
+        {selectedStatus?.label}{selectedSummary && selectedSummary !== selectedStatus?.label && !summaryRepeatedInIssue ? ` · ${selectedSummary}` : ""}
       </div></PanelSectionRow>}
       {game && <>
-        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || !installState?.allowed || latestUnsupported}
-          onClick={() => void interact(installOrUpdate)}>{submission.pending ? "Starting installation…" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
+        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || (!repairReady && (!installState?.allowed || latestUnsupported))}
+          onClick={() => void interact(repairReady ? () => action("repair") : installOrUpdate)}>{submission.pending ? "Starting installation…" : repairReady ? "Repair HelixSR files" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
       </>}
       {installError && <PanelSectionRow><div role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>{installError}</div></PanelSectionRow>}
       {latestUnsupported && <PanelSectionRow><div role="alert" className="helix-card" style={{ ...infoStyle, borderLeftColor: "#f1ca7e" }}>
         {data?.release?.support_reason || `HelixSR ${data?.release?.version || "latest"} is not supported yet.`} Choose a reviewed release below.
       </div></PanelSectionRow>}
-      <PanelSectionRow><ButtonItem layout="below" onClick={() => void refresh()} disabled={busy || modalOpen}>Refresh library and status</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => void refresh(true)} disabled={busy || modalOpen}>Refresh library and status</ButtonItem></PanelSectionRow>
       <PanelSectionRow><DropdownItem layout="below" label="Release to install" selectedOption={releaseChoice} disabled={disabled}
         rgOptions={releaseOptions}
         onChange={option => { selectedReleaseChoice = String(option.data); setReleaseChoice(String(option.data)); }} /></PanelSectionRow>
+      <PanelSectionRow><div className="helix-muted">{releaseChoiceExplanation(releaseChoice)}</div></PanelSectionRow>
       <PanelSectionRow><div className="helix-muted">{libraryView.summary}</div></PanelSectionRow>
       {submission.pending && <PanelSectionRow><div className="helix-card" style={infoStyle} role="status">
         <strong>{submission.name}: Starting installation…</strong>{"\n"}{submission.message}
@@ -670,7 +686,7 @@ function Content() {
         </>}
         {game.dx12_confirmation_needed && <PanelSectionRow><ToggleField label="Confirm DX12 mode"
           description="Choose DX12 in the game first, then confirm it here." checked={dx12} onChange={setDx12} disabled={disabled} /></PanelSectionRow>}
-        {installState?.reason && !dx12OnlyReason && <PanelSectionRow><div role="status" style={infoStyle}>{installState.reason}</div></PanelSectionRow>}
+        {installState?.reason && !dx12OnlyReason && !installReasonRepeatedInIssue && <PanelSectionRow><div role="status" style={infoStyle}>{installState.reason}</div></PanelSectionRow>}
         {game.recovery_available && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running} onClick={() => void interact(() => action("recover"))}>Recover interrupted file transaction</ButtonItem></PanelSectionRow>}
         {!!pluginUpdate?.pending && <PanelSectionRow><div style={infoStyle}>Finish or cancel the downloaded plugin update in Plugin updates before installing game files.</div></PanelSectionRow>}
         {game.managed && !game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
@@ -795,7 +811,7 @@ function Content() {
         {updatesOpen ? "Hide updates" : latestUnsupported ? "Choose a reviewed release" : "Game release and plugin updates"}</ButtonItem></PanelSectionRow>
       {updatesOpen && <>
       <PanelSectionRow><div className="helix-muted">Installed: {game?.installed_version || "none"} · Latest found: {data?.release?.version || "check required"}</div></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen} onClick={() => void run(() => checkUpdates(true)).then(r => { if (r) setData(d => d ? { ...d, release: r } : d); })}>Check latest HelixSR version</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={busy || modalOpen} onClick={() => void run(() => checkUpdates(true)).then(r => { if (r) setData(d => cacheRelease(d, r)); })}>Check latest HelixSR version</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen}
         onClick={() => SteamClient.System.OpenInSystemBrowser(data?.release_choices?.find(choice => choice.id === releaseChoice)?.page
           || "https://github.com/lonewolf0622/HelixSR/releases")}>HelixSR release notes</ButtonItem></PanelSectionRow>

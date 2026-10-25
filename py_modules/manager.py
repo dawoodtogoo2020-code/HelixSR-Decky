@@ -859,6 +859,7 @@ class Manager:
                         managed=False, enabled=False, inputs=[],
                         executable_choices=[], selected_executable=None, executable_selection_needed=False,
                         recovery_available=self.recovery_available(game),
+                        repair_eligible=False, repair_files=[],
                         optiscaler={'present': False, 'involved': False, 'helix_configured': False,
                                     'runtime': 'unknown', 'dlls': []},
                         framegen=[], framegen_summary='No supported per-game evidence',
@@ -992,6 +993,8 @@ class Manager:
             reasons.append('Existing direct HelixSR installation: explicit import is required before management')
         steam_build_review = None
         restore_eligible = False
+        repair_missing = []
+        repair_conflict = False
         if rec:
             if game.get('build') and rec.get('game_build') and game['build'] != rec['game_build']:
                 blocked.append('Steam build changed; installation needs review')
@@ -1004,6 +1007,7 @@ class Manager:
                 if steam_build_review is not None and len(steam_build_review['files']) < 20:
                     steam_build_review['files'].append(dict(path=rel, state=state))
             mutable = self.mutable_config_paths(game, rec)
+            non_file_blocked = list(blocked)
             restore_blocked = list(blocked)
             missing_introduced = []
             for rel, expected in rec['current'].items():
@@ -1041,6 +1045,10 @@ class Manager:
                     reason = ('Managed files changed; ownership needs review before further changes: '
                               + rel + ' (current state: ' + state + ')')
                     blocked.append(reason)
+                    if actual is None and expected is not None:
+                        repair_missing.append(rel)
+                    else:
+                        repair_conflict = True
                     if absent_introduced:
                         missing_introduced.append(rel)
                     else:
@@ -1069,6 +1077,22 @@ class Manager:
         # not a cross-library search and rehash of every prepared model. Details
         # and every mutation retain the full, fresh package verification.
         package = self.package(game, route) if detailed else None
+        repair_package = (self.package(game, route, selection=rec.get('package_selection'),
+                                       installed=rec if not rec.get('package_selection') else None)
+                          if detailed and rec and rec.get('enabled') and repair_missing
+                          and not repair_conflict and not non_file_blocked else None)
+        repair_files = []
+        repair_reason = None
+        if (rec and rec.get('enabled') and repair_missing and not repair_conflict
+                and not non_file_blocked and repair_package):
+            try:
+                repair_files = self.repair_plan(game, rec, repair_package, repair_missing)
+            except (ValueError, OSError, TypeError, KeyError) as exc:
+                repair_reason = str(exc)
+        if (detailed and rec and rec.get('enabled') and repair_missing
+                and not repair_conflict and not non_file_blocked and not repair_files):
+            blocked.append(repair_reason or
+                           'Exact installed package is unavailable or changed; repair needs the recorded checksum-verified package')
         data = dict(game, compatibility='blocked' if blocked else 'unsupported' if dx11_title else 'candidate' if route else 'unsupported',
                     reasons=blocked + reasons, route=route, inputs=inputs, target=str(target) if target else None,
                     targets=[str(p) for p in targets], main_exe=str(main) if main else None,
@@ -1084,6 +1108,7 @@ class Manager:
                     installed_variant=rec.get('variant', {}).get('id') if valid_variant(rec.get('variant')) else None,
                     recovery_available=self.recovery_available(game), steam_build_review=steam_build_review,
                     restore_eligible=restore_eligible,
+                    repair_eligible=bool(repair_files), repair_files=repair_files,
                     dx12_confirmation_needed=(not dx11_title and route == 'optiscaler'
                                               and not (main and pe_info(main)['dx12'])
                                               and not confirmed_dx12),
@@ -1655,6 +1680,8 @@ class Manager:
         # An unsupported renderer can still restore owned originals. Any other
         # assessment blocker (build, hashes, process, staging) remains decisive.
         return (data['compatibility'] == 'candidate' or
+                action == 'repair' and data.get('repair_eligible')
+                and data.get('managed') and not data.get('recovery_available') or
                 action in ('disable', 'remove') and data.get('restore_eligible')
                 and data.get('managed') and not data.get('recovery_available') or
                 action in ('disable', 'remove') and data['compatibility'] == 'unsupported'
@@ -1663,7 +1690,7 @@ class Manager:
     def preview(self, gid, action, dx12_confirmed=False, executable=None):
         with self.lock:
             game = self.get_game(gid)
-            if action not in ('install', 'update', 'enable', 'disable', 'remove', 'adopt', 'recover') + menu_labels.ACTIONS:
+            if action not in ('install', 'update', 'enable', 'disable', 'remove', 'adopt', 'recover', 'repair') + menu_labels.ACTIONS:
                 raise ValueError('Unknown action')
             if action == 'recover':
                 journal = self.companion(game) / 'transaction/journal.json'
@@ -1688,7 +1715,7 @@ class Manager:
                 raise ValueError('; '.join(data['reasons']))
             if action in menu_labels.ACTIONS:
                 menu_labels.plan(self, game, data, rec, action)
-            if action in ('install', 'update', 'enable'):
+            if action in ('install', 'update', 'enable', 'repair'):
                 self.validate_install_executable(data)
             if data['dx12_confirmation_needed'] and not dx12_confirmed and action in ('install', 'update'):
                 raise ValueError('Confirm that this game is set to DirectX 12')
@@ -1696,16 +1723,16 @@ class Manager:
                 raise ValueError('Only verified legacy direct installations can be imported')
             if data['legacy'] and action != 'adopt':
                 raise ValueError('Import existing direct installation first')
-            if action in ('install', 'update', 'enable'):
+            if action in ('install', 'update', 'enable', 'repair'):
                 if 'variant' in rec and not valid_variant(rec['variant']):
                     raise ValueError('Installed model identity needs review; use Update HelixSR with a supported model or remove it')
                 package = self.package(game, data['route'],
                                        variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
-                                       selection=rec.get('package_selection') if action == 'enable' else None,
-                                       installed=rec if action == 'enable' else None)
+                                       selection=rec.get('package_selection') if action in ('enable', 'repair') else None,
+                                       installed=rec if action in ('enable', 'repair') and not rec.get('package_selection') else None)
                 if not package:
                     raise ValueError('Exact installed package is unavailable; use Update HelixSR and review the change'
-                                     if action == 'enable' else 'Prepare HelixSR on this drive first')
+                                     if action in ('enable', 'repair') else 'Prepare HelixSR on this drive first')
                 if not self._verify_package_payloads(package, data['route']):
                     raise ValueError('Prepared package manifest is incomplete or changed. Rebuild required.')
                 for n, expected in package[2]['files'].items():
@@ -1715,6 +1742,10 @@ class Manager:
                 raise ValueError('Already managed; use update or enable')
             if action in ('disable', 'enable', 'remove', 'update') and not rec:
                 raise ValueError('Game is not managed by this plugin')
+            if action == 'repair':
+                if not rec or not data.get('repair_eligible'):
+                    raise ValueError('This installation is not eligible for safe repair')
+                self.repair_plan(game, rec, package, data.get('repair_files', []))
             if action == 'adopt':
                 for target in data['targets']:
                     p = Path(target)
@@ -1724,7 +1755,7 @@ class Manager:
             token = uuid.uuid4().hex
             fingerprint = self.fingerprint(game, data, package=package)
             self.previews[token] = dict(game=gid, action=action, fingerprint=fingerprint,
-                                       package_selection=package_selection(package[2]) if action in ('install', 'update', 'enable') else None,
+                                       package_selection=package_selection(package[2]) if action in ('install', 'update', 'enable', 'repair') else None,
                                        executable=data['selected_executable'] if not data['managed'] and data['route'] == 'optiscaler' else None,
                                        selected_executable=data['selected_executable'],
                                        expires=time.time()+120, dx12=dx12_confirmed)
@@ -1780,6 +1811,8 @@ class Manager:
 
     def planned_paths(self, game, data, action, package=AUTO_PACKAGE, release=None):
         rec, root = self.record(game), Path(game['folder'])
+        if action == 'repair':
+            return list(data.get('repair_files', []))
         if package is AUTO_PACKAGE:
             package = self.package(game, data['route'])
         payload = release or (package[2] if package else {})
@@ -1872,10 +1905,11 @@ class Manager:
         if preview['action'] in menu_labels.ACTIONS:
             menu_labels.plan(self, game, data, rec, preview['action'])
         package = None
-        if preview['action'] in ('install', 'update', 'enable'):
+        if preview['action'] in ('install', 'update', 'enable', 'repair'):
             package = self.package(game, data['route'],
                                    variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
-                                   selection=preview.get('package_selection'))
+                                   selection=preview.get('package_selection'),
+                                   installed=rec if preview.get('package_selection') is None else None)
         if (not self.action_compatible(data, preview['action'])
                 or self.fingerprint(game, data, package=package) != preview['fingerprint']):
             raise ValueError('Game changed since preview; refresh and review again')
@@ -1892,11 +1926,11 @@ class Manager:
         if package is AUTO_PACKAGE:
             rec = self.record(game)
             package = None
-            if action in ('install', 'update', 'enable'):
+            if action in ('install', 'update', 'enable', 'repair'):
                 package = self.package(game, data['route'],
                                        variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
-                                       selection=rec.get('package_selection') if action == 'enable' else None,
-                                       installed=rec if action == 'enable' else None)
+                                       selection=rec.get('package_selection') if action in ('enable', 'repair') else None,
+                                       installed=rec if action in ('enable', 'repair') and not rec.get('package_selection') else None)
         paths = self.planned_paths(game, data, action, package)
         size = sum((root / p).stat().st_size for p in paths if (root / p).is_file())
         if shutil.disk_usage(root).free < size * 3 + (128 << 20):
@@ -1989,6 +2023,14 @@ class Manager:
                 previous['enabled'] = False
                 if isinstance(previous.get('menu_labels'), dict):
                     previous['menu_labels']['enabled'] = False
+            elif action == 'repair':
+                if not package:
+                    raise ValueError('Exact installed package is unavailable; repair cannot continue')
+                missing = self.repair_plan(game, previous, package, data.get('repair_files', []))
+                self.repair_payload(game, previous, package, missing)
+                for rel in missing:
+                    if sha(checked_path(root, rel)) != previous['current'][rel]:
+                        raise ValueError('Repaired file hash does not match installation record: ' + rel)
             elif action in ('install', 'update', 'enable'):
                 if not package:
                     raise ValueError('Prepared package unavailable')
@@ -2013,7 +2055,12 @@ class Manager:
                 previous['dx12_confirmation'] = dict(
                     selected_executable=data['selected_executable'],
                     executable_sha256=confirmed_executable_sha(data['main_exe']))
-            previous['current'] = {rel: sha(root / rel) if (root / rel).is_file() else None for rel in paths}
+            if action == 'repair':
+                current = dict(previous['current'])
+                current.update({rel: sha(root / rel) if (root / rel).is_file() else None for rel in paths})
+                previous['current'] = current
+            else:
+                previous['current'] = {rel: sha(root / rel) if (root / rel).is_file() else None for rel in paths}
             previous['updated_at'], previous['game_build'] = time.time(), game.get('build')
             if game.get('manifest'):
                 from library import vdf
@@ -2200,6 +2247,123 @@ class Manager:
             sync_directory(dst.parent)
         finally:
             temp.unlink(missing_ok=True)
+
+    def copy_absent_atomic(self, src, dst, expected):
+        """Install one missing repair file without ever replacing a new arrival."""
+        source_hash = sha(src)
+        if source_hash != expected:
+            raise ValueError('Recorded repair source changed during repair')
+        self.track_write(dst, expected)
+        dst = Path(dst)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        temp = dst.with_name(dst.name + '.helixsr-decky.tmp')
+        try:
+            shutil.copy2(src, temp)
+            if sha(src) != expected or sha(temp) != expected:
+                raise ValueError('Repair copy verification failed')
+            with temp.open('r+b') as f:
+                os.fsync(f.fileno())
+            try:
+                os.link(temp, dst)
+            except FileExistsError as exc:
+                raise ValueError('Repair target appeared during repair: ' + str(dst.name)) from exc
+            temp.unlink()
+            sync_directory(dst.parent)
+        finally:
+            temp.unlink(missing_ok=True)
+
+    def repair_sources(self, game, rec, package):
+        """Map reproducible installed paths to immutable, hash-checked sources."""
+        root, package_path, package_record = Path(game['folder']), package[1], package[2]
+        sources = {}
+        if rec['route'] == 'direct':
+            for target in map(Path, rec['targets']):
+                rel = str(target.relative_to(root))
+                sources[rel] = ('file', package_path / output_dll(package_record))
+                original_rel = str(target.with_name(target.stem + '.original.dll').relative_to(root))
+                sources[original_rel] = ('file', self.companion(game) / 'originals' / rel)
+                if not helix20_release.modern(package_record):
+                    for name in NETWORK:
+                        sources[str((target.parent / name).relative_to(root))] = ('file', package_path / name)
+                install_rel = str((target.parent / 'helixsr-install.json').relative_to(root))
+                sources[install_rel] = ('bytes', (json.dumps({
+                    'route': 'direct', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
+                    'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')
+                }, indent=2) + '\n').encode())
+        elif is_modern(package_record):
+            target = Path(rec['target'])
+            for source, dest in release_adapter(package_record).scaler_pairs():
+                if not dest.endswith('.ini'):
+                    sources[str((target / dest).relative_to(root))] = ('file', package_path / source)
+            install_rel = str((target / 'HelixSR/helixsr-install.json').relative_to(root))
+            sources[install_rel] = ('bytes', (json.dumps({
+                'route': 'optiscaler', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
+                'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')
+            }, indent=2) + '\n').encode())
+        else:
+            target = Path(rec['target'])
+            pairs = [('optiscaler/OptiScaler.dll', 'dxgi.dll'),
+                     ('optiscaler/fakenvapi.dll', 'fakenvapi.dll'),
+                     (DLL, 'HelixSR/helixsr.dll'), (DLL, 'HelixSR/helixsr_upscaler.dll'),
+                     ('amd-fsr/amd_fidelityfx_upscaler_dx12.dll',
+                      'HelixSR/amd_fidelityfx_upscaler_dx12.amd.dll')]
+            pairs += [(name, 'HelixSR/' + name) for name in NETWORK]
+            fg = 'amd-fsr/' + AMD_FG
+            if fg in package_record['files']:
+                pairs.append((fg, 'HelixSR/' + AMD_FG))
+            for source, dest in pairs:
+                sources[str((target / dest).relative_to(root))] = ('file', package_path / source)
+            install_rel = str((target / 'HelixSR/helixsr-install.json').relative_to(root))
+            sources[install_rel] = ('bytes', (json.dumps({
+                'route': 'optiscaler', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
+                'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')
+            }, indent=2) + '\n').encode())
+        return sources
+
+    def repair_plan(self, game, rec, package, missing):
+        """Validate that every requested absent file has the exact recorded source."""
+        if (not isinstance(missing, list) or not missing
+                or not isinstance(rec.get('current'), dict) or not isinstance(rec.get('baseline'), dict)):
+            raise ValueError('Invalid repair request')
+        root = Path(game['folder'])
+        sources = self.repair_sources(game, rec, package)
+        result = []
+        for rel in missing:
+            path = checked_path(root, rel)
+            expected = rec['current'].get(rel)
+            if rel not in rec['baseline'] or not isinstance(expected, str) or rel not in sources:
+                raise ValueError('Missing file cannot be reproduced safely: ' + rel)
+            if path.exists() or path.is_symlink():
+                raise ValueError('Repair target is no longer absent: ' + rel)
+            kind, source = sources[rel]
+            actual = sha(source) if kind == 'file' and Path(source).is_file() else (
+                hashlib.sha256(source).hexdigest() if kind == 'bytes' else None)
+            if actual != expected:
+                raise ValueError('Recorded repair source is unavailable or changed: ' + rel)
+            baseline = rec['baseline'][rel]
+            if baseline is not None:
+                original = checked_path(self.companion(game), str(Path('originals') / rel))
+                if not original.is_file() or sha(original) != baseline:
+                    raise ValueError('Original file hash mismatch: ' + rel)
+            result.append(rel)
+        return result
+
+    def repair_payload(self, game, rec, package, missing):
+        sources = self.repair_sources(game, rec, package)
+        root = Path(game['folder'])
+        for rel in missing:
+            kind, source = sources[rel]
+            expected = rec['current'][rel]
+            if kind == 'file':
+                self.copy_absent_atomic(Path(source), checked_path(root, rel), expected)
+            else:
+                if hashlib.sha256(source).hexdigest() != expected:
+                    raise ValueError('Recorded repair source changed: ' + rel)
+                destination = checked_path(root, rel)
+                temporary_source = self.companion(game) / 'transaction/repair-source' / rel
+                temporary_source.parent.mkdir(parents=True, exist_ok=True)
+                temporary_source.write_bytes(source)
+                self.copy_absent_atomic(temporary_source, destination, expected)
 
     def install_payload(self, game, data, rec, package, previous_version=None):
         root = Path(game['folder'])

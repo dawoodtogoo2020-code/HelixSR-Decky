@@ -10,6 +10,15 @@ from test_backend import Fixtures
 
 
 class ReleaseChoiceTests(Fixtures):
+    def test_recommended_release_is_first_and_older_choices_are_explicit(self):
+        choices = releases.release_choices()
+        self.assertEqual(choices[0]['id'], releases.RECOMMENDED_CHOICE)
+        self.assertEqual(choices[0]['version'], '2.0.0')
+        self.assertTrue(choices[0]['recommended'])
+        self.assertEqual(sum(bool(choice['recommended']) for choice in choices), 1)
+        self.assertTrue(all('older release' in choice['label'] for choice in choices[1:3]))
+        self.assertEqual(choices[-1]['id'], 'latest')
+
     def test_reviewed_choices_do_not_need_network(self):
         with patch.object(self.m, 'check_update', side_effect=AssertionError('Network used')):
             for choice in releases.REVIEWED_CHOICES:

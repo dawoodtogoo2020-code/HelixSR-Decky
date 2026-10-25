@@ -42,7 +42,10 @@ test("result settling after every caller timed out is returned by the next get",
   assert.deepEqual(await lib.get(), games);
   assert.equal(scans.length, 1);
 
-  const next = lib.get();
+  assert.deepEqual(await lib.get(), games);
+  assert.equal(scans.length, 1);
+
+  const next = lib.refresh();
   await flush();
   assert.equal(scans.length, 2);
   scans[1].resolve(["fresh"]);
@@ -72,7 +75,8 @@ test("timed out gets share one pending scan and a waiting get receives it", asyn
   assert.equal(value, "completed scan");
   assert.equal(scans.length, 1);
 
-  const next = lib.get();
+  assert.equal(await lib.get(), "completed scan");
+  const next = lib.refresh();
   await flush();
   assert.equal(scans.length, 2);
   scans[1].resolve("fresh");
@@ -118,7 +122,8 @@ test("concurrent waiters on a pending scan receive the same result without dupli
   assert.equal(await b, payload);
   assert.equal(await c, payload);
 
-  const next = lib.get();
+  assert.equal(await lib.get(), payload);
+  const next = lib.refresh();
   await flush();
   assert.equal(scans.length, 2);
   scans[1].resolve([]);
@@ -178,15 +183,65 @@ test("slow rejection after deadlines surfaces once without unhandled rejection",
   }
 });
 
-test("ordinary success starts a fresh read each time", async () => {
+test("ordinary success is reused until an explicit refresh", async () => {
   let calls = 0;
   const lib = new LibraryRead(async () => {
     calls++;
     return [`scan ${calls}`];
   });
   assert.deepEqual(await lib.get(), ["scan 1"]);
-  assert.deepEqual(await lib.get(), ["scan 2"]);
+  assert.deepEqual(await lib.get(), ["scan 1"]);
+  assert.deepEqual(await lib.refresh(), ["scan 2"]);
   assert.equal(calls, 2);
+});
+
+test("a newer refresh wins when an older scan finishes later", async () => {
+  const { scans, read } = scripted();
+  const lib = new LibraryRead(read);
+  const older = lib.refresh();
+  const newer = lib.refresh();
+  await flush();
+  assert.equal(scans.length, 2);
+
+  scans[0].resolve("stale");
+  scans[1].resolve("current");
+  assert.equal(await newer, "current");
+  assert.equal(await older, "current");
+  assert.equal(await lib.get(), "current");
+});
+
+test("remembered mutation data invalidates an in-flight scan", async () => {
+  const { scans, read } = scripted();
+  const lib = new LibraryRead(read);
+  const pending = lib.refresh();
+  await flush();
+  lib.remember("mutation result");
+  scans[0].resolve("old scan");
+  assert.equal(await pending, "mutation result");
+  assert.equal(await lib.get(), "mutation result");
+});
+
+test("invalidate drops a retained snapshot so the next get scans", async () => {
+  let calls = 0;
+  const lib = new LibraryRead(async () => `scan ${++calls}`);
+  assert.equal(await lib.get(), "scan 1");
+  assert.equal(await lib.get(), "scan 1");
+  lib.invalidate();
+  assert.equal(await lib.get(), "scan 2");
+});
+
+test("invalidating a pending scan prevents its waiter from republishing stale data", async () => {
+  const { scans, read } = scripted();
+  const lib = new LibraryRead(read);
+  const oldWaiter = lib.get();
+  await flush();
+  lib.invalidate();
+  scans[0].resolve("before the background install");
+  await flush();
+  assert.equal(scans.length, 2);
+  scans[1].resolve("after the background install");
+  assert.equal(await oldWaiter, "after the background install");
+  assert.equal(await lib.get(), "after the background install");
 });
 
 test("immediate error is surfaced and the next get retries", async () => {

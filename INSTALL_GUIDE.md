@@ -4,11 +4,15 @@
 
 Choose **Game** and **Release to install** at the top. HelixSR version checks sit with the game installation controls. Plugin version and updates are grouped immediately below, followed by **Import games**. Expand **Advanced game settings** for model settings, the overlay, optional menu labels, diagnostics, **Disable HelixSR** and **Remove and restore originals**.
 
+**HelixSR 2.0.0 (recommended)** is already selected. The older releases are optional compatibility choices, not additional components you need to install. [What release review means](UPGRADE_2.0.md#release-choices-and-review).
+
+Opening a dropdown reuses the game list. Selecting a game still checks its current status. After installing or moving games in Steam, use **Refresh library and status** to rescan. If a managed DLL is missing, use **Repair HelixSR files** when offered. It shows exactly which files will be restored and uses the verified package from that installation. [Missing-file and review guidance](STATUS_GUIDE.md#why-changes-are-blocked).
+
 HelixSR 2.0 restores DLSS frame generation through Scaler. Select Light or Full, provider and supported multiplier in the application. HelixSR FG requires a DirectX 12 game with DLSS FG enabled in-game. 3× is exposed only for XeSS FG. Native FSR replacement remains upscaling-only. Remove and restore originals before changing between native and Scaler routes.
 
 ## Installation error mentioning LICENSE-APACHE-2.0
 
-Decky **0.1.35** supports the reviewed official **HelixSR 2.0.0** release and **Scaler 1.1.0**. It adds a 30-second deadline for game-details reads so a stalled request releases the game picker and Refresh button. Late results cannot replace a newer selection, and retries share pending reads. Upscaler, FG provider, multiplier, advanced tuning, Scaler menu guidance and DX12 confirmation from 0.1.34 remain available. Reviewed HelixSR 2.0.0, 1.9.3 and 1.8.1 can be selected independently of the latest-release check. Frame-generation controls do not establish gameplay compatibility; see [settings and validation limits](UPGRADE_2.0.md).
+Decky **0.1.36** reuses the library list when opening dropdowns, selects **HelixSR 2.0.0** by default and offers a verified repair for missing managed files. **Refresh library and status** still rescans the library. Older releases are labeled explicitly, and package review is explained separately from game installation warnings. Frame-generation controls do not establish gameplay compatibility; see [settings and validation limits](UPGRADE_2.0.md).
 
 The compatibility download is tied to the reviewed official archive SHA-256 and the [1.8.1 license](https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE). A replaced archive is rejected. Newer or unverified existing installations are blocked from being downgraded; remove them using their owning manager first. Keep locally generated networks and game installation records.
 
@@ -18,7 +22,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Download the [Decky 0.1.35 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.35/HelixSR-Decky-0.1.35.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
+3. Download the [Decky 0.1.36 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.36/HelixSR-Decky-0.1.36.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed

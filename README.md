@@ -1,6 +1,6 @@
 # HelixSR Decky
 
-Decky **0.1.35** supports the reviewed official **HelixSR 2.0.0** release and **Scaler 1.1.0**. It adds a 30-second deadline for game-details reads so a stalled request releases the game picker and Refresh button. Late results cannot replace a newer selection, and retries share pending reads. Upscaler, FG provider, multiplier, advanced tuning, Scaler menu guidance and DX12 confirmation from 0.1.34 remain available. Reviewed HelixSR 2.0.0, 1.9.3 and 1.8.1 can be selected independently of the latest-release check. Frame-generation controls do not establish gameplay compatibility; see [settings and validation limits](UPGRADE_2.0.md).
+Decky **0.1.36** reuses the library list when opening dropdowns, selects **HelixSR 2.0.0** by default and offers a verified repair for missing managed files. **Refresh library and status** still rescans the library. Older releases are labeled explicitly, and package review is explained separately from game installation warnings. Frame-generation controls do not establish gameplay compatibility; see [settings and validation limits](UPGRADE_2.0.md).
 
 An independent Decky Loader plugin for managing HelixSR on SteamOS. It does not include HelixSR binaries or NVIDIA-derived weights. It downloads a complete official release and builds the network locally under the upstream licenses.
 
@@ -8,7 +8,7 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 
 [Support Blackheart909 on Ko-fi](https://ko-fi.com/blackheart909). Optional support helps with my work on this independent plugin and my other projects. HelixSR is developed separately by Lone Wolf.
 
-[Download Decky 0.1.35 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.35/HelixSR-Decky-0.1.35.zip) · [All releases](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/latest) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Desktop AppImage and guide](DESKTOP_GUIDE.md) · [OptiScaler setup](OPTISCALER_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
+[Download Decky 0.1.36 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.36/HelixSR-Decky-0.1.36.zip) · [All releases](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Desktop AppImage and guide](DESKTOP_GUIDE.md) · [OptiScaler setup](OPTISCALER_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
 
 Use the **install ZIP** in Decky. Developer source archives, including older `-source.zip` files and GitHub's **Source code** downloads, cannot run as a plugin. If Decky reports **Failed to fetch dynamically imported module**, follow the [repair steps](INSTALL_GUIDE.md#failed-to-fetch-dynamically-imported-module).
 
