@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import struct
+from discovery_records import normalize_imports
 
 
 _DISCOVERY_SOURCES = frozenset({
@@ -276,7 +277,7 @@ def discover(home, imported=(), sources=None):
     def add(source, folder, name, **metadata):
         try:
             p = safe_root(folder)
-        except ValueError as e:
+        except (OSError, ValueError, TypeError) as e:
             warnings.append(f'{source}: {name}: {e}')
             return
         key = str(p)
@@ -472,9 +473,10 @@ def discover(home, imported=(), sources=None):
                 add('Lutris', resolved.parent, title)
             elif record or (exe and Path(exe[1].strip().strip('"\'')).suffix.lower() == '.exe'):
                 warnings.append(f'Lutris: {title}: Windows executable unresolved; import game folder')
-    for record in imported if 'imported' in enabled else ():
-        if isinstance(record, dict) and record.get('folder'):
-            add('Imported', record['folder'], record.get('name', Path(record['folder']).name))
+    imports, import_warnings = normalize_imports(imported) if 'imported' in enabled else ([], [])
+    warnings.extend(import_warnings)
+    for record in imports:
+        add('Imported', record['folder'], record['name'])
     if 'steam' in enabled and not entries:
         if not steam_root_found:
             warnings.append('Steam: no supported Steam library root found for this user')

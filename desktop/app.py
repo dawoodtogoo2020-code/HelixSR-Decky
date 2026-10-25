@@ -275,6 +275,8 @@ class MainWindow(QMainWindow):
         self.launch_setup = QPushButton('Copy Proton launch setup')
         self.launch_setup.clicked.connect(self.copy_launch)
         content.addWidget(self.launch_setup)
+        self.settings_button = self._button('Upscaling and frame generation settings', self.edit_helix_settings, content)
+        self.scaler_route_button = self._button('Use Scaler route for frame generation', self.choose_scaler_route, content)
         row = QHBoxLayout()
         self.actions = {}
         for action in ("enable", "disable", "remove", "adopt", "recover"):
@@ -440,6 +442,9 @@ class MainWindow(QMainWindow):
         active = any(j.get("state") in ACTIVE for j in self._jobs)
         free = not (self._task or self._modal or self._closing or active)
         game = self.game or {}
+        self.settings_button.setEnabled(free and bool((game.get('helix_settings') or {}).get('available'))
+                                        and game.get('compatibility') == 'candidate')
+        self.scaler_route_button.setEnabled(free and bool(game) and not game.get('managed') and not game.get('legacy'))
         for control in (self.games, self.executables, self.models, self.release_choice, self.refresh_button, self.launchers, self.import_button, self.folder_button, self.helix_check, self.app_check, self.auto_check, self.diagnostic_button):
             control.setEnabled(free)
         choices = game.get("executable_choices", [])
@@ -638,6 +643,74 @@ class MainWindow(QMainWindow):
             call = (lambda: self.backend.preview_latest(gid, confirmed, model, executable)) if choice == "latest" else (
                 lambda: self.backend.preview_latest(gid, confirmed, model, executable, choice))
             self._run(call, lambda p: self._preview_received(p, True))
+
+    def choose_scaler_route(self):
+        if self.game:
+            gid = self.game['id']
+            self._run(lambda: self.backend.set_installation_route(gid, 'optiscaler'),
+                      lambda value: self._details_received(gid, value))
+
+    def edit_helix_settings(self):
+        game = self.game or {}
+        state = game.get('helix_settings') or {}
+        if not state.get('available'):
+            return
+        gid, revision = game['id'], state['revision']
+        dialog = QDialog(self)
+        dialog.setWindowTitle('HelixSR settings')
+        dialog.setMinimumWidth(460)
+        layout = QVBoxLayout(dialog)
+        note = QLabel('Close the game before saving; restart it afterwards. HelixSR FG needs DX12 and DLSS FG enabled in-game. 3× uses XeSS FG. Light/Full select the FG model; upscaling remains Model E.')
+        note.setWordWrap(True)
+        note.setMinimumHeight(85)
+        layout.addWidget(note)
+        fields = {}
+        choices = {
+            'upscaler': ('Upscaler', [('HelixSR Model E', 'helixsr'), ('AMD FSR', 'fsr')]),
+            'provider': ('Frame generation', [('Off', 'off'), ('HelixSR DLSS FG', 'helixsr'), ('AMD FSR FG', 'fsr'), ('Intel XeSS FG', 'xess')]),
+            'model': ('FG model', [('Light', 'light'), ('Full', 'full')]),
+            'quick_flow': ('QuickFlow (Full only)', [('Off', 'off'), ('Fast', 'fast'), ('Fastest', 'fastest')]),
+            'multiplier': ('Multiplier (3× is XeSS only)', [('2×', 2), ('3×', 3)]),
+            'int8': ('INT8', [('Automatic', 'auto'), ('On', 'on'), ('Off', 'off')]),
+            'wave_size': ('Wave size', [('Automatic', 'auto'), ('32', '32'), ('64', '64')]),
+        }
+        for key, (label, options) in choices.items():
+            layout.addWidget(QLabel(label))
+            combo = QComboBox()
+            for title, value in options:
+                combo.addItem(title, value)
+            if combo.findData(state.get(key)) < 0:
+                combo.addItem('Existing custom value', state.get(key))
+            combo.setCurrentIndex(combo.findData(state.get(key)))
+            fields[key] = combo
+            layout.addWidget(combo)
+        def provider_changed():
+            if fields['provider'].currentData() != 'xess':
+                fields['multiplier'].setCurrentIndex(fields['multiplier'].findData(2))
+            fields['multiplier'].setEnabled(fields['provider'].currentData() == 'xess')
+        def model_changed():
+            if fields['model'].currentData() != 'full':
+                fields['quick_flow'].setCurrentIndex(fields['quick_flow'].findData('off'))
+            fields['quick_flow'].setEnabled(fields['model'].currentData() == 'full')
+        fields['provider'].currentIndexChanged.connect(provider_changed)
+        fields['model'].currentIndexChanged.connect(model_changed)
+        fields['multiplier'].setEnabled(state.get('provider') == 'xess')
+        fields['quick_flow'].setEnabled(state.get('model') == 'full')
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        self._modal = True
+        try:
+            accepted = dialog.exec() == QDialog.Accepted
+        finally:
+            self._modal = False
+            self._controls()
+        if accepted:
+            changes = {k: c.currentData() for k, c in fields.items() if c.currentData() != state.get(k)}
+            if changes:
+                self._run(lambda: self.backend.set_game_settings(gid, changes, revision),
+                          lambda value: self._details_received(gid, value))
 
     def preview_action(self, action):
         if self.game and self.actions[action].isEnabled():

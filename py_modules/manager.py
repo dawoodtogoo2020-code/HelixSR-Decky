@@ -23,6 +23,7 @@ import ssl
 from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from library import discover, discover_launcher, safe_root, scan_tree, text
+from discovery_records import normalize_imports
 from awareness import awareness, active_processes, text_tail, optiscaler_proxy
 from game_guidance import setup_guidance
 from operation_lock import operation_lock, game_locked
@@ -30,9 +31,24 @@ from host_environment import host_environment
 from installation_status import installation_status
 import menu_labels
 import modern_release
+import helix20_release
+
+def release_adapter(record):
+    return helix20_release if helix20_release.modern(record) else modern_release
+
+def is_modern(record):
+    return helix20_release.modern(record) or modern_release.modern(record)
+
+def output_dll(record):
+    return helix20_release.OUTPUT_DLL if helix20_release.modern(record) else 'amd_fidelityfx_dx12.dll'
+
+def manifest_path(record):
+    return helix20_release.MANIFEST_PATH if helix20_release.modern(record) else 'helixsr_setup.json'
+import helix_settings
 from modern_build import build_script as modern_build_script
 from compatibility_release import (COMPATIBLE_CHOICE, compatible_release, selection,
-                                   validate_compatible_release, require_supported_latest)
+                                   validate_compatible_release, require_supported_latest,
+                                   reviewed_release, release_choices, release_status)
 from build_runtime import wine_candidates
 from github_release import web_latest_release
 from model_variants import (DEFAULT_VARIANT, catalog, package_selection, same_release,
@@ -131,6 +147,18 @@ def sha(path):
         for chunk in iter(lambda: f.read(1 << 20), b''):
             h.update(chunk)
     return h.hexdigest()
+
+
+def confirmed_executable_sha(path):
+    """Hash a confirmed executable once per stable on-disk identity."""
+    p = Path(path)
+    info = p.stat()
+    return _confirmed_executable_sha(str(p), info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
+@lru_cache(maxsize=64)
+def _confirmed_executable_sha(path, device, inode, size, modified):
+    return sha(path)
 
 
 def atomic_json(path, value):
@@ -451,6 +479,16 @@ class Manager:
     def record(self, game):
         return load_json(self.record_path(game))
 
+    @staticmethod
+    def has_confirmed_dx12(rec, executable, selected_executable):
+        """Accept only an explicit install-time confirmation for this exact binary."""
+        confirmation = rec.get('dx12_confirmation') if isinstance(rec, dict) else None
+        if not isinstance(confirmation, dict) or not executable or not selected_executable:
+            return False
+        expected = confirmation.get('executable_sha256')
+        return (confirmation.get('selected_executable') == selected_executable
+                and isinstance(expected, str) and expected == confirmed_executable_sha(executable))
+
     def checked_menu_path(self, game, relative):
         return checked_path(safe_root(game['folder']), relative)
 
@@ -491,7 +529,9 @@ class Manager:
         # Modern Scaler retires fakenvapi.ini by restoring its baseline. Keep
         # its ownership and saved-edit history, but no longer read it as an
         # active editable config (it can legitimately be absent).
-        names = ('OptiScaler.ini',) if modern_release.modern(rec) else ('OptiScaler.ini', 'fakenvapi.ini')
+        names = ('OptiScaler.ini',) if is_modern(rec) else ('OptiScaler.ini', 'fakenvapi.ini')
+        if helix20_release.modern(rec):
+            names += ('HelixSR-fsrfg/helixsr.ini',)
         paths = [str((target / name).relative_to(root)) for name in names]
         mutable = []
         for rel in paths:
@@ -531,6 +571,12 @@ class Manager:
         container = rec.get('saved_configs', {})
         current, baseline = rec.get('current', {}), rec.get('baseline', {})
         allowed = {str(Path(rel).parent / name) for name in ('OptiScaler.ini', 'fakenvapi.ini')}
+        if helix20_release.modern(rec):
+            base = Path(rel).parent
+            if base.name == 'HelixSR-fsrfg':
+                base = base.parent
+            allowed |= {str(base / 'OptiScaler.ini'), str(base / 'fakenvapi.ini'),
+                        str(base / 'HelixSR-fsrfg/helixsr.ini')}
         if (not isinstance(container, dict) or not isinstance(current, dict) or not isinstance(baseline, dict)
                 or any(k not in allowed or k not in current or k not in baseline for k in container)):
             raise ValueError('Invalid retained configuration record')
@@ -563,13 +609,13 @@ class Manager:
             return None
         if 'variant' in record and not valid_variant(record['variant']):
             return None
-        if modern_release.modern(record) and (
-                record.get('release_sha256') != modern_release.RELEASE_SHA256
+        if is_modern(record) and (
+                record.get('release_sha256') != release_adapter(record).RELEASE_SHA256
                 or not valid_variant(record.get('variant'))
-                or record['variant']['recipe_sha256'] != modern_release.RECIPE_SHA256):
+                or record['variant']['recipe_sha256'] != release_adapter(record).RECIPE_SHA256):
             return None
         if 'variant' in record and (not isinstance(record.get('files'), dict)
-                                    or 'helixsr_setup.json' not in record['files']):
+                                    or manifest_path(record) not in record['files']):
             return None
         path, release_digest = record.get('path'), record.get('release_sha256')
         prepared = record.get('prepared_at', 0)
@@ -598,7 +644,7 @@ class Manager:
                 if self._symlink_in_path(package_root):
                     return None
                 resolved, resolved_root = path.resolve(), package_root.resolve()
-                if resolved.parent != resolved_root or not set(modern_release.payload_files() if modern_release.modern(record) else PACKAGE_FILES).issubset(files):
+                if resolved.parent != resolved_root or not set(release_adapter(record).payload_files() if is_modern(record) else PACKAGE_FILES).issubset(files):
                     return None
             for name, digest in files.items():
                 if (not isinstance(name, str) or not name or '\x00' in name or '\\' in name or ':' in name
@@ -625,10 +671,10 @@ class Manager:
         if route not in (None, 'direct', 'optiscaler'):
             raise ValueError('Unknown package route')
         path, record = package[1], package[2]
-        required = set(modern_release.payload_files() if modern_release.modern(record) else
+        required = set(release_adapter(record).payload_files() if is_modern(record) else
                        PACKAGE_FILES if route in (None, 'optiscaler') else NETWORK + (DLL,))
         if record.get('variant'):
-            required.add('helixsr_setup.json')
+            required.add(manifest_path(record))
         if not required.issubset(record['files']):
             return False
         framegen_name = 'amd-fsr/' + AMD_FG
@@ -640,11 +686,11 @@ class Manager:
                        and (path / name).is_file() and sha(path / name) == record['files'][name]
                        for name in record['files'])
             if verified and record.get('variant'):
-                if modern_release.modern(record):
-                    modern_release.verify_outputs(path)
+                if is_modern(record):
+                    release_adapter(record).verify_outputs(path)
                 else:
                     verify_outputs(path)
-                api = pe_info(path / DLL)
+                api = pe_info(path / output_dll(record))
                 verified = api['arch'] == 'x64' and bool(api['ffx'])
             return verified
         except (OSError, ValueError, KeyError, TypeError, struct.error):
@@ -734,12 +780,14 @@ class Manager:
             pairs = []
             if installed['route'] == 'direct':
                 for target in map(Path, installed['targets']):
-                    pairs.append((str(target.relative_to(root)), DLL))
-                    pairs.extend((str((target.parent / name).relative_to(root)), name) for name in NETWORK)
-            elif installed['route'] == 'optiscaler' and modern_release.modern(package_record):
+                    pairs.append((str(target.relative_to(root)), output_dll(package_record)))
+                    if not helix20_release.modern(package_record):
+                        pairs.extend((str((target.parent / name).relative_to(root)), name) for name in NETWORK)
+            elif installed['route'] == 'optiscaler' and is_modern(package_record):
                 game_target = Path(installed['target'])
                 pairs = [(str((game_target / dest).relative_to(root)), source)
-                         for source, dest in modern_release.scaler_pairs()]
+                         for source, dest in release_adapter(package_record).scaler_pairs()
+                         if not dest.endswith('.ini')]
             elif installed['route'] == 'optiscaler':
                 game_target = Path(installed['target'])
                 target = game_target / 'HelixSR'
@@ -762,13 +810,16 @@ class Manager:
             return False
 
     def refresh(self):
+        started = time.monotonic()
         entries, warnings = discover(self.home, self.cfg.get('imports', []))
-        self.entries = {x['id']: x for x in entries}
         games = []
         for game in entries:
             games.append(self.assess_safe(game, detailed=False))
-        release = load_release(self.settings)
+        self.entries = {x['id']: x for x in entries}
+        release = release_status(load_release(self.settings))
         return dict(games=games, warnings=warnings, release=release,
+                    release_choices=release_choices(), scanned_at=time.time(),
+                    scan_seconds=round(time.monotonic() - started, 3),
                     model_catalog=catalog(),
                     license_accepted=bool(self.cfg.get('license')) and self.cfg.get('license') == license_key(release),
                     jobs=list(self.jobs.values()))
@@ -808,6 +859,7 @@ class Manager:
                         managed=False, enabled=False, inputs=[],
                         executable_choices=[], selected_executable=None, executable_selection_needed=False,
                         recovery_available=self.recovery_available(game),
+                        repair_eligible=False, repair_files=[],
                         optiscaler={'present': False, 'involved': False, 'helix_configured': False,
                                     'runtime': 'unknown', 'dlls': []},
                         framegen=[], framegen_summary='No supported per-game evidence',
@@ -855,6 +907,8 @@ class Manager:
         native_api = bool(probe_targets) and all(pe_info(p)['ffx'] for p in probe_targets)
         route = rec.get('route') or ('direct' if native_api else 'optiscaler' if inputs and main else
                                     'direct' if targets else None)
+        if not rec and self.cfg.get('route_preferences', {}).get(game['id']) == 'optiscaler' and main:
+            route = 'optiscaler'
         # Native API discovery uses the original heuristic independently of an
         # OptiScaler executable choice. An existing receipt owns its target.
         eligible = []
@@ -882,7 +936,7 @@ class Manager:
         reasons, blocked = [], []
         dx11_title = DX11_ONLY_STEAM_APPS.get(str(game.get('appid', ''))) if game.get('source') == 'Steam' else None
         if dx11_title:
-            reasons.append(f'{dx11_title} uses DirectX 11 only. HelixSR requires DirectX 12, and OptiScaler cannot change the game\'s renderer.')
+            reasons.append(f'{dx11_title} uses DirectX 11 only. This plugin currently installs HelixSR only through its validated DirectX 12 route. Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling, but that route is not enabled here.')
         if platform.machine().lower() not in ('x86_64', 'amd64'):
             blocked.append('HelixSR requires an x86_64 host')
         if os.name == 'posix' and os.geteuid() == 0:
@@ -896,7 +950,9 @@ class Manager:
                     blocked.append(f'{p.name}: expected x64 FidelityFX API not found')
         if main and pe_info(main)['arch'] != 'x64' and not rec:
             blocked.append('Main executable is not x64 Windows PE (32-bit, native Linux or unknown architecture)')
-        if not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']):
+        confirmed_dx12 = self.has_confirmed_dx12(
+            rec, main, main.relative_to(root).as_posix() if main else None)
+        if not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']) and not confirmed_dx12:
             reasons.append('DX12 is not confirmed by executable imports; confirm the game runs DX12 before installation')
         directory_names = [str(d.relative_to(root)).lower() for d, _ in tree]
         if any(anti_cheat_name(n) for _, n in names) or any(anti_cheat_name(n) for n in directory_names):
@@ -937,6 +993,8 @@ class Manager:
             reasons.append('Existing direct HelixSR installation: explicit import is required before management')
         steam_build_review = None
         restore_eligible = False
+        repair_missing = []
+        repair_conflict = False
         if rec:
             if game.get('build') and rec.get('game_build') and game['build'] != rec['game_build']:
                 blocked.append('Steam build changed; installation needs review')
@@ -949,6 +1007,7 @@ class Manager:
                 if steam_build_review is not None and len(steam_build_review['files']) < 20:
                     steam_build_review['files'].append(dict(path=rel, state=state))
             mutable = self.mutable_config_paths(game, rec)
+            non_file_blocked = list(blocked)
             restore_blocked = list(blocked)
             missing_introduced = []
             for rel, expected in rec['current'].items():
@@ -986,6 +1045,10 @@ class Manager:
                     reason = ('Managed files changed; ownership needs review before further changes: '
                               + rel + ' (current state: ' + state + ')')
                     blocked.append(reason)
+                    if actual is None and expected is not None:
+                        repair_missing.append(rel)
+                    else:
+                        repair_conflict = True
                     if absent_introduced:
                         missing_introduced.append(rel)
                     else:
@@ -1014,6 +1077,22 @@ class Manager:
         # not a cross-library search and rehash of every prepared model. Details
         # and every mutation retain the full, fresh package verification.
         package = self.package(game, route) if detailed else None
+        repair_package = (self.package(game, route, selection=rec.get('package_selection'),
+                                       installed=rec if not rec.get('package_selection') else None)
+                          if detailed and rec and rec.get('enabled') and repair_missing
+                          and not repair_conflict and not non_file_blocked else None)
+        repair_files = []
+        repair_reason = None
+        if (rec and rec.get('enabled') and repair_missing and not repair_conflict
+                and not non_file_blocked and repair_package):
+            try:
+                repair_files = self.repair_plan(game, rec, repair_package, repair_missing)
+            except (ValueError, OSError, TypeError, KeyError) as exc:
+                repair_reason = str(exc)
+        if (detailed and rec and rec.get('enabled') and repair_missing
+                and not repair_conflict and not non_file_blocked and not repair_files):
+            blocked.append(repair_reason or
+                           'Exact installed package is unavailable or changed; repair needs the recorded checksum-verified package')
         data = dict(game, compatibility='blocked' if blocked else 'unsupported' if dx11_title else 'candidate' if route else 'unsupported',
                     reasons=blocked + reasons, route=route, inputs=inputs, target=str(target) if target else None,
                     targets=[str(p) for p in targets], main_exe=str(main) if main else None,
@@ -1029,14 +1108,71 @@ class Manager:
                     installed_variant=rec.get('variant', {}).get('id') if valid_variant(rec.get('variant')) else None,
                     recovery_available=self.recovery_available(game), steam_build_review=steam_build_review,
                     restore_eligible=restore_eligible,
-                    dx12_confirmation_needed=not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']),
+                    repair_eligible=bool(repair_files), repair_files=repair_files,
+                    dx12_confirmation_needed=(not dx11_title and route == 'optiscaler'
+                                              and not (main and pe_info(main)['dx12'])
+                                              and not confirmed_dx12),
                     **aware)
         if not detailed:
             data.pop('logs', None)
         data['installation_status'] = installation_status(data)
         data['setup_guidance'] = setup_guidance(data)
         data['menu_labels'] = self.menu_status(game, data, rec, detailed)
+        if detailed:
+            data['helix_settings'] = self.game_settings(game, rec)
         return data
+
+    def game_settings(self, game, rec=None):
+        rec = self.record(game) if rec is None else rec
+        if not (rec.get('enabled') and rec.get('version') == '2.0.0' and rec.get('route') == 'optiscaler'):
+            return dict(available=False, reason='Install HelixSR 2.0 with the Scaler route to edit these settings.')
+        try:
+            rel = str((Path(rec['target']) / 'OptiScaler.ini').relative_to(Path(game['folder'])))
+            if rel not in self.mutable_config_paths(game, rec):
+                raise ValueError('Settings file is not owned by this installation')
+            source = self.read_owned_config(game, rel)
+            return dict(available=True, revision=source['sha256'],
+                        **helix_settings.read_settings(source['content']))
+        except (ValueError, OSError) as exc:
+            return dict(available=False, reason=str(exc))
+
+    def set_game_settings(self, gid, changes, revision):
+        with self.lock:
+            if self.worker and self.worker.is_alive():
+                raise ValueError('Wait for preparation to finish')
+            game = self.get_game(gid)
+            with operation_lock(self.companion(game)):
+                data = self.assess(game)
+                rec = self.record(game)
+                current = self.game_settings(game, rec)
+                if not current.get('available'):
+                    raise ValueError(current.get('reason', 'Settings unavailable'))
+                if current['revision'] != revision:
+                    raise ValueError('Settings changed; refresh before saving')
+                if data['compatibility'] != 'candidate' or active_processes(game['folder'], game.get('appid', '')):
+                    raise ValueError('Close the game and resolve installation warnings before changing settings')
+                rel = str((Path(rec['target']) / 'OptiScaler.ini').relative_to(Path(game['folder'])))
+                source = self.read_owned_config(game, rel)
+                if source['sha256'] != revision:
+                    raise ValueError('Settings changed; refresh before saving')
+                updated = helix_settings.update_settings(source['content'], changes)
+                self.mutate(game, data, 'settings', None, settings=(rel, updated))
+                return self.assess_safe(game)
+
+    def set_installation_route(self, gid, route):
+        if route not in ('auto', 'optiscaler'):
+            raise ValueError('Unknown installation route')
+        with self.lock:
+            game = self.get_game(gid)
+            with operation_lock(self.companion(game)):
+                data = self.assess(game)
+                if data.get('managed') or data.get('legacy'):
+                    raise ValueError('Remove HelixSR and restore originals before changing installation route')
+                if active_processes(game['folder'], game.get('appid', '')) or self.recovery_available(game):
+                    raise ValueError('Close the game and resolve pending recovery first')
+                self.cfg.setdefault('route_preferences', {})[gid] = route
+                self.save()
+                return self.assess_safe(game)
 
     def import_folder(self, folder, name=''):
         return self.import_folders([folder], name)
@@ -1051,19 +1187,25 @@ class Manager:
                 raise ValueError('No Windows game executable found in folder: ' + str(p))
             additions.append({'folder': str(p), 'name': str(name or p.name)[:200]})
         # Validate the whole selection before saving any import.
-        merged = {x['folder']: x for x in self.cfg['imports']}
+        existing, warnings = normalize_imports(self.cfg.get('imports'))
+        merged = {x['folder']: x for x in existing}
         merged.update({x['folder']: x for x in additions})
         self.cfg['imports'] = list(merged.values())
         self.save()
-        return self.refresh()
+        result = self.refresh()
+        result['warnings'] = list(dict.fromkeys(warnings + result['warnings']))
+        return result
 
     def forget(self, gid):
         g = self.get_game(gid)
         if self.record(g):
             raise ValueError('Remove managed HelixSR before forgetting its folder')
-        self.cfg['imports'] = [x for x in self.cfg['imports'] if x['folder'] != g['folder']]
+        existing, warnings = normalize_imports(self.cfg.get('imports'))
+        self.cfg['imports'] = [x for x in existing if x['folder'] != g['folder']]
         self.save()
-        return self.refresh()
+        result = self.refresh()
+        result['warnings'] = list(dict.fromkeys(warnings + result['warnings']))
+        return result
 
     def accept_license(self, accepted, token=None):
         reviewed = None
@@ -1091,8 +1233,8 @@ class Manager:
 
     def release_for_choice(self, choice=None, force=False):
         """Latest discovery stays independent from an explicitly selected archive."""
-        if selection(choice) == COMPATIBLE_CHOICE:
-            return validate_compatible_release(compatible_release())
+        if selection(choice) != 'latest':
+            return require_supported_latest(reviewed_release(choice))
         release = self.check_update(force)
         if release.get('error') or not release.get('version'):
             raise ValueError(release.get('error') or 'Check upstream updates first')
@@ -1234,7 +1376,7 @@ class Manager:
                 raise ValueError(release.get('error') or 'Check upstream updates first')
             game = self.get_game(gid)
             data = self.assess(game, executable=executable)
-            if choice == COMPATIBLE_CHOICE and (data.get('managed') or data.get('legacy')):
+            if choice != 'latest' and (data.get('managed') or data.get('legacy')):
                 installed = data.get('installed_version')
                 try:
                     newer = version(installed) > version(release['version'])
@@ -1290,7 +1432,7 @@ class Manager:
             if kind not in ('prepare', 'install_latest'):
                 raise ValueError('Unsupported background operation')
             choice = selection(preview.get('release_choice') if preview else None)
-            release = self.reviewed_install_release(preview) if preview and choice == COMPATIBLE_CHOICE else load_release(self.settings)
+            release = self.reviewed_install_release(preview) if preview and choice != 'latest' else load_release(self.settings)
             if preview and not same_release(release, preview['release']):
                 raise ValueError('Upstream release changed since review; review Install or Update again')
             selected = select_variant(preview.get('variant_id') if preview else None)
@@ -1322,7 +1464,8 @@ class Manager:
                                 raise ValueError('Verified prepared package unavailable after preparation')
                             result = self.mutate(game, data,
                                                  'update' if self.record(game) else 'install',
-                                                 prepared_package)
+                                                 prepared_package,
+                                                 dx12_confirmed=preview.get('dx12', False))
                             job['result'] = result
                         job['state'], job['message'] = 'completed', result['message']
                     else:
@@ -1425,8 +1568,8 @@ class Manager:
             safe_extract(archive, work / 'unpacked')
             archive.unlink()
             package = work / 'unpacked' / ('HelixSR-' + release['version'])
-            modern = modern_release.modern(release)
-            layout = (['LICENSE', 'THIRD_PARTY_NOTICES.md', DLL,
+            modern = is_modern(release)
+            layout = (['LICENSE', 'THIRD_PARTY_NOTICES.md', output_dll(release),
                        'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
                        'helixsr-scaler/OptiScaler.dll', 'helixsr-scaler/OptiScaler.ini'] if modern else
                       ['LICENSE', 'LICENSE-APACHE-2.0', 'THIRD_PARTY_NOTICES.md', DLL,
@@ -1487,15 +1630,15 @@ class Manager:
                 check_build_exit(self.process.returncode, self.cancel.is_set(), job['log'])
             if self.cancel.is_set():
                 raise ValueError('Cancelled')
-            for name in NETWORK:
+            for name in (() if helix20_release.modern(release) else NETWORK):
                 if not (package / name).is_file() or (package / name).stat().st_size < 1024:
                     raise ValueError('Generated HelixSR model files are missing or incomplete. '
                                      'See the build log; this is not an internet connection error.')
             if modern:
-                modern_release.verify_outputs(package)
+                release_adapter(release).verify_outputs(package)
             else:
                 verify_outputs(package)
-            api = pe_info(package / DLL)
+            api = pe_info(package / output_dll(release))
             if api['arch'] != 'x64' or not api['ffx']:
                 raise ValueError('Prepared HelixSR DLL has an unsupported installation interface')
             build.unlink()
@@ -1506,7 +1649,7 @@ class Manager:
                 # A changed cache can be rebuilt without overwriting the previous owned path.
                 final = final.with_name(final.name + '-' + job['id'][:8])
             os.replace(package, final)
-            payloads = modern_release.payload_files() if modern else PACKAGE_FILES + ('helixsr_setup.json',)
+            payloads = release_adapter(release).payload_files() if modern else PACKAGE_FILES + ('helixsr_setup.json',)
             if (final / 'amd-fsr' / AMD_FG).is_file():
                 payloads += ('amd-fsr/' + AMD_FG,)
             record = dict(version=release['version'], path=str(final), release_sha256=release['sha256'],
@@ -1525,7 +1668,7 @@ class Manager:
             records = [r for r in records if self._package_record(r, game, companion)
                        and r.get('path') != record['path']]
             atomic_json(index_path, dict(schema=1, packages=(records + [record])[-256:]))
-            for n in NETWORK:
+            for n in payloads:
                 (final / n).chmod(0o600)
             return version(record['version']), final, record
         finally:
@@ -1537,6 +1680,8 @@ class Manager:
         # An unsupported renderer can still restore owned originals. Any other
         # assessment blocker (build, hashes, process, staging) remains decisive.
         return (data['compatibility'] == 'candidate' or
+                action == 'repair' and data.get('repair_eligible')
+                and data.get('managed') and not data.get('recovery_available') or
                 action in ('disable', 'remove') and data.get('restore_eligible')
                 and data.get('managed') and not data.get('recovery_available') or
                 action in ('disable', 'remove') and data['compatibility'] == 'unsupported'
@@ -1545,7 +1690,7 @@ class Manager:
     def preview(self, gid, action, dx12_confirmed=False, executable=None):
         with self.lock:
             game = self.get_game(gid)
-            if action not in ('install', 'update', 'enable', 'disable', 'remove', 'adopt', 'recover') + menu_labels.ACTIONS:
+            if action not in ('install', 'update', 'enable', 'disable', 'remove', 'adopt', 'recover', 'repair') + menu_labels.ACTIONS:
                 raise ValueError('Unknown action')
             if action == 'recover':
                 journal = self.companion(game) / 'transaction/journal.json'
@@ -1570,7 +1715,7 @@ class Manager:
                 raise ValueError('; '.join(data['reasons']))
             if action in menu_labels.ACTIONS:
                 menu_labels.plan(self, game, data, rec, action)
-            if action in ('install', 'update', 'enable'):
+            if action in ('install', 'update', 'enable', 'repair'):
                 self.validate_install_executable(data)
             if data['dx12_confirmation_needed'] and not dx12_confirmed and action in ('install', 'update'):
                 raise ValueError('Confirm that this game is set to DirectX 12')
@@ -1578,16 +1723,16 @@ class Manager:
                 raise ValueError('Only verified legacy direct installations can be imported')
             if data['legacy'] and action != 'adopt':
                 raise ValueError('Import existing direct installation first')
-            if action in ('install', 'update', 'enable'):
+            if action in ('install', 'update', 'enable', 'repair'):
                 if 'variant' in rec and not valid_variant(rec['variant']):
                     raise ValueError('Installed model identity needs review; use Update HelixSR with a supported model or remove it')
                 package = self.package(game, data['route'],
                                        variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
-                                       selection=rec.get('package_selection') if action == 'enable' else None,
-                                       installed=rec if action == 'enable' else None)
+                                       selection=rec.get('package_selection') if action in ('enable', 'repair') else None,
+                                       installed=rec if action in ('enable', 'repair') and not rec.get('package_selection') else None)
                 if not package:
                     raise ValueError('Exact installed package is unavailable; use Update HelixSR and review the change'
-                                     if action == 'enable' else 'Prepare HelixSR on this drive first')
+                                     if action in ('enable', 'repair') else 'Prepare HelixSR on this drive first')
                 if not self._verify_package_payloads(package, data['route']):
                     raise ValueError('Prepared package manifest is incomplete or changed. Rebuild required.')
                 for n, expected in package[2]['files'].items():
@@ -1597,6 +1742,10 @@ class Manager:
                 raise ValueError('Already managed; use update or enable')
             if action in ('disable', 'enable', 'remove', 'update') and not rec:
                 raise ValueError('Game is not managed by this plugin')
+            if action == 'repair':
+                if not rec or not data.get('repair_eligible'):
+                    raise ValueError('This installation is not eligible for safe repair')
+                self.repair_plan(game, rec, package, data.get('repair_files', []))
             if action == 'adopt':
                 for target in data['targets']:
                     p = Path(target)
@@ -1606,7 +1755,7 @@ class Manager:
             token = uuid.uuid4().hex
             fingerprint = self.fingerprint(game, data, package=package)
             self.previews[token] = dict(game=gid, action=action, fingerprint=fingerprint,
-                                       package_selection=package_selection(package[2]) if action in ('install', 'update', 'enable') else None,
+                                       package_selection=package_selection(package[2]) if action in ('install', 'update', 'enable', 'repair') else None,
                                        executable=data['selected_executable'] if not data['managed'] and data['route'] == 'optiscaler' else None,
                                        selected_executable=data['selected_executable'],
                                        expires=time.time()+120, dx12=dx12_confirmed)
@@ -1662,17 +1811,30 @@ class Manager:
 
     def planned_paths(self, game, data, action, package=AUTO_PACKAGE, release=None):
         rec, root = self.record(game), Path(game['folder'])
+        if action == 'repair':
+            return list(data.get('repair_files', []))
         if package is AUTO_PACKAGE:
             package = self.package(game, data['route'])
         payload = release or (package[2] if package else {})
-        modern = modern_release.modern(payload)
-        if (data['route'] == 'optiscaler' and modern_release.modern(rec) and payload and not modern
+        modern = is_modern(payload)
+        if helix20_release.modern(payload) and data['route'] == 'direct' and action in ('install', 'update', 'enable', 'latest'):
+            paths = list(rec.get('baseline', {}))
+            for target in map(Path, data['targets']):
+                additions = [target, target.with_name(target.stem + '.original.dll'), target.parent / 'helixsr-install.json']
+                for path in additions:
+                    rel = str(path.relative_to(root))
+                    if rel not in paths:
+                        if path != target and (path.exists() or path.is_symlink()):
+                            raise ValueError('New upstream file conflicts with an unmanaged file: ' + rel)
+                        paths.append(rel)
+            return paths
+        if (data['route'] == 'optiscaler' and is_modern(rec) and payload and not modern
                 and action in ('install', 'update', 'enable', 'latest')):
             raise ValueError('Updating modern Scaler to legacy HelixSR is unsupported. '
                              'Remove HelixSR to restore original files first, then install the compatibility release.')
         if modern and data['route'] == 'optiscaler' and action in ('install', 'update', 'enable', 'latest'):
             target = Path(data['target'])
-            names = [dest for _, dest in modern_release.scaler_pairs()] + ['OptiScaler.ini', 'HelixSR/helixsr-install.json']
+            names = [dest for _, dest in release_adapter(payload).scaler_pairs()] + ['OptiScaler.ini', 'HelixSR/helixsr-install.json']
             paths = list(rec.get('baseline', {}))
             for name in names:
                 rel = str((target / name).relative_to(root))
@@ -1743,17 +1905,18 @@ class Manager:
         if preview['action'] in menu_labels.ACTIONS:
             menu_labels.plan(self, game, data, rec, preview['action'])
         package = None
-        if preview['action'] in ('install', 'update', 'enable'):
+        if preview['action'] in ('install', 'update', 'enable', 'repair'):
             package = self.package(game, data['route'],
                                    variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
-                                   selection=preview.get('package_selection'))
+                                   selection=preview.get('package_selection'),
+                                   installed=rec if preview.get('package_selection') is None else None)
         if (not self.action_compatible(data, preview['action'])
                 or self.fingerprint(game, data, package=package) != preview['fingerprint']):
             raise ValueError('Game changed since preview; refresh and review again')
-        return self.mutate(game, data, preview['action'], package)
+        return self.mutate(game, data, preview['action'], package, dx12_confirmed=preview.get('dx12', False))
 
     @game_locked
-    def mutate(self, game, data, action, package=AUTO_PACKAGE):
+    def mutate(self, game, data, action, package=AUTO_PACKAGE, settings=None, dx12_confirmed=False):
         root, companion = Path(game['folder']), self.companion(game)
         tx = companion / 'transaction'
         if tx.exists():
@@ -1763,11 +1926,11 @@ class Manager:
         if package is AUTO_PACKAGE:
             rec = self.record(game)
             package = None
-            if action in ('install', 'update', 'enable'):
+            if action in ('install', 'update', 'enable', 'repair'):
                 package = self.package(game, data['route'],
                                        variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
-                                       selection=rec.get('package_selection') if action == 'enable' else None,
-                                       installed=rec if action == 'enable' else None)
+                                       selection=rec.get('package_selection') if action in ('enable', 'repair') else None,
+                                       installed=rec if action in ('enable', 'repair') and not rec.get('package_selection') else None)
         paths = self.planned_paths(game, data, action, package)
         size = sum((root / p).stat().st_size for p in paths if (root / p).is_file())
         if shutil.disk_usage(root).free < size * 3 + (128 << 20):
@@ -1828,6 +1991,12 @@ class Manager:
                     original_sha256=previous['baseline'][rel],
                     patched_sha256=(menu_labels.digest(label_plan['payload']) if action == 'labels_enable'
                                     else previous['menu_labels']['patched_sha256']))
+            elif action == 'settings':
+                if not settings or settings[0] not in self.mutable_config_paths(game, previous):
+                    raise ValueError('Invalid settings transaction')
+                self.write_managed(root / settings[0], settings[1])
+                previous.setdefault('saved_configs', {})[settings[0]] = dict(
+                    content=settings[1], sha256=hashlib.sha256(settings[1].encode('utf-8')).hexdigest())
             elif action == 'adopt':
                 # Baseline restores native DLL and removes only identified Helix payload.
                 for target in map(Path, data['targets']):
@@ -1854,6 +2023,14 @@ class Manager:
                 previous['enabled'] = False
                 if isinstance(previous.get('menu_labels'), dict):
                     previous['menu_labels']['enabled'] = False
+            elif action == 'repair':
+                if not package:
+                    raise ValueError('Exact installed package is unavailable; repair cannot continue')
+                missing = self.repair_plan(game, previous, package, data.get('repair_files', []))
+                self.repair_payload(game, previous, package, missing)
+                for rel in missing:
+                    if sha(checked_path(root, rel)) != previous['current'][rel]:
+                        raise ValueError('Repaired file hash does not match installation record: ' + rel)
             elif action in ('install', 'update', 'enable'):
                 if not package:
                     raise ValueError('Prepared package unavailable')
@@ -1869,8 +2046,21 @@ class Manager:
                 # Their paths were conflict-checked, snapshotted and journaled above.
                 for rel in paths:
                     previous['baseline'].setdefault(rel, before[rel])
-                self.install_payload(game, data, previous, package)
-            previous['current'] = {rel: sha(root / rel) if (root / rel).is_file() else None for rel in paths}
+                if helix20_release.modern(package[2]):
+                    self.install_payload(game, data, previous, package, previous_version=(journal.get('previous') or {}).get('version'))
+                else:
+                    self.install_payload(game, data, previous, package)
+            if (action in ('install', 'update') and data['route'] == 'optiscaler'
+                    and dx12_confirmed):
+                previous['dx12_confirmation'] = dict(
+                    selected_executable=data['selected_executable'],
+                    executable_sha256=confirmed_executable_sha(data['main_exe']))
+            if action == 'repair':
+                current = dict(previous['current'])
+                current.update({rel: sha(root / rel) if (root / rel).is_file() else None for rel in paths})
+                previous['current'] = current
+            else:
+                previous['current'] = {rel: sha(root / rel) if (root / rel).is_file() else None for rel in paths}
             previous['updated_at'], previous['game_build'] = time.time(), game.get('build')
             if game.get('manifest'):
                 from library import vdf
@@ -2058,23 +2248,148 @@ class Manager:
         finally:
             temp.unlink(missing_ok=True)
 
-    def install_payload(self, game, data, rec, package):
+    def copy_absent_atomic(self, src, dst, expected):
+        """Install one missing repair file without ever replacing a new arrival."""
+        source_hash = sha(src)
+        if source_hash != expected:
+            raise ValueError('Recorded repair source changed during repair')
+        self.track_write(dst, expected)
+        dst = Path(dst)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        temp = dst.with_name(dst.name + '.helixsr-decky.tmp')
+        try:
+            shutil.copy2(src, temp)
+            if sha(src) != expected or sha(temp) != expected:
+                raise ValueError('Repair copy verification failed')
+            with temp.open('r+b') as f:
+                os.fsync(f.fileno())
+            try:
+                os.link(temp, dst)
+            except FileExistsError as exc:
+                raise ValueError('Repair target appeared during repair: ' + str(dst.name)) from exc
+            temp.unlink()
+            sync_directory(dst.parent)
+        finally:
+            temp.unlink(missing_ok=True)
+
+    def repair_sources(self, game, rec, package):
+        """Map reproducible installed paths to immutable, hash-checked sources."""
+        root, package_path, package_record = Path(game['folder']), package[1], package[2]
+        sources = {}
+        if rec['route'] == 'direct':
+            for target in map(Path, rec['targets']):
+                rel = str(target.relative_to(root))
+                sources[rel] = ('file', package_path / output_dll(package_record))
+                original_rel = str(target.with_name(target.stem + '.original.dll').relative_to(root))
+                sources[original_rel] = ('file', self.companion(game) / 'originals' / rel)
+                if not helix20_release.modern(package_record):
+                    for name in NETWORK:
+                        sources[str((target.parent / name).relative_to(root))] = ('file', package_path / name)
+                install_rel = str((target.parent / 'helixsr-install.json').relative_to(root))
+                sources[install_rel] = ('bytes', (json.dumps({
+                    'route': 'direct', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
+                    'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')
+                }, indent=2) + '\n').encode())
+        elif is_modern(package_record):
+            target = Path(rec['target'])
+            for source, dest in release_adapter(package_record).scaler_pairs():
+                if not dest.endswith('.ini'):
+                    sources[str((target / dest).relative_to(root))] = ('file', package_path / source)
+            install_rel = str((target / 'HelixSR/helixsr-install.json').relative_to(root))
+            sources[install_rel] = ('bytes', (json.dumps({
+                'route': 'optiscaler', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
+                'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')
+            }, indent=2) + '\n').encode())
+        else:
+            target = Path(rec['target'])
+            pairs = [('optiscaler/OptiScaler.dll', 'dxgi.dll'),
+                     ('optiscaler/fakenvapi.dll', 'fakenvapi.dll'),
+                     (DLL, 'HelixSR/helixsr.dll'), (DLL, 'HelixSR/helixsr_upscaler.dll'),
+                     ('amd-fsr/amd_fidelityfx_upscaler_dx12.dll',
+                      'HelixSR/amd_fidelityfx_upscaler_dx12.amd.dll')]
+            pairs += [(name, 'HelixSR/' + name) for name in NETWORK]
+            fg = 'amd-fsr/' + AMD_FG
+            if fg in package_record['files']:
+                pairs.append((fg, 'HelixSR/' + AMD_FG))
+            for source, dest in pairs:
+                sources[str((target / dest).relative_to(root))] = ('file', package_path / source)
+            install_rel = str((target / 'HelixSR/helixsr-install.json').relative_to(root))
+            sources[install_rel] = ('bytes', (json.dumps({
+                'route': 'optiscaler', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
+                'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')
+            }, indent=2) + '\n').encode())
+        return sources
+
+    def repair_plan(self, game, rec, package, missing):
+        """Validate that every requested absent file has the exact recorded source."""
+        if (not isinstance(missing, list) or not missing
+                or not isinstance(rec.get('current'), dict) or not isinstance(rec.get('baseline'), dict)):
+            raise ValueError('Invalid repair request')
+        root = Path(game['folder'])
+        sources = self.repair_sources(game, rec, package)
+        result = []
+        for rel in missing:
+            path = checked_path(root, rel)
+            expected = rec['current'].get(rel)
+            if rel not in rec['baseline'] or not isinstance(expected, str) or rel not in sources:
+                raise ValueError('Missing file cannot be reproduced safely: ' + rel)
+            if path.exists() or path.is_symlink():
+                raise ValueError('Repair target is no longer absent: ' + rel)
+            kind, source = sources[rel]
+            actual = sha(source) if kind == 'file' and Path(source).is_file() else (
+                hashlib.sha256(source).hexdigest() if kind == 'bytes' else None)
+            if actual != expected:
+                raise ValueError('Recorded repair source is unavailable or changed: ' + rel)
+            baseline = rec['baseline'][rel]
+            if baseline is not None:
+                original = checked_path(self.companion(game), str(Path('originals') / rel))
+                if not original.is_file() or sha(original) != baseline:
+                    raise ValueError('Original file hash mismatch: ' + rel)
+            result.append(rel)
+        return result
+
+    def repair_payload(self, game, rec, package, missing):
+        sources = self.repair_sources(game, rec, package)
+        root = Path(game['folder'])
+        for rel in missing:
+            kind, source = sources[rel]
+            expected = rec['current'][rel]
+            if kind == 'file':
+                self.copy_absent_atomic(Path(source), checked_path(root, rel), expected)
+            else:
+                if hashlib.sha256(source).hexdigest() != expected:
+                    raise ValueError('Recorded repair source changed: ' + rel)
+                destination = checked_path(root, rel)
+                temporary_source = self.companion(game) / 'transaction/repair-source' / rel
+                temporary_source.parent.mkdir(parents=True, exist_ok=True)
+                temporary_source.write_bytes(source)
+                self.copy_absent_atomic(temporary_source, destination, expected)
+
+    def install_payload(self, game, data, rec, package, previous_version=None):
         root = Path(game['folder'])
         package_path, package_record = package[1], package[2]
         if data['route'] == 'direct':
+            if helix20_release.modern(package_record):
+                # The native FSR route provides SR only; DLSS FG needs Scaler and a DLSS FG game.
+                keep = {str(p.relative_to(root)) for target in map(Path, rec['targets'])
+                        for p in (target, target.with_name(target.stem + '.original.dll'), target.parent / 'helixsr-install.json')}
+                obsolete = {rel: digest for rel, digest in rec['baseline'].items() if rel not in keep}
+                if obsolete:
+                    self.restore_baseline(game, {'baseline': obsolete})
             for target in map(Path, rec['targets']):
                 rel = str(target.relative_to(root))
                 original = self.companion(game) / 'originals' / rel
                 if sha(original) != rec['baseline'][rel]:
                     raise ValueError('Original FidelityFX DLL changed')
                 self.copy_atomic(original, target.with_name(target.stem + '.original.dll'))
-                self.copy_atomic(package_path / DLL, target, package_record['files'][DLL])
-                for name in NETWORK:
+                source_dll = output_dll(package_record)
+                self.copy_atomic(package_path / source_dll, target, package_record['files'][source_dll])
+                for name in (() if helix20_release.modern(package_record) else NETWORK):
                     self.copy_atomic(package_path / name, target.parent / name, package_record['files'][name])
                 self.write_managed_json(target.parent / 'helixsr-install.json',
                             {'route': 'direct', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
                              'variant': rec.get('variant'), 'package_selection': rec.get('package_selection')})
-        elif modern_release.modern(package_record):
+        elif is_modern(package_record):
             target = Path(rec['target'])
             settings_path = package_path / 'helixsr-scaler/OptiScaler.ini'
             settings_bytes = settings_path.read_bytes()
@@ -2082,8 +2397,11 @@ class Manager:
                 raise ValueError('Prepared package changed during installation')
             template = settings_bytes.decode('utf-8')
             source = self.retained_config(rec, str((target / 'OptiScaler.ini').relative_to(root)))
-            configured = modern_release.configuration(template if source is None else source, template)
-            pairs = modern_release.scaler_pairs()
+            adapter = release_adapter(package_record)
+            configured = (adapter.configuration(template if source is None else source, template, previous_version=previous_version)
+                          if helix20_release.modern(package_record) else
+                          adapter.configuration(template if source is None else source, template))
+            pairs = release_adapter(package_record).scaler_pairs()
             modern_paths = {str((target / dest).relative_to(root)) for _, dest in pairs}
             modern_paths |= {str((target / name).relative_to(root)) for name in ('OptiScaler.ini', 'HelixSR/helixsr-install.json')}
             # Retire only old owned payloads through the same journal and saved originals.
@@ -2093,6 +2411,11 @@ class Manager:
                 self.restore_baseline(game, {'baseline': obsolete})
             for source, dest in pairs:
                 self.copy_atomic(package_path / source, target / dest, package_record['files'][source])
+            if helix20_release.modern(package_record):
+                rel = str((target / 'HelixSR-fsrfg/helixsr.ini').relative_to(root))
+                retained = self.retained_config(rec, rel)
+                if retained is not None:
+                    self.write_managed(target / 'HelixSR-fsrfg/helixsr.ini', retained)
             self.write_managed(target / 'OptiScaler.ini', configured)
             self.write_managed_json(target / 'HelixSR/helixsr-install.json',
                         {'route': 'optiscaler', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),

@@ -10,7 +10,8 @@ import shlex
 
 GUIDE = 'https://github.com/dawoodtogoo2020-code/HelixSR-Decky/blob/main/OPTISCALER_GUIDE.md'
 KEYS = ('Dx12Upscaler', 'FfxDx12Path', 'FfxDx12SRPath', 'EnableDlssInputs',
-        'NvapiPath', 'OverrideNvapiDll', 'UseFakenvapi', 'Dxgi', 'ShortcutKey')
+        'NvapiPath', 'OverrideNvapiDll', 'UseFakenvapi', 'Dxgi', 'ShortcutKey',
+        'FGInput', 'FGNvngxReplacement')
 
 
 def parse_config(source):
@@ -86,6 +87,8 @@ def configuration(path):
             raise ValueError('Configuration is too large or invalid')
         parser = parse_config(raw.decode('utf-8-sig'))
         values = {}
+        if parser.has_option('FrameGen', 'Enabled'):
+            values['FrameGenEnabled'] = parser.get('FrameGen', 'Enabled').strip()
         for section in parser.sections():
             for key in KEYS:
                 if parser.has_option(section, key):
@@ -136,25 +139,40 @@ def setup_report(target, route, options, proxy_files=()):
     required = ('dxgi.dll', 'fakenvapi.dll', 'fakenvapi.ini', 'HelixSR/helixsr.dll',
                 'HelixSR/helixsr_upscaler.dll', 'HelixSR/helixsr_weights.bin', 'HelixSR/helixsr_kernels.pak')
     modern = False
+    modern20 = False
     if directory:
         marker = directory / 'HelixSR/helixsr-install.json'
         try:
             if not marker.is_symlink() and marker.stat().st_size <= 4096:
-                modern = json.loads(marker.read_text()).get('helixsr') == '1.9.3'
+                installed = json.loads(marker.read_text()).get('helixsr')
+                modern = installed in ('1.9.3', '2.0.0')
+                modern20 = installed == '2.0.0'
         except (OSError, ValueError, AttributeError):
             pass
-    if modern:
+    if modern20:
+        from helix20_release import scaler_pairs
+        required = tuple(dest for _, dest in scaler_pairs())
+        paths_match = (directory / 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll').is_file()
+        configured = (route == 'optiscaler'
+                      and values.get('Dx12Upscaler', '').lower() in ('auto', 'ffx')
+                      and paths_match and not error)
+    elif modern:
         from modern_release import scaler_pairs
         required = tuple(dest for _, dest in scaler_pairs())
         paths_match = (directory / 'HelixSR/helixsr.dll').is_file()
         configured = route == 'optiscaler' and values.get('Dx12Upscaler', '').lower() == 'dlss' and paths_match and not error
+    fg_configured = None if modern20 and error else (modern20 and values.get('FGInput', '').lower() == 'nvngxfg'
+                     and values.get('FGNvngxReplacement', '').lower() == 'helixsr'
+                     and values.get('FrameGenEnabled', 'auto').lower() not in ('false', 'off', '0'))
     missing = [name for name in required if not directory or not (directory / name).is_file()]
     launch = override_status(options)
     key = values.get('ShortcutKey', 'auto')
     shortcut = 'Insert (default)' if key.lower() == 'auto' else 'overlay shortcut disabled' if key == '-1' else 'configured ShortcutKey=' + key
     checks = []
     if route == 'optiscaler':
-        checks.append('Install adds HelixSR Scaler and its complete runtime assets automatically.' if modern else
+        checks.append(('Install adds HelixSR 2.0 Scaler, its embedded upscaler and both frame-generation modes automatically.'
+                       if modern20 else
+                       'Install adds HelixSR Scaler and its complete runtime assets automatically.') if modern else
                       'Install adds OptiScaler, fakenvapi and HelixSR automatically for this route.')
         if missing:
             checks.append('Missing setup files: ' + ', '.join(missing))
@@ -174,7 +192,8 @@ def setup_report(target, route, options, proxy_files=()):
             checks.append('An existing nvapi64.dll may affect DLSS input. It is not replaced; review OptiScaler.log and NvapiPath.')
         if values.get('NvapiPath', 'auto').lower() != 'auto':
             checks.append('Custom NvapiPath is configured. Verify it points to your intended per-game NVAPI provider.')
-        checks.append(('Run the game in DX12. Select DLSS (or a supported FSR/XeSS input). Open HelixSR Scaler using ' + shortcut + '; HelixSR uses the DLSS backend.' if modern else
+        checks.append(('Run the game in DX12. Select an upscaler supported by the game. Open HelixSR Scaler using ' + shortcut + '; auto selects the embedded HelixSR FidelityFX backend.' if modern20 else
+                       'Run the game in DX12. Select DLSS (or a supported FSR/XeSS input). Open HelixSR Scaler using ' + shortcut + '; HelixSR uses the DLSS backend.' if modern else
                        'Run the game in DX12. Open OptiScaler using ' + shortcut + '. Select Upscaling → Upscalers → FFX: FSR HelixSR (3.1.5).'))
         checks.append('If DLSS is unavailable, use a supported FSR or XeSS input if the game offers one. Input name alone does not identify the output backend. Otherwise collect a fresh OptiScaler.log.')
         checks.append('Check a fresh helixsr.log for neural output, then check gameplay for artifacts or crashes. Installed files and a mapped proxy alone do not prove rendering.')
@@ -182,7 +201,17 @@ def setup_report(target, route, options, proxy_files=()):
         checks.append('Native FSR 3.1 replacement: select AMD FSR in the game. This route does not need OptiScaler or an additional DXGI override.')
     else:
         checks.append('No supported route detected. Review compatibility reasons before installing.')
-    checks.append('Frame generation is separate. Existing settings are preserved; HelixSR does not add frame generation.')
+    if modern20:
+        checks.append(('HelixSR frame generation is configured for DLSS FG input. The game must support and enable DLSS frame generation. '
+                       'Installed files and settings do not prove frame generation ran.' if fg_configured else
+                       'HelixSR frame-generation files are installed, but the current provider settings do not select them. '
+                       'This is configuration evidence only; runtime activation is unknown.'))
+    else:
+        checks.append('Frame generation is separate. Existing settings are preserved; this HelixSR version does not add frame generation.')
     return dict(configured=configured, backend=values.get('Dx12Upscaler', 'unknown'),
                 provider_paths_match=paths_match, override=launch, overlay_shortcut=shortcut,
-                settings=values, missing=missing, checks=checks, guide=GUIDE)
+                settings=values, missing=missing, checks=checks, guide=GUIDE,
+                framegen_configured=fg_configured,
+                framegen_evidence=('configuration unavailable; state unknown' if fg_configured is None else
+                                   'configured; runtime unverified' if fg_configured else
+                                   'not selected; runtime unknown' if modern20 else 'not provided by this release'))

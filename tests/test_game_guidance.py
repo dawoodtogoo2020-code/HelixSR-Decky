@@ -68,4 +68,5 @@ class GameGuidanceTests(unittest.TestCase):
     def test_dx12_confirmation_explains_what_toggle_does(self):
         value = setup_guidance(self.game(dx12_confirmation_needed=True))
         self.assertIn('actually runs in DirectX 12', value['steps'][0])
+        self.assertIn("plugin's current installation route", value['steps'][0])
         self.assertIn('cannot add DX12', value['steps'][0])

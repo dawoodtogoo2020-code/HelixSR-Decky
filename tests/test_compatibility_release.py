@@ -127,15 +127,15 @@ class LatestGuardTests(unittest.TestCase):
                 self.assertEqual(release, snapshot)
 
     def test_unsupported_newer_versions(self):
-        for version in ("1.9.0", "1.10.0", "2.0.0", "10.0.0", "1.8.2"):
+        for version in ("1.9.0", "1.10.0", "2.1.0", "10.0.0", "1.8.2"):
             with self.subTest(version=version):
                 with self.assertRaises(ValueError) as ctx:
                     cr.require_supported_latest({"version": version})
                 message = str(ctx.exception)
                 self.assertIn(version, message)
-                self.assertIn("1.9", message)
-                self.assertIn("Scaler", message)
-                self.assertIn("Compatible HelixSR 1.8.1", message)
+                self.assertIn("not yet reviewed", message)
+                self.assertIn("Check for a plugin update", message)
+                self.assertIn("HelixSR 2.0.0 (recommended)", message)
 
     def test_malformed_versions(self):
         bad = [

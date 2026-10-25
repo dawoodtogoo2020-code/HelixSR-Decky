@@ -2,6 +2,7 @@
 from pathlib import PurePosixPath
 
 DD2_GUIDE = 'https://github.com/optiscaler/OptiScaler/wiki/Dragons-Dogma-2'
+PRAGMATA_GUIDE = 'https://github.com/optiscaler/OptiScaler/wiki/PRAGMATA'
 
 
 def setup_guidance(game):
@@ -18,8 +19,16 @@ def setup_guidance(game):
     if dd2 and route == 'optiscaler':
         notes.append("Dragon's Dogma 2 needs extra setup: OptiScaler's guide requires the DD2 build of REFramework (dinput8.dll). This app does not install or verify REFramework. Follow the linked game guide, including its Linux loader instructions, before launching. Do not replace an existing mod blindly. This is not a verified Steam Deck gameplay result.")
         links.append(dict(label="Dragon's Dogma 2 setup guide", url=DD2_GUIDE))
+    pragmata = (game.get('source') == 'Steam' and str(game.get('appid')) == '3357650') or (
+        exe == 'pragmata.exe' and str(game.get('name', '')).casefold() == 'pragmata')
+    if pragmata and route == 'optiscaler':
+        notes.append('PRAGMATA requires a compatible REFramework build for Scaler. Without it the game can exit during startup. This app does not install or verify that dependency. Follow the linked game guide and enable its dinput8 loader alongside dxgi on Proton. Keep existing mods and launch options. Game updates can require a newer REFramework build.')
+        links.append(dict(label='PRAGMATA setup guide', url=PRAGMATA_GUIDE))
     if game.get('awareness_deferred'):
         action, headline, steps = 'inspect', 'Checking this game before installation', ['Wait for the selected game details to finish loading.']
+    elif report.get('can_repair'):
+        action, headline = 'repair', 'HelixSR files are missing'
+        steps = ['Use Repair HelixSR files, review the missing-file list, then confirm the repair. The app will use only the exact recorded package and will not overwrite changed files.']
     elif not ready or game.get('recovery_available'):
         action, headline = 'review', report.get('label') or 'Review required'
         steps = ['Resolve the reasons shown below, then refresh this game. Selecting it does not install HelixSR.']
@@ -27,7 +36,7 @@ def setup_guidance(game):
         action, headline = 'install', 'HelixSR is not installed for this game'
         steps = ['Choose Install HelixSR for this game, then confirm the file changes. Wait for installation to finish.']
         if game.get('dx12_confirmation_needed'):
-            steps.insert(0, 'Confirm the game actually runs in DirectX 12 using the checkbox below. A launch option cannot add DX12 to a DX11-only game.')
+            steps.insert(0, "Confirm the game actually runs in DirectX 12 for this plugin's current installation route. The checkbox and launch options cannot add DX12 to a DX11-only game.")
     elif game.get('legacy') and not managed:
         action, headline = 'adopt', 'Existing HelixSR installation needs importing'
         steps = ['Review the existing installation before managing or updating its files.']
@@ -39,10 +48,10 @@ def setup_guidance(game):
         if override != 'correct':
             action, headline = 'launch', 'Files installed. Finish Proton launch setup'
             steps = ['Review the Proton proxy launch option below. Keep other launch options and any extra game-specific loader requirements.',
-                     'Then launch with DirectX 12 and select a supported DLSS, FSR or XeSS input. The input name is not the output backend.']
+                     "For this plugin's current Scaler route, launch in DirectX 12 and select a supported DLSS, FSR or XeSS input. The input name is not the output backend."]
         else:
             action, headline = 'play', 'Files installed. Check the in-game settings next'
-            steps = ['Launch with DirectX 12 and select a supported DLSS, FSR or XeSS input. Check OptiScaler is using FFX: FSR HelixSR (3.1.5).']
+            steps = ["For this plugin's current Scaler route, launch in DirectX 12 and select a supported DLSS, FSR or XeSS input. Check OptiScaler is using FFX: FSR HelixSR (3.1.5)."]
     else:
         action, headline = 'play', 'Files installed. Select AMD FSR in the game'
         steps = ['This native FSR replacement does not need an OptiScaler proxy launch option.']

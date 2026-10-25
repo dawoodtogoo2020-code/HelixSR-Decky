@@ -48,10 +48,10 @@ def _issue(reason, game=None):
     """Classify a manager diagnostic without altering its original wording."""
     lower = reason.lower()
     if 'uses directx 11 only' in lower:
-        steps = ['Use the game\'s built-in upscaling instead. A plugin setting or DX12 launch option cannot add a renderer the game does not have.']
+        steps = ["This plugin's validated installation route requires DirectX 12. Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling, but this plugin has not enabled that route. A plugin setting or launch option cannot change the game's renderer."]
         if (game or {}).get('managed'):
             steps.append('Close the game, then use Disable HelixSR or Remove and restore originals. Existing file, Steam build and download checks must still pass.')
-        return ('unsupported_renderer', 'DirectX 11 is unsupported', steps)
+        return ('unsupported_renderer', 'DX11 route not verified', steps)
     if reason == RUNNING_REASON:
         return ('game_running', 'Game running',
                 ['Close the game normally before changing its files, then refresh.'])
@@ -68,6 +68,11 @@ def _issue(reason, game=None):
                      'The installation record and live files disagree. File changes remain blocked for review; reinstalling the plugin does not reconcile this game record.',
                      'Report the named file and app version. Do not delete DLLs, saved originals or installation records.'])
         if lower.endswith('(current state: missing)'):
+            if (game or {}).get('repair_eligible'):
+                return ('managed_files_missing', 'Installed file missing',
+                        ['Steam verification checks files owned by the game, but HelixSR adds or replaces plugin files tracked by this app. Steam may leave added files absent and cannot reconcile this installation receipt.',
+                         'Use Repair HelixSR files to restore only the listed missing files from the exact checksum-verified package recorded by this installation.',
+                         'Changed files, a changed Steam build, a running game, or an active Steam update still block repair.'])
             if (game or {}).get('restore_eligible'):
                 return ('managed_files_changed', 'Plugin-created file already absent',
                         ['Close the game, then review Disable HelixSR or Remove and restore originals to finish cleanup.',
@@ -168,8 +173,10 @@ def installation_status(game):
     can_restore = bool(game.get('managed')) and (state == 'ready' or
         game.get('restore_eligible') and not running and not recovery or
         compatibility == 'unsupported' and game.get('renderer_unsupported') and not running and not recovery)
+    can_repair = bool(game.get('repair_eligible')) and not running and not recovery
     if can_restore and game.get('restore_eligible'):
         summary = ('Some plugin-created files are already absent. Disable or Remove can finish restoring '
                    'the recorded originals; installation and updates stay blocked.')
     return dict(state=state, label=label, summary=summary, running=running,
-                selectable=selectable, can_modify=state == 'ready', can_restore=can_restore, issues=issues)
+                selectable=selectable, can_modify=state == 'ready', can_restore=can_restore,
+                can_repair=can_repair, issues=issues)

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import shlex
 import subprocess
 import tarfile
@@ -126,8 +127,29 @@ class ModernBuildTests(unittest.TestCase):
         script = build.build_script()
         self.assertIn('--separate-files', script)
         self.assertIn('--no-fg', script)
+        self.assertIn('helix20_layout', script)
         embedded = script.split("<<'PY_HELIX_BOOTSTRAP'\n", 1)[1].rsplit('\nPY_HELIX_BOOTSTRAP', 1)[0]
         compile(embedded, '<bootstrap>', 'exec')
+
+    def test_verified_20_layout_builds_embedded_network_and_full_frame_generation(self):
+        dll = self.write(self.root, 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll', b'MZ-2.0')
+        setup = self.write(self.root, 'setup/helixsr_setup.py', b'official network setup')
+        fg = self.write(self.root, 'setup/fg/fg_setup.py', b'official frame generation setup')
+        with patch.object(build, 'HELIX20_DLL_SIZE', dll.stat().st_size), \
+                patch.object(build, 'HELIX20_DLL_SHA256', build.digest(dll)), \
+                patch.object(build, 'HELIX20_SETUP_SHA256', build.digest(setup)), \
+                patch.object(build, 'HELIX20_FG_SETUP_SHA256', build.digest(fg)):
+            self.assertTrue(build.helix20_layout(self.root))
+            command = build.setup_command(self.root, Path('/python'), Path('/dxc-launch'))
+        self.assertEqual(command[-3:], ['--dxc', str(Path('/dxc-launch')), '--yes'])
+        self.assertNotIn('--separate-files', command)
+        self.assertNotIn('--no-fg', command)
+
+    def test_unverified_or_19_layout_keeps_separate_network_without_frame_generation(self):
+        self.write(self.root, 'setup/helixsr_setup.py', b'legacy setup')
+        command = build.setup_command(self.root, Path('/python'), Path('/dxc-launch'))
+        self.assertFalse(build.helix20_layout(self.root))
+        self.assertEqual(command[-2:], ['--separate-files', '--no-fg'])
 
     def test_frozen_bootstrap_uses_bundled_source_and_real_interpreter(self):
         resource = self.write(self.root, 'bootstrap/modern_build.py', b'print("host bootstrap executed")\n')
@@ -146,9 +168,36 @@ class ModernBuildTests(unittest.TestCase):
         result = subprocess.run([host_python, '-c', embedded], capture_output=True, text=True, check=True)
         self.assertEqual(result.stdout.strip(), 'host bootstrap executed')
 
+    def test_frozen_plugin_host_uses_adjacent_source_not_host_bundle(self):
+        resource = self.write(self.root, 'plugin/modern_build.py', b'print("plugin bootstrap")\n')
+        for bundled in (False, True):
+            if bundled:
+                self.write(self.root, 'bootstrap/modern_build.py', b'raise RuntimeError("wrong bundle")\n')
+            with self.subTest(bundled=bundled), \
+                    patch.object(build.sys, 'frozen', True, create=True), \
+                    patch.object(build.sys, '_MEIPASS', str(self.root), create=True), \
+                    patch.object(build.sys, 'executable', '/decky/PluginLoader'), \
+                    patch.object(build, '__file__', str(resource)), \
+                    patch.object(build.shutil, 'which', return_value='/usr/bin/python3') as which:
+                script = build.build_script()
+                which.assert_called_once_with('python3', path=os.defpath)
+                self.assertIn('/usr/bin/python3 - "$HERE"', script)
+                self.assertNotIn('/decky/PluginLoader', script)
+                embedded = script.split("<<'PY_HELIX_BOOTSTRAP'\n", 1)[1].rsplit('\nPY_HELIX_BOOTSTRAP', 1)[0]
+                self.assertEqual(embedded, resource.read_text())
+
+    def test_frozen_bytecode_without_bundle_fails_with_resource_error(self):
+        bytecode = self.write(self.root, 'modern_build.pyc', b'not Python source')
+        with patch.object(build, 'sys', SimpleNamespace(frozen=True, executable='/decky/PluginLoader')), \
+                patch.object(build, '__file__', str(bytecode)), \
+                patch.object(build.shutil, 'which', return_value='/usr/bin/python3'):
+            with self.assertRaisesRegex(ValueError, 'bootstrap resource is missing'):
+                build.build_script()
+
     def test_frozen_missing_interpreter_or_resource_fails_before_build(self):
         with patch.object(build.sys, 'frozen', True, create=True), \
-                patch.object(build.sys, '_MEIPASS', str(self.root), create=True):
+                patch.object(build.sys, '_MEIPASS', str(self.root), create=True), \
+                patch.object(build, '__file__', str(self.root / 'missing-module.pyc')):
             with patch.object(build.shutil, 'which', return_value=None):
                 with self.assertRaisesRegex(ValueError, 'Install system Python 3'):
                     build.build_script()

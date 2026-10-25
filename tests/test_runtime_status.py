@@ -369,5 +369,18 @@ class ManagedRuntimeAssessmentTests(Fixtures):
         self.assertTrue(game['main_exe'])
 
 
+class Helix20RuntimePathTests(unittest.TestCase):
+    def test_scaler_monitor_uses_embedded_dll_and_new_log_without_claiming_fg(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game = dict(folder=str(root), target=str(root), targets=[], main_exe=str(root / 'game.exe'),
+                        route='optiscaler', managed=True, enabled=True, installed_version='2.0.0')
+            evidence = runtime_status.RuntimeEvidence(game)
+            self.assertIn(root / 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll', evidence.modules)
+            self.assertNotIn(root / 'HelixSR/helixsr.dll', evidence.modules)
+            self.assertIn(root / 'HelixSR-fsrfg/helixsr.log', evidence.paths)
+            self.assertFalse(any('fg' in path.name.lower() for path in evidence.modules))
+
+
 if __name__ == '__main__':
     unittest.main()
