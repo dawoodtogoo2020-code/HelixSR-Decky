@@ -23,7 +23,7 @@ class FolderDialogTests(unittest.TestCase):
         cls.app.setQuitOnLastWindowClosed(False)
 
     def setUp(self):
-        task_root = Path('D:/Downloads/Codex/hsrtmp') if os.name == 'nt' else Path(tempfile.gettempdir()) / 'helixsr-folder-tests'
+        task_root = Path(os.environ.get('HELIXSR_TEST_TMP', tempfile.gettempdir())) / 'helixsr-folder-tests'
         task_root.mkdir(parents=True, exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(dir=task_root, prefix='folders-')
         self.root = Path(self.temporary.name)

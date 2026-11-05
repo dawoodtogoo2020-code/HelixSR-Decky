@@ -315,3 +315,11 @@ test("malformed and ambiguous shell options are refused", () => {
     'WINEDLLOVERRIDES="dxgi=n,b;dxgi=n,b" %command%',
   ]) assert.throws(() => proxyOptions(input), /review/i, input);
 });
+
+
+test("installed model identity remains visible in ready and review states", () => {
+  const g = {compatibility: "candidate", managed: true, enabled: true, legacy: false,
+    installed_version: "3.2.0", installed_model: "HLX FSR 4 (FSR 4.1.2 Lite)"};
+  assert.match(gameStatus(g).summary, /3\.2\.0.*HLX FSR 4/);
+  assert.match(gameStatus({...g, compatibility: "blocked"}).summary, /Recorded as enabled.*HLX FSR 4/);
+});

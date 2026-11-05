@@ -131,6 +131,17 @@ class AwarenessMetadataTests(unittest.TestCase):
             result = awareness.awareness(game, tree, self.home, 'optiscaler', self.game)
         self.assertEqual(result['framegen_summary'], 'HelixSR FG configuration unavailable; state unknown')
 
+    def test_hlx_summary_separates_super_resolution_from_frame_generation(self):
+        game = dict(folder=str(self.game), name='Example', id='example')
+        setup = dict(family='hlx-fsr', configured=True, framegen_configured=False,
+                     framegen_evidence='not selected; runtime unknown')
+        with patch('awareness.setup_report', return_value=setup), patch('awareness.active_processes', return_value=[]):
+            direct = awareness.awareness(game, [], self.home, 'direct', self.game)
+            scaler = awareness.awareness(game, [], self.home, 'optiscaler', self.game)
+        self.assertIn('super resolution only', direct['framegen_summary'])
+        self.assertIn('no HelixSR frame generation', scaler['framegen_summary'])
+        self.assertIn('not selected', scaler['framegen_summary'])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

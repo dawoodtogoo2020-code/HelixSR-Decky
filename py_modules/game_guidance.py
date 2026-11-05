@@ -10,6 +10,7 @@ def setup_guidance(game):
     ready = game.get('compatibility') == 'candidate' and report.get('can_modify', True)
     route = game.get('route')
     managed = bool(game.get('managed'))
+    hlx = game.get('installed_variant') == 'hlx-fsr4-1-2'
     notes, links = [], []
     # Only an identified title gets its special instructions. A DLL named
     # dinput8.dll is not proof of REFramework, its version or a working loader.
@@ -51,10 +52,15 @@ def setup_guidance(game):
                      "For this plugin's current Scaler route, launch in DirectX 12 and select a supported DLSS, FSR or XeSS input. The input name is not the output backend."]
         else:
             action, headline = 'play', 'Files installed. Check the in-game settings next'
-            steps = ["For this plugin's current Scaler route, launch in DirectX 12 and select a supported DLSS, FSR or XeSS input. Check OptiScaler is using FFX: FSR HelixSR (3.1.5)."]
+            steps = ["Launch in DirectX 12 and select a supported DLSS, FSR or XeSS input. Check the output provider in HelixSR Scaler: HLX FSR 4 uses FSR 4.1.2; AMD FSR uses the native provider." if hlx else
+                     "For this plugin's current Scaler route, launch in DirectX 12 and select a supported DLSS, FSR or XeSS input. Check OptiScaler is using FFX: FSR HelixSR (3.1.5)."]
     else:
         action, headline = 'play', 'Files installed. Select AMD FSR in the game'
         steps = ['This native FSR replacement does not need an OptiScaler proxy launch option.']
     if managed and game.get('enabled'):
-        steps.append('Installed files are not runtime proof. The optional status overlay needs fresh HelixSR log evidence to report neural output.')
+        if hlx:
+            log = 'OptiScaler.log' if route == 'optiscaler' else 'HLX_FSR.log'
+            steps.append(f"Check a fresh {log} for an active HLX FSR 4 runtime or fallback to AMD. A GPU dispatch capture can confirm frame processing. Check frame generation separately.")
+        else:
+            steps.append('Installed files are not runtime proof. The optional status overlay needs fresh HelixSR log evidence to report neural output.')
     return dict(action=action, headline=headline, steps=steps, notes=notes, links=links)

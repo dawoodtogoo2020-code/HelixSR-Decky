@@ -57,7 +57,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(model_variants.DEFAULT_VARIANT, 'helixsr-model-e')
         self.assertEqual(catalog['default'], model_variants.DEFAULT_VARIANT)
         self.assertEqual([item['id'] for item in catalog['variants']],
-                         [model_variants.DEFAULT_VARIANT])
+                         [model_variants.DEFAULT_VARIANT, model_variants.hlx_fsr_release.VARIANT_ID])
         selected = model_variants.select_variant()
         self.assertEqual(selected['label'], 'HelixSR Model E')
         self.assertEqual(selected['source'], 'NVIDIA DLSS 310.7.0')
@@ -70,7 +70,7 @@ class RegistryTests(unittest.TestCase):
         self.assertIn('setup/helixsr_setup.py', model_variants.RECIPE_FILES)
         self.assertIn('setup/lib/model/model_gen.inc', model_variants.RECIPE_FILES)
         self.assertEqual(set(model_variants.REVIEWED_RECIPES.values()),
-                         {model_variants.DEFAULT_VARIANT})
+                         {model_variants.DEFAULT_VARIANT, model_variants.hlx_fsr_release.VARIANT_ID})
         self.assertGreaterEqual(len(model_variants.REVIEWED_RECIPES), 2)
         for digest in model_variants.REVIEWED_RECIPES:
             self.assertRegex(digest, r'^[a-f0-9]{64}$')

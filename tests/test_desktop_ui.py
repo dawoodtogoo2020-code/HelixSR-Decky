@@ -165,6 +165,58 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertEqual(self.window.unavailable.count(), 1)
         self.assertIn('Protected game', self.window.unavailable.item(0).text())
         self.assertFalse(any(c[0] in ('install', 'preview', 'license') for c in self.backend.calls))
+
+    def test_hlx_model_and_pinned_release_reach_review_together(self):
+        library = self.backend.library()
+        old, hlx = 'reviewed-2.0.0', 'reviewed-3.2.0'
+        catalog = library['model_catalog']['variants']
+        catalog[0]['release_choices'] = [old]
+        catalog.append(dict(id='hlx-fsr4-1-2', label='HLX FSR 4', source='AMD',
+                            release_choices=[hlx], routes=['direct', 'optiscaler']))
+        library['release_choices'] = [dict(id=id_, version=id_.split('-')[1], label=id_) for id_ in (old, hlx)]
+        self.window._library_received(library)
+        self.settle()
+        self.window.models.setCurrentIndex(self.window.models.findData('hlx-fsr4-1-2'))
+        self.assertEqual(self.window.release_choice.currentData(), hlx)
+        with mock.patch.object(self.window, '_preview_received'):
+            self.window.preview_latest()
+            self.settle()
+        self.assertEqual(self.backend.preview_variant, 'hlx-fsr4-1-2')
+        self.assertEqual(self.backend.preview_release_choice, hlx)
+        self.window.release_choice.setCurrentIndex(self.window.release_choice.findData(old))
+        self.assertEqual(self.window.models.currentData(), 'fixture-model')
+
+    def test_viewing_hlx_install_does_not_change_default_for_unmanaged_game(self):
+        library = self.backend.library()
+        catalog = library['model_catalog']['variants']
+        catalog[0]['release_choices'] = ['reviewed-2.0.0']
+        catalog.append(dict(id='hlx-fsr4-1-2', label='HLX FSR 4', source='AMD',
+                            release_choices=['reviewed-3.2.0'], routes=['direct', 'optiscaler']))
+        library['release_choices'] = [dict(id=id_, version=id_.split('-')[1], label=id_)
+                                      for id_ in ('reviewed-2.0.0', 'reviewed-3.2.0')]
+        self.window._library_received(library)
+        self.settle()
+        self.window.game = dict(self.backend.game, installed_variant='hlx-fsr4-1-2')
+        self.window._render_game()
+        self.assertEqual(self.window.release_choice.currentData(), 'reviewed-3.2.0')
+        self.window.game = self.backend.game.copy()
+        self.window._render_game()
+        self.assertEqual(self.window.release_choice.currentData(), 'reviewed-2.0.0')
+        self.assertEqual(self.window.models.currentData(), catalog[0]['id'])
+
+    def test_missing_managed_files_can_be_reviewed_for_repair_without_updates_or_consent(self):
+        self.backend.game.update(managed=True, enabled=True, repair_eligible=True, installed_variant='hlx-fsr4-1-2',
+                                 installation_status=dict(can_modify=False, can_repair=True, label='Files missing',
+                                                          summary='Repair the recorded package', issues=[]))
+        self.window._library_received(self.backend.library())
+        self.settle()
+        repair = self.window.actions['repair']
+        self.assertTrue(repair.isVisible() and repair.isEnabled())
+        with mock.patch.object(self.window, '_preview_received'):
+            repair.click()
+            self.settle()
+        self.assertIn(('preview_action', 'repair'), self.backend.calls)
+        self.assertFalse(any(c[0] in ('install', 'license', 'apply') for c in self.backend.calls))
         self.assertIn('OptiScaler installed: yes', self.window.evidence.toPlainText())
 
     def test_explicit_compatibility_choice_reaches_review_with_matching_license(self):

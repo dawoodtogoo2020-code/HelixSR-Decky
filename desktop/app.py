@@ -32,11 +32,8 @@ BUGS = PROJECT + "/issues"
 ACTIVE = {"running", "queued", "cancelling"}
 LIMIT = 24000
 TERMS = (
-    "HelixSR is downloaded from lonewolf0622/HelixSR and retains its freeware terms. "
-    "NVIDIA DLSS and generated network files remain subject to NVIDIA's license. "
-    "Generated weights and kernels are private local assets and must not be redistributed. "
-    "OptiScaler is GPL 3.0; fakenvapi is MIT; AMD FidelityFX retains AMD notices. "
-    "Setup scripts through 1.8.1 retain Apache 2.0 terms. Newer releases have different terms and require a supported adapter. Review the selected release license."
+    "Review the selected HelixSR release license and its third-party notices. "
+    "Generated network files must stay on this device."
 )
 
 
@@ -123,12 +120,15 @@ class PreviewDialog(QDialog):
             f"Select in game: {preview.get('select_upscaler', 'see guide')}\n\n"
             f"{preview.get('warning', '')}\n\nChanged files:\n" +
             "\n".join(str(p) for p in preview.get('files', []))[:LIMIT] +
-            "\n\nTerms and credits:\n" + TERMS
+            "\n\nTerms and credits:\n" + (preview.get('source_terms') or TERMS)
         )
         layout.addWidget(body)
         license_url = preview.get('license_url') or 'https://github.com/lonewolf0622/HelixSR'
         links = link_label('<a href="' + html.escape(license_url, quote=True) + '">Selected HelixSR release license</a>', parent._notify)
         layout.addWidget(links)
+        if preview.get('source_license_url'):
+            url = html.escape(preview['source_license_url'], quote=True)
+            layout.addWidget(link_label(f'<a href="{url}">Selected model source license</a>', parent._notify))
         self.ack = QCheckBox("I have reviewed the changes and accept the applicable terms")
         layout.addWidget(self.ack)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -154,6 +154,10 @@ class MainWindow(QMainWindow):
         self._library_loaded = False
         self.game = None
         self.release = {}
+        self._variants = {}
+        self._release_choices = []
+        self._preferred_release_choice = 'reviewed-2.0.0'
+        self._syncing_model = False
         self.app_update = {}
         self._seen_jobs = {}
         self._shutdown_requested = False
@@ -251,8 +255,7 @@ class MainWindow(QMainWindow):
         self.release_choice.addItem("Compatible HelixSR 1.8.1", "compatible-1.8.1")
         self.release_choice.setMinimumHeight(40)
         content.addWidget(self.release_choice)
-        release_note = QLabel("HelixSR 1.9.3 is supported with Scaler 1.0.6. Its own frame generation is unavailable; "
-                             "alternative providers retain their settings and requirements. Compatible HelixSR 1.8.1 remains available.")
+        release_note = QLabel("Select a model to use its reviewed release, or choose a release to see the model it supports.")
         release_note.setWordWrap(True)
         content.addWidget(release_note)
         content.addWidget(QLabel("HelixSR model"))
@@ -264,6 +267,8 @@ class MainWindow(QMainWindow):
         self.model_note.setWordWrap(True)
         self.model_note.setTextFormat(Qt.PlainText)
         content.addWidget(self.model_note)
+        self.models.currentIndexChanged.connect(self._model_changed)
+        self.release_choice.currentIndexChanged.connect(self._release_changed)
         self.dx12 = QCheckBox("I have set this game to DirectX 12")
         self.dx12.toggled.connect(self._controls)
         content.addWidget(self.dx12)
@@ -279,8 +284,9 @@ class MainWindow(QMainWindow):
         self.scaler_route_button = self._button('Use Scaler route for frame generation', self.choose_scaler_route, content)
         row = QHBoxLayout()
         self.actions = {}
-        for action in ("enable", "disable", "remove", "adopt", "recover"):
-            self.actions[action] = self._button(action.title(), lambda checked=False, a=action: self.preview_action(a), row)
+        for action in ("enable", "disable", "repair", "remove", "adopt", "recover"):
+            label = "Repair HelixSR files" if action == "repair" else action.title()
+            self.actions[action] = self._button(label, lambda checked=False, a=action: self.preview_action(a), row)
         self.forget = self._button("Forget import", self.forget_game, row)
         content.addLayout(row)
         self.blockers = QLabel()
@@ -445,6 +451,8 @@ class MainWindow(QMainWindow):
         self.settings_button.setEnabled(free and bool((game.get('helix_settings') or {}).get('available'))
                                         and game.get('compatibility') == 'candidate')
         self.scaler_route_button.setEnabled(free and bool(game) and not game.get('managed') and not game.get('legacy'))
+        self.scaler_route_button.setText('Use automatic installation route' if game.get('route') == 'optiscaler'
+                                         else 'Use Scaler for frame generation and settings')
         for control in (self.games, self.executables, self.models, self.release_choice, self.refresh_button, self.launchers, self.import_button, self.folder_button, self.helix_check, self.app_check, self.auto_check, self.diagnostic_button):
             control.setEnabled(free)
         choices = game.get("executable_choices", [])
@@ -460,9 +468,13 @@ class MainWindow(QMainWindow):
             candidate = bool(report.get('can_modify')) and not game.get('recovery_available')
         candidate = candidate and not game.get('awareness_deferred')
         self.install.setText("Update this game's HelixSR" if game.get("managed") else "Install HelixSR for this game")
-        self.install.setEnabled(free and candidate and confirmed and not game.get("legacy"))
+        routes = self._variants.get(self.models.currentData(), {}).get('routes')
+        route_supported = not routes or not game.get('route') or game['route'] in routes
+        self.install.setEnabled(free and candidate and confirmed and route_supported and not game.get("legacy"))
         guidance = game.get('setup_guidance') or setup_guidance(game)
         message = 'Next step: ' + guidance['headline'] + '\n' + '\n\n'.join(guidance['steps'] + guidance['notes'])
+        if not route_supported:
+            message += f"\nThe selected model supports {', '.join(routes)}. Current route: {game['route']}."
         if game.get('dx12_confirmation_needed') and not confirmed:
             message += '\nConfirm DirectX 12 below before installing.'
         if active:
@@ -475,9 +487,13 @@ class MainWindow(QMainWindow):
         self.launch_setup.setEnabled(free and not game.get('awareness_deferred'))
         for action, button in self.actions.items():
             visible = (action == "recover" and game.get("recovery_available")) or (action == "adopt" and game.get("legacy")) or (game.get("managed") and (action == "remove" or action == ("disable" if game.get("enabled") else "enable")))
+            if action == 'repair':
+                visible = bool(game.get('repair_eligible') and report.get('can_repair'))
             button.setVisible(bool(visible))
             recovery_safe = not report.get('running') and not any(i.get('code') == 'steam_update' for i in report.get('issues', []))
             allowed = report.get('can_restore', candidate) if action in ('disable', 'remove') else candidate
+            if action == 'repair':
+                allowed = visible
             button.setEnabled(free and bool(visible) and (recovery_safe if action == "recover" else allowed))
         self.forget.setEnabled(free and game.get("source") == "Imported" and not game.get("managed"))
         self.launch.setEnabled(free and bool(game) and not game.get('awareness_deferred'))
@@ -522,10 +538,22 @@ class MainWindow(QMainWindow):
         self.games.setCurrentIndex(index if index >= 0 else 0)
         self.games.blockSignals(False)
         self.release = value.get("release", {})
+        previous_choice = self.release_choice.currentData() if self._library_loaded else None
+        self._release_choices = value.get('release_choices') or []
+        if self._release_choices:
+            self.release_choice.blockSignals(True)
+            self.release_choice.clear()
+            for choice in self._release_choices:
+                self.release_choice.addItem(choice['label'], choice['id'])
+            self.release_choice.setCurrentIndex(max(0, self.release_choice.findData(previous_choice)))
+            self.release_choice.blockSignals(False)
         models = value.get("model_catalog") or {}
+        self._variants = {m['id']: m for m in models.get('variants', [])}
+        self.models.blockSignals(True)
         self.models.clear()
-        for model in models.get("variants", []):
+        for model in self._variants.values():
             self.models.addItem(f"{model['label']} · {model['source']}", model['id'])
+        self.models.blockSignals(False)
         self.model_note.setText(models.get("note", ""))
         self._jobs_received(value.get("jobs", []))
         self.select_game()
@@ -544,6 +572,28 @@ class MainWindow(QMainWindow):
                          "See Diagnostics for discovery notes.")
         # Cached automatic-check policy belongs to the backend; no silent install.
         QTimer.singleShot(0, lambda: self.check_app(False))
+
+    def _model_changed(self, *_):
+        choices = self._variants.get(self.models.currentData(), {}).get('release_choices')
+        if choices and self.release_choice.currentData() not in choices:
+            index = self.release_choice.findData(choices[0])
+            if index >= 0:
+                self.release_choice.setCurrentIndex(index)
+        self._controls()
+
+    def _release_changed(self, *_):
+        choice = self.release_choice.currentData()
+        if not self._syncing_model:
+            self._preferred_release_choice = choice
+        if choice == 'latest':
+            choice = next((c['id'] for c in self._release_choices if c['version'] == self.release.get('version')), None)
+        compatible = [v['id'] for v in self._variants.values()
+                      if not choice or not v.get('release_choices') or choice in v['release_choices']]
+        if compatible and self.models.currentData() not in compatible:
+            self.models.blockSignals(True)
+            self.models.setCurrentIndex(self.models.findData(compatible[0]))
+            self.models.blockSignals(False)
+        self._controls()
 
     def select_game(self, *_):
         prior = (self._overlay_snapshot or {}).get('game_id')
@@ -597,7 +647,19 @@ class MainWindow(QMainWindow):
                             + (recorded + '\n' if recorded else '') +
                             f"Installed model: {game.get('installed_model') or 'not installed'}\n{game.get('folder', '')}")
         if reset_model:
-            self.models.setCurrentIndex(max(0, self.models.findData(game.get('installed_variant'))))
+            self._syncing_model = True
+            try:
+                installed = self.models.findData(game.get('installed_variant'))
+                if installed >= 0:
+                    self.models.setCurrentIndex(installed)
+                    self._model_changed()
+                else:
+                    preferred = self.release_choice.findData(self._preferred_release_choice)
+                    if preferred >= 0:
+                        self.release_choice.setCurrentIndex(preferred)
+                    self._release_changed()
+            finally:
+                self._syncing_model = False
         self.status.setStyleSheet(f"color: {color}")
         report = game.get('installation_status') or {}
         issues = report.get('issues') or []
@@ -621,7 +683,7 @@ class MainWindow(QMainWindow):
                 f"OptiScaler runtime: {opti.get('runtime', 'unknown')}\n"
                 f"HelixSR runtime: {game.get('helix_runtime', 'unknown')}\n\n"
                 f"Frame generation: {game.get('framegen_summary', 'unknown')}\n"
-                "HelixSR has no frame generation of its own. Configuration and runtime evidence are separate.\n")
+                "Frame generation uses the configured provider. Runtime activity needs separate evidence.\n")
         setup = opti.get('setup') or {}
         text += '\nSetup checks and next steps:\n' + '\n\n'.join(setup.get('checks', []))
         text += '\n\nDetected OptiScaler settings:\n' + '\n'.join(f'{k}={v}' for k, v in setup.get('settings', {}).items())
@@ -647,7 +709,8 @@ class MainWindow(QMainWindow):
     def choose_scaler_route(self):
         if self.game:
             gid = self.game['id']
-            self._run(lambda: self.backend.set_installation_route(gid, 'optiscaler'),
+            route = 'auto' if self.game.get('route') == 'optiscaler' else 'optiscaler'
+            self._run(lambda: self.backend.set_installation_route(gid, route),
                       lambda value: self._details_received(gid, value))
 
     def edit_helix_settings(self):
@@ -660,7 +723,12 @@ class MainWindow(QMainWindow):
         dialog.setWindowTitle('HelixSR settings')
         dialog.setMinimumWidth(460)
         layout = QVBoxLayout(dialog)
-        note = QLabel('Close the game before saving; restart it afterwards. HelixSR FG needs DX12 and DLSS FG enabled in-game. 3× uses XeSS FG. Light/Full select the FG model; upscaling remains Model E.')
+        hlx = state.get('family') == 'hlx-fsr'
+        note = QLabel("Close the game before saving and restart to apply. " +
+                      ("HLX FSR 4 uses AMD's FSR 4.1.2 Lite model. AMD FSR (native) selects the AMD provider. "
+                       "Keep in-game frame generation off when enabling a Scaler FG provider." if hlx else
+                       "HelixSR FG needs DX12 and DLSS FG enabled in-game. Light and Full are frame generation models.") +
+                      " 3× uses XeSS FG.")
         note.setWordWrap(True)
         note.setMinimumHeight(85)
         layout.addWidget(note)
@@ -674,6 +742,10 @@ class MainWindow(QMainWindow):
             'int8': ('INT8', [('Automatic', 'auto'), ('On', 'on'), ('Off', 'off')]),
             'wave_size': ('Wave size', [('Automatic', 'auto'), ('32', '32'), ('64', '64')]),
         }
+        if hlx:
+            choices['upscaler'] = ('Upscaler', [('HLX FSR 4 (FSR 4.1.2 Lite)', 'hlx-fsr'), ('AMD FSR (native)', 'fsr')])
+            choices['provider'] = ('Frame generation', [('Off', 'off'), ('AMD FSR FG', 'fsr'), ('Intel XeSS FG', 'xess')])
+            choices = {k: choices[k] for k in ('upscaler', 'provider', 'multiplier')}
         for key, (label, options) in choices.items():
             layout.addWidget(QLabel(label))
             combo = QComboBox()
@@ -693,9 +765,10 @@ class MainWindow(QMainWindow):
                 fields['quick_flow'].setCurrentIndex(fields['quick_flow'].findData('off'))
             fields['quick_flow'].setEnabled(fields['model'].currentData() == 'full')
         fields['provider'].currentIndexChanged.connect(provider_changed)
-        fields['model'].currentIndexChanged.connect(model_changed)
         fields['multiplier'].setEnabled(state.get('provider') == 'xess')
-        fields['quick_flow'].setEnabled(state.get('model') == 'full')
+        if not hlx:
+            fields['model'].currentIndexChanged.connect(model_changed)
+            fields['quick_flow'].setEnabled(state.get('model') == 'full')
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
@@ -723,7 +796,8 @@ class MainWindow(QMainWindow):
             return
         self._modal = True
         self._controls()
-        dialog = PreviewDialog(preview, self)
+        model = self._variants.get(preview.get('variant_id'), {})
+        dialog = PreviewDialog({**model, **preview}, self)
         self._active_dialog = dialog
         if dialog.exec() == QDialog.Accepted:
             def apply():

@@ -113,6 +113,9 @@ def launch_options(home, appid, warnings=None):
 def active_processes(folder, appid=''):
     out = []
     root = Path(folder).resolve()
+    if os.name == 'nt':
+        from windows_processes import active_processes as windows_processes
+        return windows_processes(root)
     if not Path('/proc').is_dir():
         return out
     for p in Path('/proc').glob('[0-9]*'):
@@ -175,6 +178,8 @@ def awareness(game, tree, home, route, target=None):
         # Log candidates belong to a directory, not each asset inside it. Avoid
         # thousands of identical existence/symlink checks in large game folders.
         candidates = [d / 'helixsr.log', d / 'OptiScaler.log']
+        if 'HLX_FSR.log' in names:
+            candidates.append(d / 'HLX_FSR.log')
         # HelixSR's managed subfolders live beside the game executable. Do not
         # probe those subfolders again for every directory in the scanned tree.
         if d in (Path(game['folder']), Path(target) if target else None):
@@ -251,14 +256,15 @@ def awareness(game, tree, home, route, target=None):
     evidence_state = 'unknown'
     # A one-shot assessment has no cursor/session boundary. File timestamps
     # cannot authenticate historical text; the optional monitor reads new events.
-    if any(x['path'].lower().endswith('helixsr.log') for x in logs):
+    if any(x['path'].lower().endswith(('helixsr.log', 'hlx_fsr.log')) for x in logs):
         evidence_state = 'historical log available; current runtime unverified'
     elif processes:
         evidence_state = 'game running; current HelixSR output unverified'
     setup = setup_report(target, route, options, opti_files)
     configured_helix = setup['configured']
-    if setup.get('framegen_evidence') != 'not provided by this release':
-        item = evidence('HelixSR 2.0', 'Frame generation provider', setup['framegen_evidence'],
+    hlx = setup.get('family') == 'hlx-fsr'
+    if (not hlx or route == 'optiscaler') and setup.get('framegen_evidence') != 'not provided by this release':
+        item = evidence('HelixSR Scaler 2.1' if hlx else 'HelixSR 2.0', 'Frame generation provider', setup['framegen_evidence'],
                         Path(target or game['folder']) / 'OptiScaler.ini',
                         'configuration only; runtime activation unverified')
         item['enabled'] = setup.get('framegen_configured')
@@ -268,7 +274,11 @@ def awareness(game, tree, home, route, target=None):
                                configs=[str(p) for p in configs], involved=route == 'optiscaler' or configured_helix,
                                helix_configured=configured_helix, runtime=opti_runtime, setup=setup),
                 framegen=fg,
-                framegen_summary=('HelixSR FG configuration unavailable; state unknown'
+                framegen_summary=(('HelixSR 3.2.0 has no HelixSR frame generation; ' + setup['framegen_evidence'])
+                                  if hlx and route == 'optiscaler' else
+                                  'Direct HLX FSR installs super resolution only; in-game frame generation is separate'
+                                  if hlx else
+                                  'HelixSR FG configuration unavailable; state unknown'
                                   if helix20_fg and setup.get('framegen_configured') is None else
                                   'HelixSR FG selected; generated-frame output unverified'
                                   if helix20_fg and setup.get('framegen_configured') else

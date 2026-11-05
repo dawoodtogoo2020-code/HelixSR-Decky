@@ -22,6 +22,30 @@ class SetupTests(unittest.TestCase):
     def report(self):
         return setup_report(self.root, 'optiscaler', 'WINEDLLOVERRIDES="dxgi=n,b" %command%', [self.root / 'dxgi.dll'])
 
+    def test_hlx_scaler_distinguishes_model_native_fallback_and_fg_configuration(self):
+        import json
+        from hlx_fsr_release import scaler_pairs, VARIANT_ID, MODERN_VERSION
+        for _, destination in scaler_pairs():
+            path = self.root / destination
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'fixture')
+        marker = self.root / 'HelixSR' / 'helixsr-install.json'
+        marker.parent.mkdir(parents=True)
+        marker.write_text(json.dumps(dict(helixsr=MODERN_VERSION, variant=dict(id=VARIANT_ID))))
+        config = '[Upscalers]\nDx12Upscaler=ffx\n[FSR]\nUpscalerIndex=0\n[FrameGen]\nEnabled=true\nFGInput=upscaler\nFGOutput=xefg\n'
+        self.config.write_text(config)
+        report = self.report()
+        self.assertTrue(report['configured'])
+        self.assertIn('HLX FSR 4', report['backend'])
+        self.assertTrue(report['framegen_configured'])
+        self.assertIn('runtime unverified', report['framegen_evidence'])
+        self.config.write_text(config.replace('UpscalerIndex=0', 'UpscalerIndex=1').replace('Enabled=true', 'Enabled=false'))
+        report = self.report()
+        self.assertIn('native', report['backend'])
+        self.assertFalse(report['framegen_configured'])
+        self.config.write_text(config + '[Libraries]\nFfxDx12SRPath=custom.dll\n')
+        self.assertFalse(self.report()['configured'])
+
     def test_exact_backend_and_both_paths_required(self):
         source = pin_config(self.template, self.template, self.settings)
         self.config.write_text(source)

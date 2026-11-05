@@ -109,6 +109,8 @@ def validate_zip(path, version):
                             ('helix20_release', 'helix_settings'))
         if semver(version) >= (0, 1, 32):
             required.add(f'{FOLDER}/py_modules/discovery_records.py')
+        if semver(version) >= (0, 1, 37):
+            required.update(f'{FOLDER}/py_modules/{name}.py' for name in ('hlx_fsr_release', 'windows_processes'))
         if not required <= files:
             raise ValueError('Incomplete plugin ZIP')
         for name in ('plugin.json', 'package.json'):
@@ -239,7 +241,9 @@ class PluginUpdates:
                 # The exact private staging filename belongs to this updater.
                 # A failed cached artifact must not permanently block retries.
                 cached.unlink()
-            temporary = destination.with_suffix('.download-' + uuid.uuid4().hex)
+            # One UUID isolates this private file; repeating the release digest and
+            # destination UUID can exceed the host filename/path limit.
+            temporary = self.stage / ('.download-' + uuid.uuid4().hex)
             try:
                 request = urllib.request.Request(release['url'], headers={'User-Agent': f'HelixSR-Decky/{self.current}'})
                 digest, count = hashlib.sha256(), 0

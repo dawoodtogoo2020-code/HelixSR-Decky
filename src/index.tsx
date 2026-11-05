@@ -69,7 +69,9 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
 type Release = { version?: string; error?: string; checked_at?: number; page?: string;
   supported?: boolean; support_reason?: string };
 type ReleaseChoice = { id: string; label: string; version: string | null; page: string };
-type ModelCatalog = { variants: { id: string; label: string; source: string }[]; default: string; note: string };
+type Model = { id: string; label: string; source: string; release_choices?: string[]; routes?: string[];
+  source_terms?: string; source_license_url?: string };
+type ModelCatalog = { variants: Model[]; default: string; note: string };
 type Job = { id: string; kind: string; game: string; gid?: string; state: string; message: string; log: string };
 type LauncherImport = { launcher: string; found: number; added: number; candidates: number;
   unavailable: number; game_ids: string[]; warnings: string[] };
@@ -399,7 +401,11 @@ function Content() {
     return () => { active = false; };
   }, [selected, data?.games, libraryLoading, submission.pending]);
   useEffect(() => {
-    setVariant(game?.installed_variant || data?.model_catalog?.default);
+    const models = data?.model_catalog;
+    if (!game || !models) return;
+    const installed = models.variants.find(v => v.id === game.installed_variant);
+    if (installed) chooseModel(installed, false);
+    else chooseRelease(selectedReleaseChoice);
   }, [game?.id, game?.installed_variant, data?.model_catalog?.default]);
   useEffect(() => {
     const changed = (next: Job[], finished: boolean) => { setJobs(next); if (finished) void refresh(true); };
@@ -454,6 +460,26 @@ function Content() {
     toaster.toast({ title: report.warnings.length ? "Game import finished with warnings" : "Game import complete", body: `${label}: ${message}`, duration: 6000 });
   }
 
+  function rememberRelease(choice: string) {
+    selectedReleaseChoice = choice;
+    setReleaseChoice(choice);
+  }
+  function chooseModel(model: Model, remember = true) {
+    setVariant(model.id);
+    if (model.release_choices?.length && !model.release_choices.includes(releaseChoice)) {
+      const choice = model.release_choices[0];
+      if (remember) rememberRelease(choice);
+      else setReleaseChoice(choice);
+    }
+  }
+  function chooseRelease(choice: string) {
+    rememberRelease(choice);
+    const models = data?.model_catalog?.variants || [];
+    const pinned = choice === "latest" ? data?.release_choices?.find(c => c.version === data?.release.version)?.id : choice;
+    const fits = (v: Model) => !pinned || pinned === "latest" || !v.release_choices || v.release_choices.includes(pinned);
+    const model = models.find(v => v.id === variant && fits(v)) || models.find(fits);
+    setVariant(model?.id);
+  }
   async function installOrUpdate() {
     if (!game || installSession.snapshot.pending || watchedJobs.some(j => j.state === "running")) return;
     setInstallError("");
@@ -479,13 +505,16 @@ function Content() {
     const p = await review(() => previewLatest(game.id, dx12, variant, executable,
       releaseChoice === "latest" ? undefined : releaseChoice));
     if (!p) return;
+    const model = data?.model_catalog?.variants.find(v => v.id === (p.variant_id || variant));
     openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`${game.managed || game.legacy ? "Update" : "Install"} HelixSR ${p.release_version || ""}`}
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
         <p>{p.name}: {p.warning}</p>
         <p>Selected model: {p.model}. HelixSR release: {p.release_version}.</p>
+        <p>Input route: {p.route}. Select in game: {p.select_upscaler}.</p>
         {p.license_url && <p><a href={p.license_url} onClick={event => { event.preventDefault(); SteamClient.System.OpenInSystemBrowser(p.license_url!); }}>Read the license for HelixSR {p.release_version}</a></p>}
         {p.selected_executable && <p>Game executable: {p.selected_executable}</p>}
-        <p>Required downloads and local preparation are automatic. Uses HelixSR freeware and NVIDIA DLSS under their linked licenses. Locally generated network files must stay on this device.</p>
+        <p>{model?.source_terms || "Review the source license for this model. Locally generated network files must stay on this device."}</p>
+        {model?.source_license_url && <p><a href={model.source_license_url} onClick={event => { event.preventDefault(); SteamClient.System.OpenInSystemBrowser(model.source_license_url!); }}>Read the source license for {model.source}</a></p>}
         <p>Files: {p.files.join(", ")}</p>
       </div>}
       strOKButtonText={(p.license_accepted ?? data?.license_accepted) ? "Install / update HelixSR" : "Accept terms and install"}
@@ -606,6 +635,8 @@ function Content() {
   const repairReady = !!game?.repair_eligible && !!game?.installation_status?.can_repair;
   const installReasonRepeatedInIssue = !!installState?.reason && !!game?.installation_status?.issues.some(issue => installState.reason.includes(issue.reason));
   const latestUnsupported = releaseChoice === "latest" && data?.release?.supported === false;
+  const selectedModel = data?.model_catalog?.variants.find(v => v.id === variant);
+  const routeUnsupported = !!(game?.route && selectedModel?.routes && !selectedModel.routes.includes(game.route));
   const releaseOptions = data?.release_choices?.length
     ? data.release_choices.map(choice => ({ label: releaseChoiceLabel(choice), data: choice.id }))
     : [
@@ -643,7 +674,7 @@ function Content() {
         {selectedStatus?.label}{selectedSummary && selectedSummary !== selectedStatus?.label && !summaryRepeatedInIssue ? ` · ${selectedSummary}` : ""}
       </div></PanelSectionRow>}
       {game && <>
-        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || (!repairReady && (!installState?.allowed || latestUnsupported))}
+        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || (!repairReady && (!installState?.allowed || latestUnsupported || routeUnsupported))}
           onClick={() => void interact(repairReady ? () => action("repair") : installOrUpdate)}>{submission.pending ? "Starting installation…" : repairReady ? "Repair HelixSR files" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
       </>}
       {installError && <PanelSectionRow><div role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>{installError}</div></PanelSectionRow>}
@@ -653,8 +684,13 @@ function Content() {
       <PanelSectionRow><ButtonItem layout="below" onClick={() => void refresh(true)} disabled={busy || modalOpen}>Refresh library and status</ButtonItem></PanelSectionRow>
       <PanelSectionRow><DropdownItem layout="below" label="Release to install" selectedOption={releaseChoice} disabled={disabled}
         rgOptions={releaseOptions}
-        onChange={option => { selectedReleaseChoice = String(option.data); setReleaseChoice(String(option.data)); }} /></PanelSectionRow>
+        onChange={option => chooseRelease(String(option.data))} /></PanelSectionRow>
       <PanelSectionRow><div className="helix-muted">{releaseChoiceExplanation(releaseChoice)}</div></PanelSectionRow>
+      {data?.model_catalog && <PanelSectionRow><DropdownItem layout="below" label="HelixSR model"
+        rgOptions={data.model_catalog.variants.map(v => ({ label: `${v.label} · ${v.source}`, data: v.id }))}
+        selectedOption={variant || data.model_catalog.default} disabled={disabled}
+        onChange={option => { const model = data.model_catalog?.variants.find(v => v.id === option.data); if (model) chooseModel(model); }} /></PanelSectionRow>}
+      {routeUnsupported && <PanelSectionRow><div className="helix-muted">{selectedModel?.label} supports the following routes: {selectedModel?.routes?.join(", ")}. Current route: {game?.route}.</div></PanelSectionRow>}
       <PanelSectionRow><div className="helix-muted">{libraryView.summary}</div></PanelSectionRow>
       {submission.pending && <PanelSectionRow><div className="helix-card" style={infoStyle} role="status">
         <strong>{submission.name}: Starting installation…</strong>{"\n"}{submission.message}
@@ -710,8 +746,7 @@ function Content() {
           if (updated && selectedRef.current === id) setGame(updated);
         })}>{game.route === 'direct' ? 'Use Scaler for frame generation and settings' : 'Use automatic installation route'}</ButtonItem></PanelSectionRow>}
       {game.managed && game.route === 'direct' && <PanelSectionRow><div className="helix-muted">
-        Native FSR replacement provides upscaling. For Scaler settings and DLSS frame generation, remove HelixSR to restore originals,
-        choose the Scaler route, then install again. The game must support DLSS frame generation.</div></PanelSectionRow>}
+        Select AMD FSR in the game for the native input route. To use Scaler settings, remove HelixSR to restore the original files, choose the Scaler route, then install again.</div></PanelSectionRow>}
       {game.helix_settings && <HelixSettings settings={game.helix_settings}
         disabled={disabled || game.installation_status?.can_modify === false}
         save={changes => void interact(() => saveHelixSettings(changes))}
@@ -773,12 +808,7 @@ function Content() {
         Installed model: {game.installed_model || "not installed"}{"\n"}
         {game.reasons.join("\n")}
       </div></PanelSectionRow>}
-        {!!data?.model_catalog?.variants.length && <>
-          <PanelSectionRow><DropdownItem label="HelixSR model" rgOptions={data.model_catalog.variants.map(v => ({ label: `${v.label} · ${v.source}`, data: v.id }))}
-          selectedOption={variant || data.model_catalog.default} disabled={disabled}
-          onChange={option => setVariant(String(option.data))} /></PanelSectionRow>
-           {diagnostics && <PanelSectionRow><div className="helix-muted">{data.model_catalog.note}</div></PanelSectionRow>}
-        </>}
+      {diagnostics && data?.model_catalog && <PanelSectionRow><div className="helix-muted">{data.model_catalog.note}</div></PanelSectionRow>}
       {guidance && !guidanceNeedsAttention && <>
         <PanelSectionRow><div className="helix-card" style={infoStyle}>
           <strong>Next step: {guidance.headline}</strong>{"\n"}
@@ -914,9 +944,8 @@ function Content() {
       <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/dawoodtogoo2020-code/HelixSR-Decky/blob/main/INSTALL_GUIDE.md")}>Open full guide</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml")}>Report a problem</ButtonItem></PanelSectionRow>
       <PanelSectionRow><div className="helix-muted">Accept preparation terms in the selected game's installation review. Consent applies to that release, archive and model. Generated network files stay on this device.</div></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser(releaseChoice === "compatible-1.8.1"
-        ? "https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE" : "https://github.com/lonewolf0622/HelixSR/blob/main/LICENSE")}>Read HelixSR license</ButtonItem></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser("https://github.com/NVIDIA/DLSS/blob/v310.7.0/LICENSE.txt")}>Read NVIDIA DLSS license</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser(`https://github.com/lonewolf0622/HelixSR/blob/${releaseChoice === "latest" ? "main" : "v" + releaseChoice.split("-")[1]}/LICENSE`)}>Read HelixSR license</ButtonItem></PanelSectionRow>
+      {selectedModel?.source_license_url && <PanelSectionRow><ButtonItem layout="below" onClick={() => SteamClient.System.OpenInSystemBrowser(selectedModel.source_license_url!)}>Read {selectedModel.source} license</ButtonItem></PanelSectionRow>}
       </>}
     </PanelSection>
   </div>;

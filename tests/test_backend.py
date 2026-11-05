@@ -430,7 +430,7 @@ class AssessmentTests(Fixtures):
 
     def test_pe_and_direct_route(self):
         self.assertEqual(manager.pe_info(self.native),
-                         dict(arch='x64', dx12=False, ffx=True, helix=False, helix_version=None))
+                         dict(arch='x64', dx12=False, ffx=True, helix=False, hlx_fsr=False, helix_version=None))
         data = self.m.assess(self.game)
         self.assertEqual((data['route'], data['compatibility']), ('direct', 'candidate'))
         self.assertFalse(data['managed'])

@@ -32,17 +32,24 @@ from installation_status import installation_status
 import menu_labels
 import modern_release
 import helix20_release
+import hlx_fsr_release
 
 def release_adapter(record):
+    if hlx_fsr_release.modern(record):
+        return hlx_fsr_release
     return helix20_release if helix20_release.modern(record) else modern_release
 
 def is_modern(record):
-    return helix20_release.modern(record) or modern_release.modern(record)
+    return hlx_fsr_release.modern(record) or helix20_release.modern(record) or modern_release.modern(record)
 
 def output_dll(record):
+    if hlx_fsr_release.modern(record):
+        return hlx_fsr_release.OUTPUT_DLL
     return helix20_release.OUTPUT_DLL if helix20_release.modern(record) else 'amd_fidelityfx_dx12.dll'
 
 def manifest_path(record):
+    if hlx_fsr_release.modern(record):
+        return hlx_fsr_release.MANIFEST_PATH
     return helix20_release.MANIFEST_PATH if helix20_release.modern(record) else 'helixsr_setup.json'
 import helix_settings
 from modern_build import build_script as modern_build_script
@@ -137,8 +144,22 @@ def license_key(release, variant_id=None):
     if not isinstance(release, dict) or not release.get('version') or not release.get('sha256'):
         return None
     selected = select_variant(variant_id)
-    return {'terms': LICENSE_REV, 'version': release['version'], 'release_sha256': release['sha256'],
+    terms = 'hlx-fsr-sdk-local-3.2.0' if selected['id'] == hlx_fsr_release.VARIANT_ID else LICENSE_REV
+    return {'terms': terms, 'version': release['version'], 'release_sha256': release['sha256'],
             'variant_id': selected['id'], 'adapter': selected['adapter']}
+
+
+def require_model_release(selected, release):
+    if (selected['id'] == hlx_fsr_release.VARIANT_ID) != hlx_fsr_release.modern(release):
+        raise ValueError('HLX FSR 4 (FSR 4.1.2) requires the reviewed 3.2.0 package; use an earlier reviewed release for Model E.')
+
+
+def direct_backup(target, record):
+    if hlx_fsr_release.modern(record):
+        if target.name.lower() != 'amd_fidelityfx_upscaler_dx12.dll':
+            raise ValueError('HLX FSR 4 direct mode needs the split FSR 3.1 DX12 upscaler DLL; use Scaler for other inputs.')
+        return target.with_name('amd_fidelityfx_upscaler_dx12.amd.dll')
+    return target.with_name(target.stem + '.original.dll')
 
 
 def sha(path):
@@ -343,7 +364,7 @@ def _pe_info(path, size, modified):
     marker = re.search(rb'HelixSR (\d+\.\d+\.\d+)', data)
     return dict(arch=arch, dx12='d3d12.dll' in imports,
                 ffx=all(x in exports for x in ['ffxCreateContext', 'ffxDestroyContext', 'ffxDispatch', 'ffxQuery']),
-                helix=bool(marker), helix_version=marker.group(1).decode() if marker else None)
+                helix=bool(marker), hlx_fsr=b'HLX FSR 4 (' in data, helix_version=marker.group(1).decode() if marker else None)
 
 
 def pe_symbols(path, header, offset, size):
@@ -571,7 +592,7 @@ class Manager:
         container = rec.get('saved_configs', {})
         current, baseline = rec.get('current', {}), rec.get('baseline', {})
         allowed = {str(Path(rel).parent / name) for name in ('OptiScaler.ini', 'fakenvapi.ini')}
-        if helix20_release.modern(rec):
+        if helix20_release.modern(rec) or hlx_fsr_release.modern(rec):
             base = Path(rel).parent
             if base.name == 'HelixSR-fsrfg':
                 base = base.parent
@@ -613,6 +634,11 @@ class Manager:
                 record.get('release_sha256') != release_adapter(record).RELEASE_SHA256
                 or not valid_variant(record.get('variant'))
                 or record['variant']['recipe_sha256'] != release_adapter(record).RECIPE_SHA256):
+            return None
+        if (record.get('variant') or {}).get('id') == hlx_fsr_release.VARIANT_ID and not hlx_fsr_release.modern(record):
+            return None
+        if hlx_fsr_release.modern(record) and record.get('files') != {
+                n: digest for n, (_, digest) in hlx_fsr_release.PINS.items()}:
             return None
         if 'variant' in record and (not isinstance(record.get('files'), dict)
                                     or manifest_path(record) not in record['files']):
@@ -671,6 +697,16 @@ class Manager:
         if route not in (None, 'direct', 'optiscaler'):
             raise ValueError('Unknown package route')
         path, record = package[1], package[2]
+        if hlx_fsr_release.modern(record):
+            # Do not trust a cache record even if it points to a file with its
+            # claimed digest: all SR, Scaler and notice bytes have compiled-in pins.
+            if record.get('files') != {n: d for n, (_, d) in hlx_fsr_release.PINS.items()}:
+                return False
+            try:
+                hlx_fsr_release.verify_outputs(path)
+                return True
+            except (OSError, ValueError):
+                return False
         required = set(release_adapter(record).payload_files() if is_modern(record) else
                        PACKAGE_FILES if route in (None, 'optiscaler') else NETWORK + (DLL,))
         if record.get('variant'):
@@ -781,7 +817,7 @@ class Manager:
             if installed['route'] == 'direct':
                 for target in map(Path, installed['targets']):
                     pairs.append((str(target.relative_to(root)), output_dll(package_record)))
-                    if not helix20_release.modern(package_record):
+                    if not (helix20_release.modern(package_record) or hlx_fsr_release.modern(package_record)):
                         pairs.extend((str((target.parent / name).relative_to(root)), name) for name in NETWORK)
             elif installed['route'] == 'optiscaler' and is_modern(package_record):
                 game_target = Path(installed['target'])
@@ -1076,8 +1112,9 @@ class Manager:
         # A library row needs compatibility and recorded installation state,
         # not a cross-library search and rehash of every prepared model. Details
         # and every mutation retain the full, fresh package verification.
-        package = self.package(game, route) if detailed else None
-        repair_package = (self.package(game, route, selection=rec.get('package_selection'),
+        installed_id = rec['variant']['id'] if valid_variant(rec.get('variant')) else None
+        package = self.package(game, route, variant_id=installed_id) if detailed else None
+        repair_package = (self.package(game, route, variant_id=installed_id, selection=rec.get('package_selection'),
                                        installed=rec if not rec.get('package_selection') else None)
                           if detailed and rec and rec.get('enabled') and repair_missing
                           and not repair_conflict and not non_file_blocked else None)
@@ -1124,15 +1161,16 @@ class Manager:
 
     def game_settings(self, game, rec=None):
         rec = self.record(game) if rec is None else rec
-        if not (rec.get('enabled') and rec.get('version') == '2.0.0' and rec.get('route') == 'optiscaler'):
-            return dict(available=False, reason='Install HelixSR 2.0 with the Scaler route to edit these settings.')
+        if not (rec.get('enabled') and (helix20_release.modern(rec) or hlx_fsr_release.modern(rec)) and rec.get('route') == 'optiscaler'):
+            return dict(available=False, reason='Install and enable HelixSR 2.0 (Model E) or 3.2 (HLX FSR 4) with Scaler to edit provider settings.')
         try:
             rel = str((Path(rec['target']) / 'OptiScaler.ini').relative_to(Path(game['folder'])))
             if rel not in self.mutable_config_paths(game, rec):
                 raise ValueError('Settings file is not owned by this installation')
             source = self.read_owned_config(game, rel)
+            settings_adapter = hlx_fsr_release if hlx_fsr_release.modern(rec) else helix_settings
             return dict(available=True, revision=source['sha256'],
-                        **helix_settings.read_settings(source['content']))
+                        **settings_adapter.read_settings(source['content']))
         except (ValueError, OSError) as exc:
             return dict(available=False, reason=str(exc))
 
@@ -1155,7 +1193,8 @@ class Manager:
                 source = self.read_owned_config(game, rel)
                 if source['sha256'] != revision:
                     raise ValueError('Settings changed; refresh before saving')
-                updated = helix_settings.update_settings(source['content'], changes)
+                settings_adapter = hlx_fsr_release if hlx_fsr_release.modern(rec) else helix_settings
+                updated = settings_adapter.update_settings(source['content'], changes)
                 self.mutate(game, data, 'settings', None, settings=(rel, updated))
                 return self.assess_safe(game)
 
@@ -1372,6 +1411,7 @@ class Manager:
             selected = select_variant(variant_id)
             choice = selection(release_choice)
             release = self.release_for_choice(choice)
+            require_model_release(selected, release)
             if release.get('error') or not release.get('version'):
                 raise ValueError(release.get('error') or 'Check upstream updates first')
             game = self.get_game(gid)
@@ -1388,6 +1428,13 @@ class Manager:
             if data['compatibility'] != 'candidate':
                 raise ValueError('; '.join(data['reasons']))
             self.validate_install_executable(data)
+            if (hlx_fsr_release.modern(release) and data['route'] == 'optiscaler' and not data.get('managed')
+                    and not data.get('inputs') and not any(pe_info(Path(p)).get('ffx') for p in data.get('targets', []))):
+                raise ValueError('HLX Scaler requires a detected DLSS, XeSS or FSR input. A DX12 executable alone does not establish an upscaling route.')
+            if data['route'] not in selected['routes']:
+                raise ValueError('The selected model does not support this installation route.')
+            if data['legacy'] and hlx_fsr_release.modern(release):
+                raise ValueError('Import or remove the existing native installation with its owning manager before switching providers.')
             if data['dx12_confirmation_needed'] and not dx12_confirmed:
                 raise ValueError('Confirm the game uses DirectX 12')
             if data['legacy']:
@@ -1399,19 +1446,21 @@ class Manager:
                                        executable=data['selected_executable'] if not data['managed'] and data['route'] == 'optiscaler' else None,
                                        selected_executable=data['selected_executable'],
                                        dx12=dx12_confirmed,
-                                       fingerprint=self.fingerprint(game, data, include_package=False))
+                                       fingerprint=self.fingerprint(game, data, include_package=False, release=release))
             return dict(token=token, name=game['name'], action='latest', route=data['route'],
                         selected_executable=data['selected_executable'],
                         model=selected['label'], variant_id=selected['id'], release_version=release['version'],
                         release=dict(release), release_choice=choice,
                         license_url=f'https://github.com/{REPO}/blob/v{release["version"]}/LICENSE',
+                        source_terms=selected.get('source_terms'), source_license_url=selected.get('source_license_url'),
                         license_accepted=self.cfg.get('license') == license_key(release, selected['id']),
                         files=self.planned_paths(game, data, 'latest', release=release),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
                         warning=('You explicitly selected the reviewed HelixSR 1.8.1 compatibility release. '
                                  'This does not install the latest upstream 1.9 Scaler engine. '
                                  if choice == COMPATIBLE_CHOICE else '') +
-                                'Download required files, prepare the local network and install or update HelixSR for this game. Existing native HelixSR is imported first. Close the game. Frame generation is preserved.')
+                                ('Fetch the pinned pre-release and verify the SDK-built HLX provider. The native fallback may run on unsupported hardware. No HelixSR FG is included. Close the game.'
+                                 if hlx_fsr_release.modern(release) else 'Download required files, prepare the local network and install or update HelixSR for this game. Existing native HelixSR is imported first. Close the game. Frame generation is preserved.'))
 
     def execute_latest(self, token):
         with self.lock:
@@ -1454,7 +1503,7 @@ class Manager:
                             raise ValueError('Cancelled before installation')
                         with self.lock:
                             data = self.assess(game, executable=preview.get('executable'))
-                            if data['compatibility'] != 'candidate' or self.fingerprint(game, data, include_package=False) != preview['fingerprint']:
+                            if data['compatibility'] != 'candidate' or self.fingerprint(game, data, include_package=False, release=release) != preview['fingerprint']:
                                 raise ValueError('Game changed during preparation or is running. Close it and review again.')
                             job['message'] = 'Installing HelixSR and verifying game files'
                             if data['legacy']:
@@ -1530,6 +1579,7 @@ class Manager:
         if release.get('error') or not release.get('version'):
             raise ValueError(release.get('error', 'Check upstream updates first'))
         selected = select_variant(job.get('variant_id'))
+        require_model_release(selected, release)
         if self.cfg.get('license') != license_key(release, selected['id']):
             raise ValueError('Upstream release changed; review and accept its terms before preparation')
         if job.get('reviewed_release') and not same_release(release, job['reviewed_release']):
@@ -1565,83 +1615,104 @@ class Manager:
                     out.write(chunk)
             if size != release['size'] or sha(archive) != release['sha256']:
                 raise ValueError('Release SHA256 or size mismatch; upstream may have replaced the archive. Check for updates and retry')
-            safe_extract(archive, work / 'unpacked')
-            archive.unlink()
             package = work / 'unpacked' / ('HelixSR-' + release['version'])
             modern = is_modern(release)
-            layout = (['LICENSE', 'THIRD_PARTY_NOTICES.md', output_dll(release),
-                       'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
-                       'helixsr-scaler/OptiScaler.dll', 'helixsr-scaler/OptiScaler.ini'] if modern else
-                      ['LICENSE', 'LICENSE-APACHE-2.0', 'THIRD_PARTY_NOTICES.md', DLL,
-                         'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
-                         'optiscaler/OptiScaler.dll', 'optiscaler/OptiScaler.ini'])
-            for name in layout:
-                if not (package / name).is_file():
-                    raise ValueError('Unexpected upstream package layout: ' + name)
-            # Apache-licensed setup adaptation: stop before its interactive game installer.
-            # Complete official release is kept; compiled parts are never patched here.
-            setup = (package / 'helixsr-setup.sh').read_text()
-            build = package / 'decky-build-only.sh'
-            converter = (package / 'setup/helixsr_setup.py').read_text()
-            model = verify_recipe(package, selected['id'])
-            env = dict(os.environ, XDG_DATA_HOME=str(companion / 'dependencies'),
-                       TMPDIR=str(work / 'tmp'), PIP_CACHE_DIR=str(companion / 'dependencies/pip'),
-                       HELIXSR_FORCE_PORTABLE='1', PYTHONUNBUFFERED='1', PYTHONDONTWRITEBYTECODE='1')
-            env = host_environment(env)
-            env.pop('HELIXSR_BUILD_WINE', None)
-            env.pop('HELIXSR_BUILD_DATA', None)
-            job['message'] = 'Checking installed Proton for local preparation'
-            build_wine, runtime_notes = select_build_wine(self.home, env)
-            if self.cancel.is_set():
-                raise ValueError('Cancelled')
-            if build_wine:
-                env['HELIXSR_BUILD_WINE'] = str(build_wine)
-            if modern and not build_wine:
-                raise ValueError('No working installed Proton or Wine was found for shader compilation')
-            build.write_text(modern_build_script() if modern else
-                             build_only_script(setup, converter, bool(build_wine)), newline='\n')
-            Path(env['TMPDIR']).mkdir()
-            logfile = companion / 'records' / ('build-' + job['id'] + '.log')
-            logfile.parent.mkdir(parents=True, exist_ok=True)
-            job['message'] = 'Building local NVIDIA-derived network; no games are changed'
-            with logfile.open('wb') as output:
-                if runtime_notes:
-                    output.write(('\n'.join(runtime_notes) + '\n').encode('utf-8'))
-                    output.flush()
-                self._spawn_compiler(['bash', str(build), '--yes'], cwd=package, env=env,
-                                                stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
-                                                start_new_session=True)
-                deadline = time.monotonic() + 900
-                while self.process.poll() is None:
-                    job['log'] = text_tail(logfile, 8000)
-                    if self.cancel.is_set() or time.monotonic() > deadline:
-                        import signal
-                        with contextlib.suppress(ProcessLookupError):
-                            os.killpg(self.process.pid, signal.SIGTERM)
-                        try:
-                            self.process.wait(timeout=10)
-                        except subprocess.TimeoutExpired:
-                            with contextlib.suppress(ProcessLookupError):
-                                os.killpg(self.process.pid, signal.SIGKILL)
-                            self.process.wait()
-                        raise ValueError('Cancelled' if self.cancel.is_set() else 'Build timed out')
-                    time.sleep(0.5)
-                job['log'] = text_tail(logfile, 8000)
-                check_build_exit(self.process.returncode, self.cancel.is_set(), job['log'])
-            if self.cancel.is_set():
-                raise ValueError('Cancelled')
-            for name in (() if helix20_release.modern(release) else NETWORK):
-                if not (package / name).is_file() or (package / name).stat().st_size < 1024:
-                    raise ValueError('Generated HelixSR model files are missing or incomplete. '
-                                     'See the build log; this is not an internet connection error.')
-            if modern:
-                release_adapter(release).verify_outputs(package)
+            if hlx_fsr_release.modern(release):
+                # Only consume individually pinned members. Do not run setup, fetch a driver,
+                # or execute the Model E converter to prepare the SDK-built FSR payload.
+                hlx_fsr_release.validate_release(release)
+                members = release_adapter(release).payload_files()
+                with zipfile.ZipFile(archive) as z:
+                    for name in members:
+                        key = package.name + '/' + name
+                        matches = [entry for entry in z.infolist() if entry.filename == key]
+                        if (len(matches) != 1 or stat.S_ISLNK(matches[0].external_attr >> 16)
+                                or matches[0].file_size > 256 << 20):
+                            raise ValueError('Missing, duplicated or unsafe reviewed archive member: ' + name)
+                        if self.cancel.is_set():
+                            raise ValueError('Cancelled')
+                        path = package / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        with z.open(matches[0]) as source, path.open('xb') as dest:
+                            shutil.copyfileobj(source, dest, 1 << 20)
+                model = hlx_fsr_release.verify_recipe(package)
             else:
-                verify_outputs(package)
+                safe_extract(archive, work / 'unpacked')
+                archive.unlink()
+                layout = (['LICENSE', 'THIRD_PARTY_NOTICES.md', output_dll(release),
+                           'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
+                           'helixsr-scaler/OptiScaler.dll', 'helixsr-scaler/OptiScaler.ini'] if modern else
+                          ['LICENSE', 'LICENSE-APACHE-2.0', 'THIRD_PARTY_NOTICES.md', DLL,
+                             'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
+                             'optiscaler/OptiScaler.dll', 'optiscaler/OptiScaler.ini'])
+                for name in layout:
+                    if not (package / name).is_file():
+                        raise ValueError('Unexpected upstream package layout: ' + name)
+                # Apache-licensed setup adaptation: stop before its interactive game installer.
+                # Complete official release is kept; compiled parts are never patched here.
+                setup = (package / 'helixsr-setup.sh').read_text()
+                build = package / 'decky-build-only.sh'
+                converter = (package / 'setup/helixsr_setup.py').read_text()
+                model = verify_recipe(package, selected['id'])
+                env = dict(os.environ, XDG_DATA_HOME=str(companion / 'dependencies'),
+                           TMPDIR=str(work / 'tmp'), PIP_CACHE_DIR=str(companion / 'dependencies/pip'),
+                           HELIXSR_FORCE_PORTABLE='1', PYTHONUNBUFFERED='1', PYTHONDONTWRITEBYTECODE='1')
+                env = host_environment(env)
+                env.pop('HELIXSR_BUILD_WINE', None)
+                env.pop('HELIXSR_BUILD_DATA', None)
+                job['message'] = 'Checking installed Proton for local preparation'
+                build_wine, runtime_notes = select_build_wine(self.home, env)
+                if self.cancel.is_set():
+                    raise ValueError('Cancelled')
+                if build_wine:
+                    env['HELIXSR_BUILD_WINE'] = str(build_wine)
+                if modern and not build_wine:
+                    raise ValueError('No working installed Proton or Wine was found for shader compilation')
+                build.write_text(modern_build_script() if modern else
+                                 build_only_script(setup, converter, bool(build_wine)), newline='\n')
+                Path(env['TMPDIR']).mkdir()
+                logfile = companion / 'records' / ('build-' + job['id'] + '.log')
+                logfile.parent.mkdir(parents=True, exist_ok=True)
+                job['message'] = 'Building local NVIDIA-derived network; no games are changed'
+                with logfile.open('wb') as output:
+                    if runtime_notes:
+                        output.write(('\n'.join(runtime_notes) + '\n').encode('utf-8'))
+                        output.flush()
+                    self._spawn_compiler(['bash', str(build), '--yes'], cwd=package, env=env,
+                                                    stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+                                                    start_new_session=True)
+                    deadline = time.monotonic() + 900
+                    while self.process.poll() is None:
+                        job['log'] = text_tail(logfile, 8000)
+                        if self.cancel.is_set() or time.monotonic() > deadline:
+                            import signal
+                            with contextlib.suppress(ProcessLookupError):
+                                os.killpg(self.process.pid, signal.SIGTERM)
+                            try:
+                                self.process.wait(timeout=10)
+                            except subprocess.TimeoutExpired:
+                                with contextlib.suppress(ProcessLookupError):
+                                    os.killpg(self.process.pid, signal.SIGKILL)
+                                self.process.wait()
+                            raise ValueError('Cancelled' if self.cancel.is_set() else 'Build timed out')
+                        time.sleep(0.5)
+                    job['log'] = text_tail(logfile, 8000)
+                    check_build_exit(self.process.returncode, self.cancel.is_set(), job['log'])
+                if self.cancel.is_set():
+                    raise ValueError('Cancelled')
+                for name in (() if helix20_release.modern(release) else NETWORK):
+                    if not (package / name).is_file() or (package / name).stat().st_size < 1024:
+                        raise ValueError('Generated HelixSR model files are missing or incomplete. '
+                                         'See the build log; this is not an internet connection error.')
+                if modern:
+                    release_adapter(release).verify_outputs(package)
+                else:
+                    verify_outputs(package)
             api = pe_info(package / output_dll(release))
             if api['arch'] != 'x64' or not api['ffx']:
                 raise ValueError('Prepared HelixSR DLL has an unsupported installation interface')
-            build.unlink()
+            if not hlx_fsr_release.modern(release):
+                build.unlink()
             final = companion / 'packages' / (selected['id'] + '-v' + release['version']
                                               + '-' + release['sha256'][:12] + '-' + model['recipe_sha256'][:12])
             final.parent.mkdir(parents=True, exist_ok=True)
@@ -1654,6 +1725,9 @@ class Manager:
                 payloads += ('amd-fsr/' + AMD_FG,)
             record = dict(version=release['version'], path=str(final), release_sha256=release['sha256'],
                           files={n: sha(final / n) for n in payloads}, prepared_at=time.time(), variant=model)
+            if hlx_fsr_release.modern(record) and record['files'] != {
+                    n: d for n, (_, d) in hlx_fsr_release.PINS.items()}:
+                raise ValueError('HLX FSR cache changed before publication; no game files were changed')
             namespace = 'packages' if selected['id'] == DEFAULT_VARIANT else 'variant_packages_v1'
             self.cfg.setdefault(namespace, {})[str(final)] = record
             self.save()
@@ -1780,11 +1854,13 @@ class Manager:
                 or pe_info(Path(data['main_exe']))['arch'] != 'x64'):
             raise ValueError('Reviewed OptiScaler executable is missing or is not x64 Windows PE; disable/remove remain available')
 
-    def fingerprint(self, game, data, include_package=True, package=AUTO_PACKAGE):
+    def fingerprint(self, game, data, include_package=True, package=AUTO_PACKAGE, release=None):
         # Observe game drift separately from an install's conflict checks.
         # Potential new dependencies must be stable before/after preparation.
         rec = self.record(game)
         paths = list(rec['baseline']) if rec else self.planned_paths(game, data, 'observe')
+        if hlx_fsr_release.modern(release):
+            paths = self.planned_paths(game, data, 'latest', package=None, release=release)
         if data['route'] == 'optiscaler':
             fg = str((Path(data['target']) / 'HelixSR' / AMD_FG).relative_to(Path(game['folder'])))
             if fg not in paths:
@@ -1801,9 +1877,9 @@ class Manager:
             p = checked_path(Path(game['folder']), rel)
             files[rel] = sha(p) if p.is_file() else None
         files['manifest'] = sha(game['manifest']) if game.get('manifest') else None
-        if package is AUTO_PACKAGE:
+        if include_package and package is AUTO_PACKAGE:
             package = self.package(game, data['route'])
-        if package and include_package:
+        if include_package and package:
             files['package_path'] = str(package[1])
             files['package_identity'] = package_selection(package[2])
             files['package_files'] = {n: sha(package[1] / n) for n in package[2]['files']}
@@ -1814,13 +1890,25 @@ class Manager:
         if action == 'repair':
             return list(data.get('repair_files', []))
         if package is AUTO_PACKAGE:
-            package = self.package(game, data['route'])
+            package = None if release else self.package(game, data['route'])
         payload = release or (package[2] if package else {})
         modern = is_modern(payload)
-        if helix20_release.modern(payload) and data['route'] == 'direct' and action in ('install', 'update', 'enable', 'latest'):
+        if (helix20_release.modern(payload) or hlx_fsr_release.modern(payload)) and data['route'] == 'direct' and action in ('install', 'update', 'enable', 'latest'):
             paths = list(rec.get('baseline', {}))
+            if not data['targets']:
+                raise ValueError('No native FidelityFX upscaler found')
             for target in map(Path, data['targets']):
-                additions = [target, target.with_name(target.stem + '.original.dll'), target.parent / 'helixsr-install.json']
+                fallback = direct_backup(target, payload)
+                if hlx_fsr_release.modern(payload):
+                    original = (checked_path(self.companion(game), str(Path('originals') / target.relative_to(root)))
+                                if rec else target)
+                    info = original.lstat()
+                    api = pe_info(original)
+                    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or api['arch'] != 'x64' or not api['ffx'] or api['helix']
+                            or api.get('hlx_fsr') or (rec and sha(original) != rec['baseline'].get(str(target.relative_to(root))))
+                            or sha(original) == hlx_fsr_release.OUTPUT_SHA256):
+                        raise ValueError('Direct HLX FSR requires the original x64 native FidelityFX upscaler, not an installed wrapper.')
+                additions = [target, fallback, target.parent / 'helixsr-install.json']
                 for path in additions:
                     rel = str(path.relative_to(root))
                     if rel not in paths:
@@ -1834,6 +1922,22 @@ class Manager:
                              'Remove HelixSR to restore original files first, then install the compatibility release.')
         if modern and data['route'] == 'optiscaler' and action in ('install', 'update', 'enable', 'latest'):
             target = Path(data['target'])
+            if hlx_fsr_release.modern(payload):
+                # Scaler adopts this older Model E provider ahead of its bundled
+                # FFX libraries, even when the INI selects index 0. An owned DLL
+                # introduced by 2.0 can be retired; an unmanaged original cannot.
+                rel = str((target / 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll').relative_to(root))
+                old = checked_path(root, rel)
+                if old.exists() and not (rel in rec.get('baseline', {})
+                                         and rec['baseline'][rel] is None):
+                    raise ValueError('An unmanaged 2.0 Model E provider would override HLX FSR: ' + rel)
+                if rec and rec.get('version') != hlx_fsr_release.MODERN_VERSION:
+                    config_rel = str((target / 'OptiScaler.ini').relative_to(root))
+                    current = (self.read_owned_config(game, config_rel)['content'] if rec.get('enabled')
+                               else self.retained_config(rec, config_rel))
+                    if current:
+                        # Validate migration before snapshotting or touching the game.
+                        hlx_fsr_release.validate_scaler_source(current)
             names = [dest for _, dest in release_adapter(payload).scaler_pairs()] + ['OptiScaler.ini', 'HelixSR/helixsr-install.json']
             paths = list(rec.get('baseline', {}))
             for name in names:
@@ -2046,7 +2150,7 @@ class Manager:
                 # Their paths were conflict-checked, snapshotted and journaled above.
                 for rel in paths:
                     previous['baseline'].setdefault(rel, before[rel])
-                if helix20_release.modern(package[2]):
+                if helix20_release.modern(package[2]) or hlx_fsr_release.modern(package[2]):
                     self.install_payload(game, data, previous, package, previous_version=(journal.get('previous') or {}).get('version'))
                 else:
                     self.install_payload(game, data, previous, package)
@@ -2280,9 +2384,9 @@ class Manager:
             for target in map(Path, rec['targets']):
                 rel = str(target.relative_to(root))
                 sources[rel] = ('file', package_path / output_dll(package_record))
-                original_rel = str(target.with_name(target.stem + '.original.dll').relative_to(root))
+                original_rel = str(direct_backup(target, package_record).relative_to(root))
                 sources[original_rel] = ('file', self.companion(game) / 'originals' / rel)
-                if not helix20_release.modern(package_record):
+                if not (helix20_release.modern(package_record) or hlx_fsr_release.modern(package_record)):
                     for name in NETWORK:
                         sources[str((target.parent / name).relative_to(root))] = ('file', package_path / name)
                 install_rel = str((target.parent / 'helixsr-install.json').relative_to(root))
@@ -2369,10 +2473,10 @@ class Manager:
         root = Path(game['folder'])
         package_path, package_record = package[1], package[2]
         if data['route'] == 'direct':
-            if helix20_release.modern(package_record):
+            if helix20_release.modern(package_record) or hlx_fsr_release.modern(package_record):
                 # The native FSR route provides SR only; DLSS FG needs Scaler and a DLSS FG game.
                 keep = {str(p.relative_to(root)) for target in map(Path, rec['targets'])
-                        for p in (target, target.with_name(target.stem + '.original.dll'), target.parent / 'helixsr-install.json')}
+                        for p in (target, direct_backup(target, package_record), target.parent / 'helixsr-install.json')}
                 obsolete = {rel: digest for rel, digest in rec['baseline'].items() if rel not in keep}
                 if obsolete:
                     self.restore_baseline(game, {'baseline': obsolete})
@@ -2381,10 +2485,10 @@ class Manager:
                 original = self.companion(game) / 'originals' / rel
                 if sha(original) != rec['baseline'][rel]:
                     raise ValueError('Original FidelityFX DLL changed')
-                self.copy_atomic(original, target.with_name(target.stem + '.original.dll'))
+                self.copy_atomic(original, direct_backup(target, package_record), rec['baseline'][rel])
                 source_dll = output_dll(package_record)
                 self.copy_atomic(package_path / source_dll, target, package_record['files'][source_dll])
-                for name in (() if helix20_release.modern(package_record) else NETWORK):
+                for name in (() if helix20_release.modern(package_record) or hlx_fsr_release.modern(package_record) else NETWORK):
                     self.copy_atomic(package_path / name, target.parent / name, package_record['files'][name])
                 self.write_managed_json(target.parent / 'helixsr-install.json',
                             {'route': 'direct', 'owner': 'HelixSR Decky', 'helixsr': rec.get('version'),
@@ -2399,7 +2503,7 @@ class Manager:
             source = self.retained_config(rec, str((target / 'OptiScaler.ini').relative_to(root)))
             adapter = release_adapter(package_record)
             configured = (adapter.configuration(template if source is None else source, template, previous_version=previous_version)
-                          if helix20_release.modern(package_record) else
+                          if helix20_release.modern(package_record) or hlx_fsr_release.modern(package_record) else
                           adapter.configuration(template if source is None else source, template))
             pairs = release_adapter(package_record).scaler_pairs()
             modern_paths = {str((target / dest).relative_to(root)) for _, dest in pairs}

@@ -12,6 +12,8 @@ HelixSR 2.0 restores DLSS frame generation through Scaler. Select Light or Full,
 
 ## Installation error mentioning LICENSE-APACHE-2.0
 
+**Prerelease:** Decky **0.1.37** adds **HLX FSR 4 (AMD FSR 4.1.2 Lite)** through the reviewed HelixSR 3.2.0 prerelease. Install [HelixSR-Decky-0.1.37.zip](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.37/HelixSR-Decky-0.1.37.zip) from the [v0.1.37 prerelease](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.37). Select the HLX model explicitly; Model E / HelixSR 2.0.0 remains the default. SteamOS gameplay, image quality, performance and frame generation with HLX remain unverified. See [installation, testing and rollback](docs/hlx-fsr.md). Desktop 0.1.21 changes are included in source; no 0.1.21 AppImage is published.
+
 Decky **0.1.36** reuses the library list when opening dropdowns, selects **HelixSR 2.0.0** by default and offers a verified repair for missing managed files. **Refresh library and status** still rescans the library. Older releases are labeled explicitly, and package review is explained separately from game installation warnings. Frame-generation controls do not establish gameplay compatibility; see [settings and validation limits](UPGRADE_2.0.md).
 
 The compatibility download is tied to the reviewed official archive SHA-256 and the [1.8.1 license](https://github.com/lonewolf0622/HelixSR/blob/v1.8.1/LICENSE). A replaced archive is rejected. Newer or unverified existing installations are blocked from being downgraded; remove them using their owning manager first. Keep locally generated networks and game installation records.
@@ -94,7 +96,7 @@ The scan covers installed local games, not every title owned by your Steam accou
 
 ## 5. Select the renderer and upscaler
 
-The **HelixSR model** dropdown in the selected game's details shows supported networks. Currently it offers **HelixSR Model E**, sourced from NVIDIA DLSS 310.7.0. This is separate from selecting AMD FSR or DLSS in the game's settings. The confirmation shows the model and HelixSR release being installed. Future DLSS 4 or FSR-derived models require upstream files and reviewed app support before appearing here. See [model support](MODEL_VARIANTS.md).
+The **HelixSR model** dropdown offers Model E and HLX FSR 4 (FSR 4.1.2 Lite). It binds the model and release in the install review. See [HLX FSR on SteamOS](docs/hlx-fsr.md) and [model support](MODEL_VARIANTS.md).
 
 **Enable** restores the recorded prepared package rather than upgrading to a newer cache. If an older disabled installation has no provable package identity, choose **Update HelixSR** and review the supported model instead. **Disable** and **Remove** still restore owned originals when model metadata needs review. Update both the Decky plugin and desktop app before using new model support on the same game.
 

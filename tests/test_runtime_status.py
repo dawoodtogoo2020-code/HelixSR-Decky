@@ -66,6 +66,21 @@ class RuntimeEvidenceTests(unittest.TestCase):
         self.append(SUCCESS)
         self.assertEqual(self.evidence.sample()['state'], 'output')
 
+    def test_hlx_context_never_claims_dispatch_and_distinguishes_native_fallback(self):
+        module = self.root / 'amd_fidelityfx_upscaler_dx12.dll'
+        self.evidence = runtime_status.RuntimeEvidence(dict(self.game, installed_variant='hlx-fsr4-1-2', targets=[str(module)]))
+        self.log = self.root / 'HLX_FSR.log'
+        self.log.touch()
+        self.assertEqual(self.evidence.sample()['state'], 'mapped')
+        self.append('[I] HLX-FSR-4 BCLITE own runtime active: fp16 (tier 2), output 1920x1080, max render 1280x720, flags 0x0\n')
+        self.assertEqual(self.evidence.sample()['state'], 'loaded')
+        self.append(SUCCESS)
+        self.assertEqual(self.evidence.sample()['state'], 'loaded')
+        self.append("[I] HLX-FSR-4 create: HLX FSR 4 does not cover this (see the line above): AMD's original instead\n")
+        self.assertEqual(self.evidence.sample()['state'], 'failure')
+        self.append(SUCCESS)
+        self.assertEqual(self.evidence.sample()['state'], 'failure')
+
     def test_partial_line_and_overflow_never_promote_old_fragment(self):
         self.log.touch()
         self.evidence.sample()

@@ -9,6 +9,7 @@ import json
 import struct
 import modern_release
 import helix20_release
+import hlx_fsr_release
 
 DEFAULT_VARIANT = 'helixsr-model-e'
 ADAPTER = 'separate-network-v1'
@@ -61,15 +62,28 @@ REVIEWED_RECIPES = {
     '93930e9c131c82fe7810181cc8e6bc81cf18e9203737a9d28d769be5983acaef': DEFAULT_VARIANT,
     modern_release.RECIPE_SHA256: DEFAULT_VARIANT,
     helix20_release.RECIPE_SHA256: DEFAULT_VARIANT,
+    hlx_fsr_release.RECIPE_SHA256: hlx_fsr_release.VARIANT_ID,
 }
 VARIANTS = {
     DEFAULT_VARIANT: dict(id=DEFAULT_VARIANT, label='HelixSR Model E',
                          source='NVIDIA DLSS 310.7.0', adapter=ADAPTER,
-                         routes=['direct', 'optiscaler']),
+                         routes=['direct', 'optiscaler'],
+                         release_choices=['reviewed-2.0.0', 'reviewed-1.9.3', 'compatible-1.8.1', 'latest'],
+                         source_license_url='https://github.com/NVIDIA/DLSS/blob/v310.7.0/LICENSE.txt',
+                         source_terms="The official setup builds Model E locally using NVIDIA's DLSS. "
+                                      'Generated files must stay on your device.'),
+    hlx_fsr_release.VARIANT_ID: dict(
+        id=hlx_fsr_release.VARIANT_ID, label='HLX FSR 4 (FSR 4.1.2 Lite)',
+        source='AMD FSR SDK 2.4.0 / FSR 4.1.2.4555', adapter=hlx_fsr_release.ADAPTER,
+        routes=['direct', 'optiscaler'], release_choices=['reviewed-3.2.0'],
+        source_license_url=hlx_fsr_release.SOURCE_LICENSE_URL,
+        source_terms='Download the complete official HelixSR 3.2.0 prerelease. Its HLX FSR 4 '
+                     'runtime includes shaders built from the MIT-licensed AMD FSR SDK. '
+                     'The HelixSR Freeware License covers the runtime; Scaler uses GPL-3.0.'),
 }
-FUTURE_NOTE = ('DLSS 4 and FSR-derived models will appear here when upstream releases '
-               'them and their preparation and installation are supported. Input '
-               'routes and frame generation are separate from the model.')
+FUTURE_NOTE = ('HLX FSR 4 runs the FSR 4.1.2 Lite model. Upstream does not provide a separate '
+               'HLX 4.0 model. Scaler can also select AMD’s native provider. Input routes and '
+               'frame generation are separate from the model.')
 
 
 def select_variant(variant_id=None):
@@ -100,6 +114,12 @@ def recipe_digest(package):
 
 def verify_recipe(package, variant_id=None):
     selected = select_variant(variant_id)
+    if selected['id'] == hlx_fsr_release.VARIANT_ID:
+        if not (package / hlx_fsr_release.MANIFEST_PATH).is_file():
+            raise ValueError('HLX FSR 4 needs the reviewed HelixSR 3.2.0 prerelease')
+        return hlx_fsr_release.verify_recipe(package)
+    if (package / 'HLX-FSR4').is_dir():
+        raise ValueError('This release is reviewed for HLX FSR 4; select a Model E release')
     if (package / 'HelixSR-fsrfg').is_dir():
         return helix20_release.verify_recipe(package)
     if (package / 'helixsr-scaler').is_dir():

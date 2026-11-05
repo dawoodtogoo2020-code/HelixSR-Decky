@@ -499,6 +499,61 @@ function enableSettings(h, extra = {}) {
   }});
 }
 
+test("choosing HLX selects its reviewed release and displays its source terms before install", async () => {
+  const models = [
+    { id: "helixsr-model-e", label: "Model E", source: "NVIDIA", release_choices: ["reviewed-2.0.0"] },
+    { id: "hlx-fsr4-1-2", label: "HLX FSR 4", source: "AMD", release_choices: ["reviewed-3.2.0"],
+      routes: ["direct"], source_terms: "AMD model terms", source_license_url: "https://example.com/terms" }
+  ];
+  const h = harness({
+    library: () => ({ ...h.library(), model_catalog: { default: models[0].id, variants: models },
+      release_choices: [{id: "reviewed-2.0.0", version: "2.0.0"}, {id: "reviewed-3.2.0", version: "3.2.0"}] }),
+    preview_latest: (_gid, _confirmed, id, _exe, choice) => {
+      assert.equal(id, models[1].id);
+      assert.equal(choice, "reviewed-3.2.0");
+      return {token: "preview", name: "Game", files: [], variant_id: id, model: "HLX FSR 4", route: "direct",
+        select_upscaler: "AMD FSR", release_version: "3.2.0"};
+    }
+  });
+  await h.ready();
+  const control = label => h.walk(h.render(), n => n.type === "DropdownItem" && n.props.label === label)[0];
+  control("HelixSR model").props.onChange({data: models[1].id});
+  assert.equal(control("Release to install").props.selectedOption, "reviewed-3.2.0");
+  const review = await h.openInstall();
+  assert.match(h.text(review.element.props.strDescription), /AMD model terms/);
+  assert.equal(h.count("install_latest"), 0);
+  control("Release to install").props.onChange({data: "reviewed-2.0.0"});
+  assert.equal(control("HelixSR model").props.selectedOption, models[0].id);
+});
+
+test("viewing an installed HLX game does not opt the next game into the prerelease", async () => {
+  const models = [
+    {id: "helixsr-model-e", label: "Model E", release_choices: ["reviewed-2.0.0"]},
+    {id: "hlx-fsr4-1-2", label: "HLX FSR 4", release_choices: ["reviewed-3.2.0"]}
+  ];
+  const h = harness({library: () => ({...h.library(),
+    model_catalog: {default: models[0].id, variants: models},
+    release_choices: models.map(m => ({id: m.release_choices[0], label: m.label}))})});
+  h.game.installed_variant = models[1].id;
+  await h.ready();
+  const control = label => h.walk(h.render(), n => n.type === "DropdownItem" && n.props.label === label)[0];
+  assert.equal(control("Release to install").props.selectedOption, "reviewed-3.2.0");
+  delete h.game.installed_variant;
+  h.render(); h.render();
+  assert.equal(control("Release to install").props.selectedOption, "reviewed-2.0.0");
+  assert.equal(control("HelixSR model").props.selectedOption, models[0].id);
+});
+
+test("HLX Scaler exposes native AMD as a separate output and only available FG providers", async () => {
+  const h = harness();
+  enableSettings(h, {family: "hlx-fsr", upscaler: "hlx-fsr", provider: "off"});
+  await h.ready();
+  const options = label => Array.from(settingsDropdown(h, label).props.rgOptions, v => v.data);
+  assert.deepEqual(options("Upscaler"), ["hlx-fsr", "fsr"]);
+  assert.deepEqual(options("Frame generation"), ["off", "fsr", "xess"]);
+  assert.doesNotMatch(h.text(renderedHelixSettings(h)), /Advanced tuning/);
+});
+
 test("FG controls stay visible while optional game settings and tuning retain disclosure choices", async () => {
   const h = harness(); enableSettings(h); await h.ready();
   assert.equal(h.walk(h.render(), n => typeof n.type === "function" && n.type.name === "HelixSettings").length, 1,

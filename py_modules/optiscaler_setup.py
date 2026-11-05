@@ -89,6 +89,9 @@ def configuration(path):
         values = {}
         if parser.has_option('FrameGen', 'Enabled'):
             values['FrameGenEnabled'] = parser.get('FrameGen', 'Enabled').strip()
+        for section, key in (('FSR', 'UpscalerIndex'), ('FrameGen', 'FGOutput'), ('Libraries', 'OptiDllPath')):
+            if parser.has_option(section, key):
+                values[key] = parser.get(section, key).strip()
         for section in parser.sections():
             for key in KEYS:
                 if parser.has_option(section, key):
@@ -141,10 +144,13 @@ def setup_report(target, route, options, proxy_files=()):
     modern = False
     modern20 = False
     if directory:
-        marker = directory / 'HelixSR/helixsr-install.json'
+        marker = directory / ('helixsr-install.json' if route == 'direct' else 'HelixSR/helixsr-install.json')
         try:
             if not marker.is_symlink() and marker.stat().st_size <= 4096:
-                installed = json.loads(marker.read_text()).get('helixsr')
+                record = json.loads(marker.read_text())
+                installed = record.get('helixsr')
+                if installed == '3.2.0' and (record.get('variant') or {}).get('id') == 'hlx-fsr4-1-2':
+                    return _hlx_report(directory, route, options, values, error)
                 modern = installed in ('1.9.3', '2.0.0')
                 modern20 = installed == '2.0.0'
         except (OSError, ValueError, AttributeError):
@@ -215,3 +221,46 @@ def setup_report(target, route, options, proxy_files=()):
                 framegen_evidence=('configuration unavailable; state unknown' if fg_configured is None else
                                    'configured; runtime unverified' if fg_configured else
                                    'not selected; runtime unknown' if modern20 else 'not provided by this release'))
+
+
+def _hlx_report(directory, route, options, values, error):
+    """Report the configured SR and FG providers without promising runtime success."""
+    from hlx_fsr_release import scaler_pairs
+    direct = route == 'direct'
+    upscaler = 'amd_fidelityfx_upscaler_dx12.dll'
+    amd = 'amd_fidelityfx_upscaler_dx12.amd.dll'
+    required = (upscaler, amd) if direct else tuple(dest for _, dest in scaler_pairs()) + ('OptiScaler.ini',)
+    missing = [name for name in required if not (directory / name).is_file()]
+    launch = override_status(options)
+    shortcut_key = values.get('ShortcutKey', 'auto')
+    shortcut = ('Insert (default)' if shortcut_key.lower() == 'auto' else
+                'overlay shortcut disabled' if shortcut_key == '-1' else 'configured ShortcutKey=' + shortcut_key)
+    checks = []
+    if direct:
+        checks.append('Select AMD FSR in the DX12 game. Check a fresh HLX_FSR.log for the active HLX runtime or fallback to the original AMD provider.')
+        configured, paths_match = False, not missing
+        fg = None
+        backend = 'Native FSR 3.1 input'
+    else:
+        paths_match = (all(values.get(k, 'auto').lower() == 'auto' for k in ('OptiDllPath', 'FfxDx12Path', 'FfxDx12SRPath'))
+                       and all((directory / 'OptiScaler' / dll).is_file() for dll in (upscaler, amd)))
+        output = values.get('Dx12Upscaler', '').lower()
+        backend = {'0': 'HLX FSR 4 (FSR 4.1.2)', '1': 'AMD FSR (native)'}.get(values.get('UpscalerIndex')) if output == 'ffx' and paths_match else None
+        configured = bool(backend and not missing and not error)
+        backend = backend or 'Custom or unknown Scaler output'
+        checks.append(f'Configured output: {backend}. Select a supported DLSS, FSR or XeSS input in the DX12 game. Check a fresh OptiScaler.log to identify the active provider.')
+        if launch != 'correct':
+            checks.append('DXGI launch override: ' + launch + '. Review the proxy launch option in Steam or your launcher.')
+        if error:
+            checks.append(error)
+        fg = None if error else (values.get('FGInput', '').lower() == 'upscaler'
+                                 and values.get('FGOutput', '').lower() in ('fsrfg', 'xefg')
+                                 and values.get('FrameGenEnabled', 'auto').lower() not in ('false', 'off', '0'))
+        checks.append('Scaler frame generation is a separate setting. Keep in-game FG off when testing Scaler FSR FG or XeSS FG.')
+    if missing:
+        checks.append('Missing setup files: ' + ', '.join(missing))
+    return dict(family='hlx-fsr', configured=configured, backend=backend, provider_paths_match=paths_match, override=launch,
+                overlay_shortcut=shortcut, settings=values, missing=missing, checks=checks, guide=GUIDE,
+                framegen_configured=fg, framegen_evidence=('game controls frame generation' if direct else
+                    'configuration unavailable; state unknown' if fg is None else
+                    'configured; runtime unverified' if fg else 'not selected; runtime unknown'))

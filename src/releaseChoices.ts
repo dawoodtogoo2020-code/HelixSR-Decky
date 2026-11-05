@@ -3,6 +3,7 @@ export type ReleaseChoiceView = { id: string; label: string; version: string | n
 export const DEFAULT_RELEASE_CHOICE = "reviewed-2.0.0";
 
 export function releaseChoiceLabel(choice: ReleaseChoiceView): string {
+  if (choice.id === "reviewed-3.2.0") return choice.label;
   if (choice.id === DEFAULT_RELEASE_CHOICE)
     return `HelixSR ${choice.version || "2.0.0"} (recommended)`;
   if (choice.id === "latest") return "Latest upstream";
@@ -12,6 +13,8 @@ export function releaseChoiceLabel(choice: ReleaseChoiceView): string {
 }
 
 export function releaseChoiceExplanation(id: string): string {
+  if (id === "reviewed-3.2.0")
+    return "This reviewed prerelease includes HLX FSR 4 using AMD’s FSR 4.1.2 Lite model. The game’s input and the frame generation provider are separate choices.";
   if (id === DEFAULT_RELEASE_CHOICE)
     return "Recommended 2.0.0 package. Reviewed means its files and installation steps are supported by this plugin. No maintainer approval is needed; game compatibility still varies.";
   if (id === "latest")

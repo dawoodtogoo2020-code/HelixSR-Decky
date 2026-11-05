@@ -1,8 +1,6 @@
 import { readFileSync, existsSync, lstatSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, basename } from "node:path";
-import commonjs from "@rollup/plugin-commonjs";
-import { nodeResolve } from "@rollup/plugin-node-resolve";
 import replace from "@rollup/plugin-replace";
 import typescript from "@rollup/plugin-typescript";
 import externalGlobals from "rollup-plugin-external-globals";
@@ -20,13 +18,22 @@ export default {
       }
       rmSync(dist, { recursive: true, force: true });
     } },
-    typescript(), commonjs(), nodeResolve({ browser: true }),
+    typescript(),
+    // Both bundled packages publish ESM. Decky provides React/UI at runtime.
+    { name: "resolve-plugin-packages", resolveId(id) {
+      if (id === "@decky/api" || id === "react-icons/fa") return fileURLToPath(import.meta.resolve(id));
+      return null;
+    } },
     externalGlobals({ react: "SP_REACT", "react/jsx-runtime": "SP_JSX", "react-dom": "SP_REACTDOM",
       "@decky/ui": "DFL", "@decky/manifest": JSON.stringify(manifest) }),
     replace({ preventAssignment: true, "process.env.NODE_ENV": JSON.stringify("production") }),
   ],
   context: "window",
   external: ["react", "react-dom", "@decky/ui"],
+  onwarn(warning, warn) {
+    if (warning.code === "UNRESOLVED_IMPORT") throw new Error(warning.message);
+    warn(warning);
+  },
   treeshake: { preset: "smallest" },
   output: { dir: "dist", format: "esm", sourcemap: true, exports: "default",
     sourcemapPathTransform: path => path.replace(/^\.\.\//, `decky://decky/plugin/${encodeURIComponent(manifest.name)}/`) },

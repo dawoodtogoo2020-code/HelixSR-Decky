@@ -11,6 +11,10 @@ LIMIT = 32768
 SUCCESS = re.compile(r'\bdispatch\b[^\r\n]*\brender\s+\d+x\d+\s*->\s*\d+x\d+', re.I)
 READY = re.compile(r'\bnetwork running\s*\(', re.I)
 FAILURE = re.compile(r'\b(?:HelixSR ERROR|network (?:failed|not loaded)|network shaders unavailable|falling back|using fallback|fallback activated|placeholder upscale|RED FRAME|red border)\b', re.I)
+# Strings in the reviewed HLX DLL describe context creation and fallback. It
+# has no reviewed per-frame success message. Model E's output regex is unsafe here.
+HLX_READY = re.compile(r'\b(?:HLX-FSR-4|BCLITE)\b.*?own runtime active: .+? \(tier \d+\), output \d+x\d+, max render \d+x\d+, flags 0x[0-9a-f]+', re.I)
+HLX_FALLBACK = re.compile(r"\b(?:HLX-FSR-4|BCLITE)\b.*?(?:create: .*?AMD's original(?: instead|$)|frame skipped|its shaders are not built yet)", re.I)
 
 
 def regular_beneath(path, root):
@@ -111,11 +115,17 @@ class RuntimeEvidence:
         directories = {Path(p).parent for p in game.get('targets', [])}
         if target:
             directories.add(target)
-        self.paths = sorted({d / suffix for d in directories
-                             for suffix in ('helixsr.log', 'HelixSR/helixsr.log',
-                                            'HelixSR-fsrfg/helixsr.log')}, key=str)
-        self.modules = [Path(p) for p in game.get('targets', [])]
-        if game.get('route') == 'optiscaler' and target:
+        self.hlx = game.get('installed_variant') == 'hlx-fsr4-1-2'
+        scaler = game.get('route') == 'optiscaler' and target
+        if self.hlx:
+            logs = ('OptiScaler.log',) if scaler else ('HLX_FSR.log',)
+            self.modules = ([target / 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll'] if scaler else
+                            [Path(p) for p in game.get('targets', []) if Path(p).name.lower() == 'amd_fidelityfx_upscaler_dx12.dll'])
+        else:
+            logs = ('helixsr.log', 'HelixSR/helixsr.log', 'HelixSR-fsrfg/helixsr.log')
+            self.modules = [Path(p) for p in game.get('targets', [])]
+        self.paths = sorted({d / suffix for d in directories for suffix in logs}, key=str)
+        if scaler and not self.hlx:
             if (game.get('installed_version') or game.get('version')) == '2.0.0':
                 self.modules.append(target / 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll')
             else:
@@ -279,7 +289,12 @@ class RuntimeEvidence:
         for path in self.paths:
             try:
                 for line in self._read(path, proc):
-                    if FAILURE.search(line):
+                    if self.hlx:
+                        if HLX_FALLBACK.search(line):
+                            self.event = ('failure', time.time())
+                        elif HLX_READY.search(line):
+                            self.event = ('loaded', time.time())
+                    elif FAILURE.search(line):
                         self.event = ('failure', time.time())
                         self.failed = True
                         self.ready.clear()
@@ -304,6 +319,8 @@ class RuntimeEvidence:
         age = max(0, time.time() - when) if when else None
         labels = dict(failure='Session log reports a fallback/error', output='Neural output reported this session',
                       loaded='HelixSR network loaded; output unverified', mapped='HelixSR module mapped; output unverified')
+        if self.hlx:
+            labels['loaded'] = 'HLX FSR 4 runtime active; frame processing unverified'
         detail = ('A new dispatch was read after monitoring started. This does not verify image quality or continuous rendering.'
                   if state == 'output' else 'New session evidence only. Existing log text is not treated as live output.')
         if age is not None:
