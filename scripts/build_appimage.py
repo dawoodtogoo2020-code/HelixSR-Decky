@@ -19,8 +19,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from desktop.version import VERSION
 
-TOOL_URL = 'https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage'
-TOOL_SHA = '95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6'
+# Official 1.9.1 asset, built by upstream run 19938734639 from verified
+# commit 8c8c91f762b412a19f4e8d2c4b35afb98f2d7c81. Avoid mutable continuous builds.
+TOOL_URL = 'https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage'
+TOOL_SHA = 'ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0'
+TOOL_SIZE = 15092216
 
 
 def run(args, **kwargs):
@@ -139,7 +142,7 @@ def build():
             if total > 32 << 20:
                 raise SystemExit('Build tool exceeded its bound')
             stream.write(chunk)
-    if hashlib.sha256(tool.read_bytes()).hexdigest() != TOOL_SHA:
+    if tool.stat().st_size != TOOL_SIZE or hashlib.sha256(tool.read_bytes()).hexdigest() != TOOL_SHA:
         raise SystemExit('Pinned AppImage build tool changed; review before rebuilding')
     tool.chmod(0o755)
     release = ROOT / 'release-desktop'
