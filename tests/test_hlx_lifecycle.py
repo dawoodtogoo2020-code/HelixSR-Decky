@@ -99,7 +99,7 @@ class LifecycleTests(Fixtures):
             self.m.preview_latest(self.game['id'], release_choice='reviewed-3.2.0')
         fallback = self.native.with_name('amd_fidelityfx_upscaler_dx12.amd.dll')
         fallback.write_bytes(b'unmanaged')
-        with self.assertRaisesRegex(ValueError, 'unmanaged'):
+        with self.assertRaisesRegex(ValueError, '(?i)unmanaged'):
             review()
         self.assertEqual(fallback.read_bytes(), b'unmanaged')
         fallback.unlink()

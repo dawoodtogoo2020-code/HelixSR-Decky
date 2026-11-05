@@ -1007,8 +1007,14 @@ class Manager:
             blocked.append('Game is running; close it before any file changes')
         legacy = bool(direct_legacy and not rec)
         if not rec and route == 'direct' and not legacy:
-            if any(p.with_name(p.stem + '.original.dll').exists() for p in targets):
+            # Upstream's manual HLX FSR 4 drop-in renames the game's DLL to .amd.dll.
+            if any(p.with_name(p.stem + suffix).exists() for p in targets for suffix in ('.original.dll', '.amd.dll')):
                 blocked.append('Unmanaged original DLL backup exists; review it before installation')
+            # Any model would otherwise save another installer's HLX DLL as the game's original.
+            dropins = [p.name for p in probe_targets if pe_info(p).get('hlx_fsr')]
+            if dropins:
+                blocked.append('Existing unmanaged injector/configuration: HLX FSR 4 drop-in in ' + ', '.join(dropins)
+                               + '. Restore the game\'s original DLL with the tool that installed it, or verify the game files in Steam.')
         if not rec and route == 'optiscaler' and target:
             occupied = [n for n in ('dxgi.dll', 'winmm.dll', 'version.dll', 'OptiScaler.ini', 'fakenvapi.dll')
                         if (target / n).exists() or (target / n).is_symlink()]
@@ -1422,6 +1428,11 @@ class Manager:
                     newer = version(installed) > version(release['version'])
                 except (ValueError, TypeError):
                     newer = True
+                if newer and data.get('managed') and isinstance(installed, str):
+                    # This plugin owns the record, e.g. HLX FSR 4 (3.2.0) back to Model E (2.0.0).
+                    raise ValueError(f'HelixSR {installed} is installed for this game; installing {release["version"]} '
+                                     'would downgrade it. Close the game and use Remove to restore the original '
+                                     'files, then install the selected model. No files were changed.')
                 if newer:
                     raise ValueError('Compatibility installation would downgrade a newer or unverified HelixSR installation. '
                                      'Remove it with its owning manager first; no files were changed.')

@@ -45,6 +45,18 @@ class ReleaseChoiceTests(Fixtures):
                 self.m.preview_latest(self.game['id'], release_choice='reviewed-1.9.3')
         self.assertEqual(self.m.previews, {})
 
+    def test_hlx_back_to_model_e_explains_removal_with_this_plugin(self):
+        data = dict(managed=True, legacy=False, installed_version='3.2.0')
+        with patch.object(self.m, 'assess', return_value=data):
+            with self.assertRaisesRegex(ValueError, r'HelixSR 3\.2\.0 is installed.*downgrade.*use Remove') as raised:
+                self.m.preview_latest(self.game['id'], release_choice='reviewed-2.0.0')
+        self.assertNotIn('owning manager', str(raised.exception))
+        self.assertEqual(self.m.previews, {})
+        # An unrecorded native installation keeps the external-manager guidance.
+        with patch.object(self.m, 'assess', return_value=dict(managed=False, legacy=True, installed_version=None)):
+            with self.assertRaisesRegex(ValueError, 'owning manager'):
+                self.m.preview_latest(self.game['id'], release_choice='reviewed-2.0.0')
+
     def test_status_keeps_errors_and_does_not_mutate_cache(self):
         release = releases.reviewed_release('reviewed-2.0.0')
         release['error'] = 'Network unavailable'

@@ -13,8 +13,14 @@ READY = re.compile(r'\bnetwork running\s*\(', re.I)
 FAILURE = re.compile(r'\b(?:HelixSR ERROR|network (?:failed|not loaded)|network shaders unavailable|falling back|using fallback|fallback activated|placeholder upscale|RED FRAME|red border)\b', re.I)
 # Strings in the reviewed HLX DLL describe context creation and fallback. It
 # has no reviewed per-frame success message. Model E's output regex is unsafe here.
+# HLX_FSR.log lines end in CRLF; lines are compared without the trailing CR.
 HLX_READY = re.compile(r'\b(?:HLX-FSR-4|BCLITE)\b.*?own runtime active: .+? \(tier \d+\), output \d+x\d+, max render \d+x\d+, flags 0x[0-9a-f]+', re.I)
-HLX_FALLBACK = re.compile(r"\b(?:HLX-FSR-4|BCLITE)\b.*?(?:create: .*?AMD's original(?: instead|$)|frame skipped|its shaders are not built yet)", re.I)
+# AMD's original provider handles the context instead of HLX FSR 4.
+HLX_FALLBACK = re.compile(r"\b(?:HLX-FSR-4|BCLITE)\b.*?(?:create: .*?AMD's original(?: instead.*)?\s*$"
+                          r"|own runtime build failed, using AMD provider|cannot run the own runtime's shaders"
+                          r"|shaders are not built yet)", re.I)
+# Neither provider produced the frame or context.
+HLX_ERROR = re.compile(r"\b(?:HLX-FSR-4|BCLITE)\b.*?(?:frame skipped|AMD's original failed too|create failed)", re.I)
 
 
 def regular_beneath(path, root):
@@ -117,6 +123,11 @@ class RuntimeEvidence:
             directories.add(target)
         self.hlx = game.get('installed_variant') == 'hlx-fsr4-1-2'
         scaler = game.get('route') == 'optiscaler' and target
+        # In Scaler the user can deliberately select AMD's native provider.
+        # Its use is then the configured output, not an HLX fallback.
+        settings = game.get('helix_settings') if isinstance(game.get('helix_settings'), dict) else {}
+        self.native = bool(self.hlx and scaler and settings.get('upscaler') == 'fsr')
+        self.provider = None
         if self.hlx:
             logs = ('OptiScaler.log',) if scaler else ('HLX_FSR.log',)
             self.modules = ([target / 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll'] if scaler else
@@ -228,7 +239,7 @@ class RuntimeEvidence:
             cursor['anchor'] = stream.read(min(128, cursor['offset']))
             lines = data.split(b'\n')
             cursor['pending'] = lines.pop()[-4096:]
-            return [line.decode(errors='replace') for line in lines]
+            return [line.decode(errors='replace').rstrip('\r') for line in lines]
 
     def sample(self):
         base = dict(game_name=self.game.get('name', 'Game'), version=self.game.get('installed_version') or 'unknown',
@@ -290,10 +301,13 @@ class RuntimeEvidence:
             try:
                 for line in self._read(path, proc):
                     if self.hlx:
-                        if HLX_FALLBACK.search(line):
-                            self.event = ('failure', time.time())
+                        if HLX_ERROR.search(line):
+                            self.event, self.provider = ('failure', time.time()), None
+                        elif HLX_FALLBACK.search(line):
+                            self.provider = 'amd'
+                            self.event = ('loaded' if self.native else 'failure', time.time())
                         elif HLX_READY.search(line):
-                            self.event = ('loaded', time.time())
+                            self.event, self.provider = ('loaded', time.time()), 'hlx'
                     elif FAILURE.search(line):
                         self.event = ('failure', time.time())
                         self.failed = True
@@ -320,7 +334,10 @@ class RuntimeEvidence:
         labels = dict(failure='Session log reports a fallback/error', output='Neural output reported this session',
                       loaded='HelixSR network loaded; output unverified', mapped='HelixSR module mapped; output unverified')
         if self.hlx:
-            labels['loaded'] = 'HLX FSR 4 runtime active; frame processing unverified'
+            labels['loaded'] = ('AMD FSR (native) provider selected; frame processing unverified'
+                                if self.provider == 'amd' else
+                                'HLX FSR 4 runtime active; frame processing unverified')
+            labels['failure'] = 'Session log reports AMD fallback or an HLX error'
         detail = ('A new dispatch was read after monitoring started. This does not verify image quality or continuous rendering.'
                   if state == 'output' else 'New session evidence only. Existing log text is not treated as live output.')
         if age is not None:

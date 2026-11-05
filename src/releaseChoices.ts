@@ -1,6 +1,12 @@
 export type ReleaseChoiceView = { id: string; label: string; version: string | null };
 
 export const DEFAULT_RELEASE_CHOICE = "reviewed-2.0.0";
+export const PRERELEASE_CHOICES = ["reviewed-3.2.0"];
+
+/** A prerelease opt-in belongs to the game it was chosen for, never the next game opened. */
+export function releaseChoiceForGame(remembered: string, rememberedFor: string | undefined, gameId: string): string {
+  return PRERELEASE_CHOICES.includes(remembered) && rememberedFor !== gameId ? DEFAULT_RELEASE_CHOICE : remembered;
+}
 
 export function releaseChoiceLabel(choice: ReleaseChoiceView): string {
   if (choice.id === "reviewed-3.2.0") return choice.label;

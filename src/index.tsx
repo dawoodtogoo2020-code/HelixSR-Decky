@@ -14,7 +14,7 @@ import { InstallSession, JobTracker } from "./installSession";
 import { readLaunchOptions } from "./launchDetails";
 import { HelixSettings, HelixSettingsState } from "./HelixSettings";
 import { overlayShortcut } from "./overlayShortcut";
-import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceLabel } from "./releaseChoices";
+import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceForGame, releaseChoiceLabel } from "./releaseChoices";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -103,6 +103,7 @@ const previewAction = callable<[string, string, boolean, string?], Preview>("pre
 const applyAction = callable<[string], { message: string }>("apply_action");
 const previewLatest = callable<[string, boolean, string?, string?, string?], Preview>("preview_latest");
 let selectedReleaseChoice = DEFAULT_RELEASE_CHOICE;
+let selectedReleaseGame: string | undefined;
 let rememberedGameSettingsOpen = false;
 let rememberedTuningOpen = false;
 const installLatest = callable<[string], Job>("install_latest");
@@ -405,7 +406,7 @@ function Content() {
     if (!game || !models) return;
     const installed = models.variants.find(v => v.id === game.installed_variant);
     if (installed) chooseModel(installed, false);
-    else chooseRelease(selectedReleaseChoice);
+    else chooseRelease(releaseChoiceForGame(selectedReleaseChoice, selectedReleaseGame, game.id));
   }, [game?.id, game?.installed_variant, data?.model_catalog?.default]);
   useEffect(() => {
     const changed = (next: Job[], finished: boolean) => { setJobs(next); if (finished) void refresh(true); };
@@ -462,6 +463,7 @@ function Content() {
 
   function rememberRelease(choice: string) {
     selectedReleaseChoice = choice;
+    selectedReleaseGame = game?.id;
     setReleaseChoice(choice);
   }
   function chooseModel(model: Model, remember = true) {

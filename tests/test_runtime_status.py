@@ -81,6 +81,60 @@ class RuntimeEvidenceTests(unittest.TestCase):
         self.append(SUCCESS)
         self.assertEqual(self.evidence.sample()['state'], 'failure')
 
+    def hlx_direct(self):
+        module = self.root / 'amd_fidelityfx_upscaler_dx12.dll'
+        self.evidence = runtime_status.RuntimeEvidence(dict(self.game, installed_variant='hlx-fsr4-1-2', targets=[str(module)]))
+        self.log = self.root / 'HLX_FSR.log'
+        self.log.touch()
+        self.assertEqual(self.evidence.sample()['state'], 'mapped')
+
+    def hlx_line(self, message):
+        # Exact logger format in the pinned HLX DLL: "[...] [I] HLX-FSR-4 %s\r\n".
+        with self.log.open('ab') as stream:
+            stream.write(b'[12:00:00.000000] [I] HLX-FSR-4 ' + message.encode() + b'\r\n')
+
+    def test_hlx_crlf_log_reports_every_amd_fallback_message(self):
+        active = 'own runtime active: fp16 (tier 2), output 1280x800, max render 854x534, flags 0x0'
+        for message in ("create: FSR 3.1.4 requested: AMD's original",
+                        "create: HLX FSR 4 does not cover this (see the line above): AMD's original instead",
+                        'own runtime build failed, using AMD provider',
+                        "this GPU cannot run the own runtime's shaders (needs shader model 6.4 and wave ops with 32+ lanes)"):
+            with self.subTest(message=message):
+                self.hlx_direct()
+                self.hlx_line(active)
+                status = self.evidence.sample()
+                self.assertEqual((status['state'], status['label']),
+                                 ('loaded', 'HLX FSR 4 runtime active; frame processing unverified'))
+                self.hlx_line(message)
+                status = self.evidence.sample()
+                self.assertEqual(status['state'], 'failure')
+                self.assertIn('AMD fallback', status['label'])
+
+    def test_hlx_errors_are_failures_not_fallback_selection(self):
+        for message in ("create: AMD's original failed too (code -2147024809)",
+                        "frame outside the context's maximum and no AMD upscaler to hand it to: frame skipped"):
+            with self.subTest(message=message):
+                self.hlx_direct()
+                self.hlx_line(message)
+                self.assertEqual(self.evidence.sample()['state'], 'failure')
+
+    def test_hlx_scaler_native_selection_is_not_reported_as_fallback(self):
+        target = self.root
+        game = dict(self.game, installed_variant='hlx-fsr4-1-2', route='optiscaler', target=str(target),
+                    helix_settings=dict(available=True, upscaler='fsr'))
+        self.evidence = runtime_status.RuntimeEvidence(game)
+        self.log = target / 'OptiScaler.log'
+        self.log.touch()
+        self.assertEqual(self.evidence.sample()['state'], 'mapped')
+        self.append("[info] BCLITE create: FSR 4.1.2 requested: AMD's original\r\n")
+        status = self.evidence.sample()
+        self.assertEqual((status['state'], status['label']),
+                         ('loaded', 'AMD FSR (native) provider selected; frame processing unverified'))
+        self.append(SUCCESS)
+        self.assertEqual(self.evidence.sample()['state'], 'loaded')
+        self.append("[info] BCLITE create: AMD's original failed too (code 5)\r\n")
+        self.assertEqual(self.evidence.sample()['state'], 'failure')
+
     def test_partial_line_and_overflow_never_promote_old_fragment(self):
         self.log.touch()
         self.evidence.sample()

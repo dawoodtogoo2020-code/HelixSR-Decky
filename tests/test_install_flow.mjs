@@ -544,6 +544,31 @@ test("viewing an installed HLX game does not opt the next game into the prerelea
   assert.equal(control("HelixSR model").props.selectedOption, models[0].id);
 });
 
+test("an explicit HLX choice for one game is kept on refresh but never preselected for another game", async () => {
+  const models = [
+    {id: "helixsr-model-e", label: "Model E", release_choices: ["reviewed-2.0.0"]},
+    {id: "hlx-fsr4-1-2", label: "HLX FSR 4", release_choices: ["reviewed-3.2.0"]}
+  ];
+  let games;
+  const h = harness({
+    library: () => ({...h.library(), games,
+      model_catalog: {default: models[0].id, variants: models},
+      release_choices: models.map(m => ({id: m.release_choices[0], label: m.label}))}),
+    game_details: id => games.find(g => g.id === id),
+  });
+  games = [h.game, {...h.game, id: "other", name: "Other game", folder: "/games/Other"}];
+  await h.ready();
+  const control = label => h.walk(h.render(), n => n.type === "DropdownItem" && n.props.label === label)[0];
+  control("HelixSR model").props.onChange({data: models[1].id});
+  assert.equal(control("Release to install").props.selectedOption, "reviewed-3.2.0");
+  const refresh = h.walk(h.render(), n => n.type === "ButtonItem" && /Refresh library and status/.test(h.text(n)))[0];
+  refresh.props.onClick(); await flush(); h.render(); await flush(); h.render();
+  assert.equal(control("HelixSR model").props.selectedOption, models[1].id, "same game keeps its explicit opt-in");
+  control("Game").props.onChange({data: "other"}); await flush(); h.render(); await flush(); h.render();
+  assert.equal(control("Release to install").props.selectedOption, "reviewed-2.0.0");
+  assert.equal(control("HelixSR model").props.selectedOption, models[0].id);
+});
+
 test("HLX Scaler exposes native AMD as a separate output and only available FG providers", async () => {
   const h = harness();
   enableSettings(h, {family: "hlx-fsr", upscaler: "hlx-fsr", provider: "off"});

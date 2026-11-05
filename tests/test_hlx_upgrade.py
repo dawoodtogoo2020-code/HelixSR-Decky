@@ -109,11 +109,36 @@ class HlxUpgradeTests(Fixtures):
     def test_unknown_hlx_wrapper_cannot_become_game_original(self):
         wrapper = pe(ffx=True) + b'HLX FSR 4 (4.1.2) old payload'
         write(self.native, wrapper)
-        with self.assertRaisesRegex(ValueError, 'original x64 native FidelityFX'):
+        with self.assertRaisesRegex(ValueError, 'original x64 native FidelityFX|HLX FSR 4 drop-in'):
             self.review_hlx()
         self.assertEqual(self.native.read_bytes(), wrapper)
         self.assertFalse(self.native.with_name(self.native.stem + '.amd.dll').exists())
         self.assertFalse(self.m.record(self.game))
+
+    def test_upstream_hlx_dropin_blocks_every_direct_model_before_game_writes(self):
+        # Upstream's manual drop-in: game DLL renamed to .amd.dll, HLX DLL in its place.
+        fallback = write(self.native.with_name(self.native.stem + '.amd.dll'), self.original)
+        dropin = pe(ffx=True) + b'HLX FSR 4 (4.1.2) from upstream setup'
+        write(self.native, dropin)
+        self.package()
+        data = self.m.assess(self.game)
+        self.assertEqual(data['compatibility'], 'blocked')
+        self.assertTrue(any('HLX FSR 4 drop-in' in reason for reason in data['reasons']))
+        self.assertTrue(any('Unmanaged original DLL backup' in reason for reason in data['reasons']))
+        with self.assertRaisesRegex(ValueError, 'HLX FSR 4 drop-in'):
+            self.m.preview(self.game['id'], 'install')
+        with self.assertRaisesRegex(ValueError, 'HLX FSR 4 drop-in'):
+            self.review_hlx()
+        self.assertEqual((self.native.read_bytes(), fallback.read_bytes()), (dropin, self.original))
+        self.assertFalse(self.native.with_name(self.native.stem + '.original.dll').exists())
+        self.assertFalse(self.m.record(self.game))
+
+    def test_stray_amd_fallback_beside_native_dll_is_an_unmanaged_backup(self):
+        write(self.native.with_name(self.native.stem + '.amd.dll'), b'other installer backup')
+        self.package()
+        with self.assertRaisesRegex(ValueError, 'Unmanaged original DLL backup'):
+            self.m.preview(self.game['id'], 'install')
+        self.assertEqual(self.native.read_bytes(), self.original)
 
     def test_unmanaged_legacy_provider_blocks_scaler_before_any_game_writes(self):
         self.native.unlink()

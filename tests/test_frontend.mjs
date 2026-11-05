@@ -7,7 +7,7 @@ import { canRestore, gameStatus, installReadiness, nextStep } from "../src/gameS
 import { librarySelectable, libraryStatus } from "../src/libraryStatus.ts";
 import { LibraryRead } from "../src/libraryRead.ts";
 import { overlayShortcut } from "../src/overlayShortcut.ts";
-import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceLabel } from "../src/releaseChoices.ts";
+import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceForGame, releaseChoiceLabel } from "../src/releaseChoices.ts";
 
 test("overlay shortcut guide uses the configured key and does not invent disabled or custom mappings", () => {
   assert.equal(overlayShortcut("auto").key, "Insert");
@@ -41,6 +41,15 @@ test("reviewed 2.0.0 is the default and older releases are clearly distinguished
   assert.match(releaseChoiceLabel({id: "reviewed-1.9.3", label: "backend label", version: "1.9.3"}), /older release/);
   assert.match(releaseChoiceExplanation("latest"), /blocked unless that exact release has been reviewed/);
   assert.match(releaseChoiceExplanation("reviewed-1.9.3"), /Older reviewed release/);
+});
+
+test("a prerelease opt-in stays with its own game and never preselects another game", () => {
+  assert.equal(releaseChoiceForGame("reviewed-3.2.0", "steam:1", "steam:1"), "reviewed-3.2.0");
+  assert.equal(releaseChoiceForGame("reviewed-3.2.0", "steam:1", "steam:2"), DEFAULT_RELEASE_CHOICE);
+  assert.equal(releaseChoiceForGame("reviewed-3.2.0", undefined, "steam:2"), DEFAULT_RELEASE_CHOICE);
+  // Ordinary reviewed release preferences still carry across games.
+  assert.equal(releaseChoiceForGame("reviewed-1.9.3", "steam:1", "steam:2"), "reviewed-1.9.3");
+  assert.equal(releaseChoiceForGame("latest", "steam:1", "steam:2"), "latest");
 });
 
 test("library errors remain visible and a later refresh starts a fresh read", async () => {
