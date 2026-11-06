@@ -412,6 +412,8 @@ function Content() {
     const chosen = chosenModels.get(game.id);
     const installed = models.variants.find(v => v.id === game.installed_variant);
     if (chosen && models.variants.some(v => v.id === chosen.variant)) { setVariant(chosen.variant); setReleaseChoice(chosen.release); }
+    // A release chosen before the catalog loaded has no model yet; resolve it now.
+    else if (chosen && chosen.variant === undefined) chooseRelease(chosen.release, false);
     else if (installed) chooseModel(installed, false);
     else chooseRelease(releaseChoiceForGame(selectedReleaseChoice, selectedReleaseGame, game.id), false);
   }, [game?.id, game?.installed_variant, data?.model_catalog?.default]);

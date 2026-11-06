@@ -10,6 +10,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'py_modules'))
 import runtime_status
 
+REAL_MAPPED_PATHS = runtime_status.mapped_paths
+
 
 READY = 'model-e: network running (nchw8, 19 launches per frame)\n'
 DISPATCH = 'dispatch 1: render 640x400 -> 1280x800\n'
@@ -190,6 +192,39 @@ class RuntimeEvidenceTests(unittest.TestCase):
         self.hlx_line(self.ACTIVE)
         with patch.object(runtime_status, 'writing_log', return_value=True):
             self.assertEqual(self.evidence.sample()['state'], 'mapped')
+
+    def test_hlx_mirror_discovery_uses_the_module_check_maps_snapshot(self):
+        # A second /proc maps read in the same sample could fail and miss the mirror,
+        # whose log the next sample would then treat as old text.
+        storage = self.root / '_storage_'
+        storage.mkdir()
+        snapshot = {str(self.root / 'amd_fidelityfx_upscaler_dx12.dll'),
+                    str(storage / 'amd_fidelityfx_upscaler_dx12.amd.dll')}
+        reads = []
+
+        def maps(*_):
+            reads.append(1)
+            return snapshot if len(reads) == 1 else set()
+
+        self.hlx_direct_armed()
+        with patch.object(runtime_status, 'mapped_paths', REAL_MAPPED_PATHS), \
+                patch.object(runtime_status, 'mapped_files', side_effect=maps):
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+        self.assertEqual(len(reads), 1, 'one maps read per sample')
+        self.assertIn(storage, self.evidence.mirrors)
+        self.assertIn(storage / 'HLX_FSR.log', self.evidence.paths)
+
+    def test_hlx_mirror_discovery_is_capped_at_four_folders(self):
+        # The game root's mapped DLL counts toward the limit; the fifth folder is never read.
+        folders = [self.root / f'm{i}' for i in range(1, 5)]
+        for folder in folders:
+            folder.mkdir()
+        self.maps = {str(self.root / 'amd_fidelityfx_upscaler_dx12.dll')} | {
+            str(folder / 'amd_fidelityfx_upscaler_dx12.amd.dll') for folder in folders}
+        self.hlx_direct_armed()
+        self.assertEqual(self.evidence.sample()['state'], 'mapped')
+        self.assertEqual(self.evidence.mirrors, {self.root, *folders[:3]})
+        self.assertFalse([p for p in self.evidence.paths if p.parent == folders[3]])
 
     def test_hlx_mirror_log_symlink_is_rejected(self):
         other = self.outside_log()

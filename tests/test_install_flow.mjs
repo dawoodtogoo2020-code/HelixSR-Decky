@@ -570,7 +570,7 @@ test("an explicit HLX choice for one game is kept on refresh but never preselect
 });
 
 const MODEL_E = "helixsr-model-e", HLX = "hlx-fsr4-1-2";
-function modelChoiceHarness(games, overrides = {}) {
+function modelChoiceHarness(games, {catalog = () => true, ...overrides} = {}) {
   const models = [
     {id: MODEL_E, label: "Model E", release_choices: ["reviewed-2.0.0", "reviewed-1.9.3", "compatible-1.8.1", "latest"]},
     {id: HLX, label: "HLX FSR 4", release_choices: ["reviewed-3.2.0"]}
@@ -578,7 +578,7 @@ function modelChoiceHarness(games, overrides = {}) {
   let list;
   const h = harness({
     library: () => ({...h.library(), games: list.map(g => ({...g})),
-      model_catalog: {default: MODEL_E, variants: models},
+      ...(catalog() ? {model_catalog: {default: MODEL_E, variants: models}} : {}),
       release_choices: [{id: "reviewed-2.0.0", version: "2.0.0"}, {id: "reviewed-3.2.0", version: "3.2.0"}]}),
     game_details: id => ({...list.find(g => g.id === id)}),
     preview_latest: (gid, _dx12, id, _exe, choice) => ({token: "preview", name: gid, files: [], variant_id: id,
@@ -656,6 +656,21 @@ function pyError(h, message, type = "Exception") {
   return new PyError('Traceback (most recent call last):\n  File "decky_loader/plugin/messages.py", line 44, in wait_for_result\n'
     + `${type}: ${message}\n`);
 }
+
+test("a release chosen before the model catalog loads is kept for a managed game once the catalog arrives", async () => {
+  let catalog = false;
+  const h = modelChoiceHarness(game => [Object.assign(game, {managed: true, enabled: true,
+    installed_version: "2.0.0", installed_model: "HelixSR Model E", installed_variant: MODEL_E})], {catalog: () => catalog});
+  await h.ready();
+  assert.equal(h.control("HelixSR model"), undefined, "no model dropdown before the catalog loads");
+  // The release menu remounts the panel; its choice cannot resolve a model yet.
+  const release = h.control("Release to install"); h.unmount();
+  release.props.onChange({data: "reviewed-3.2.0"});
+  h.mount(); await flush(); h.render(); await flush(); h.render();
+  catalog = true;
+  await h.refresh();
+  assert.deepEqual(h.shown(), [HLX, "reviewed-3.2.0"], "the installed model does not replace the earlier release choice");
+});
 
 test("Decky's empty-message PyError still shows the downgrade guard text after Update", async () => {
   const downgrade = "HelixSR 3.2.0 is installed for this game; installing 2.0.0 would downgrade it. Close the game and use Remove to restore the original files, then install the selected model. No files were changed.";

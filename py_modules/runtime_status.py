@@ -65,9 +65,10 @@ def mapped_files(pid):
             for line in source.splitlines() if len(line.split(None, 5)) == 6}
 
 
-def mapped_paths(pid, paths):
+def mapped_paths(pid, paths, mapped=None):
     """An exact mapped path establishes module presence, never rendered output."""
-    mapped = mapped_files(pid)
+    if mapped is None:
+        mapped = mapped_files(pid)
     return any(str(path) in mapped for path in paths)
 
 
@@ -187,9 +188,9 @@ class RuntimeEvidence:
                 self.cursors.pop(str(path), None)
                 self.absent.discard(str(path))
 
-    def _discover(self, pid):
+    def _discover(self, mapped):
         """Watch logs beside mapped HLX DLL copies beneath the game, e.g. _storage_/."""
-        for name in sorted(mapped_files(pid)):
+        for name in sorted(mapped):
             path = Path(name)
             if path.name.lower() not in HLX_MODULES or path.parent in self.mirrors or len(self.mirrors) >= 4:
                 continue
@@ -321,7 +322,10 @@ class RuntimeEvidence:
             self.startup_reads.clear()
             return dict(base, state='disabled', label='Recorded installation disabled',
                         detail='Close the game and enable HelixSR before testing again.')
-        if not self.game.get('managed') or not mapped_paths(proc['pid'], self.modules):
+        # One maps snapshot per sample: the module check and mirror discovery
+        # must not disagree because a second read failed or raced the loader.
+        mapped = mapped_files(proc['pid']) if self.game.get('managed') else set()
+        if not self.game.get('managed') or not mapped_paths(proc['pid'], self.modules, mapped):
             # Keep armed prelaunch positions while the module is still loading.
             self.event = None
             self.ready.clear()
@@ -331,7 +335,7 @@ class RuntimeEvidence:
         if self.startup_reads and self.startup_deadline is None:
             self.startup_deadline = time.monotonic() + 15
         if self.mirrors is not None:
-            self._discover(proc['pid'])
+            self._discover(mapped)
         errors = []
         for path in self.paths:
             try:
