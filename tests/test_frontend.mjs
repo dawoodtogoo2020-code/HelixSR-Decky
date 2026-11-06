@@ -8,6 +8,21 @@ import { librarySelectable, libraryStatus } from "../src/libraryStatus.ts";
 import { LibraryRead } from "../src/libraryRead.ts";
 import { overlayShortcut } from "../src/overlayShortcut.ts";
 import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceForGame, releaseChoiceLabel } from "../src/releaseChoices.ts";
+import { errorMessage } from "../src/errorMessage.ts";
+
+test("backend errors keep their text when Decky leaves the message empty", () => {
+  const py = traceback => Object.assign(new Error(""), { name: "Python Exception", pythonTraceback: traceback });
+  assert.equal(errorMessage(new Error("plain")), "plain");
+  assert.equal(errorMessage(py('Traceback (most recent call last):\n  File "x.py", line 1\r\nValueError: Close the game: then retry\r\n\n')),
+    "Close the game: then retry");
+  assert.equal(errorMessage(py("json.decoder.JSONDecodeError: Expecting value")), "Expecting value");
+  assert.equal(errorMessage(py("KeyError: 'request-A'")), "'request-A'");
+  assert.equal(errorMessage(py("Exception: \n\n")), "Python Exception");
+  assert.equal(errorMessage(py(undefined)), "Python Exception");
+  assert.equal(errorMessage("text"), "text");
+  assert.equal(errorMessage(""), "Unknown error");
+  assert.equal(errorMessage(Object.assign(new Error(""), { name: "" })), "Unknown error");
+});
 
 test("overlay shortcut guide uses the configured key and does not invent disabled or custom mappings", () => {
   assert.equal(overlayShortcut("auto").key, "Insert");

@@ -10,6 +10,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'py_modules'))
 import runtime_status
 
+REAL_MAPPED_PATHS = runtime_status.mapped_paths
+
 
 READY = 'model-e: network running (nchw8, 19 launches per frame)\n'
 DISPATCH = 'dispatch 1: render 640x400 -> 1280x800\n'
@@ -30,10 +32,12 @@ class RuntimeEvidenceTests(unittest.TestCase):
         self.session = (123, '1000')
         self.processes = [self.proc]
         self.mapped = True
+        self.maps = set()
         self.patches = [
             patch.object(runtime_status, 'active_processes', side_effect=lambda *_: self.processes),
             patch.object(runtime_status, 'executable_session', side_effect=lambda *_: self.session),
             patch.object(runtime_status, 'mapped_paths', side_effect=lambda *_: self.mapped),
+            patch.object(runtime_status, 'mapped_files', side_effect=lambda *_: self.maps),
         ]
         for item in self.patches:
             item.start()
@@ -109,6 +113,173 @@ class RuntimeEvidenceTests(unittest.TestCase):
                 status = self.evidence.sample()
                 self.assertEqual(status['state'], 'failure')
                 self.assertIn('AMD fallback', status['label'])
+
+    ACTIVE = 'own runtime active: int8-s-std-k01 (tier 3), output 1280x720, max render 752x424, flags 0x19'
+    HLX_LABEL = ('loaded', 'HLX FSR 4 runtime active; frame processing unverified')
+
+    def hlx_direct_armed(self):
+        # The monitor is enabled before launch, as on the Deck.
+        module = self.root / 'amd_fidelityfx_upscaler_dx12.dll'
+        self.evidence = runtime_status.RuntimeEvidence(dict(self.game, installed_variant='hlx-fsr4-1-2', targets=[str(module)]))
+        self.processes = []
+        self.assertEqual(self.evidence.sample()['state'], 'not_running')
+        self.processes = [self.proc]
+
+    def test_hlx_direct_reads_only_new_lines_from_a_reused_optiscaler_log(self):
+        # Remove keeps an earlier Scaler install's OptiScaler.log; HLX then appends to it.
+        stale = (b'[old] [info] OptiScaler session\r\n[17:00:00.000000] [I] HLX-FSR-4 '
+                 + self.ACTIVE.encode() + b'\r\n')
+        for message, expected in ((self.ACTIVE, self.HLX_LABEL),
+                                  ('own runtime build failed, using AMD provider',
+                                   ('failure', 'Session log reports AMD fallback or an HLX error'))):
+            with self.subTest(message=message):
+                self.log = self.root / 'OptiScaler.log'
+                self.log.write_bytes(stale)
+                self.hlx_direct_armed()
+                self.assertEqual(self.evidence.sample()['state'], 'mapped', 'stale lines are not this session')
+                self.hlx_line('loaded (build Oct 28 2026 20:24:22)')
+                self.hlx_line(message)
+                status = self.evidence.sample()
+                self.assertEqual((status['state'], status['label']), expected)
+
+    def test_hlx_direct_reads_its_log_beside_a_mapped_mirror_copy_beneath_the_game(self):
+        storage = self.root / '_storage_'
+        storage.mkdir()
+        self.maps = {str(self.root / 'amd_fidelityfx_upscaler_dx12.dll'),
+                     str(storage / 'amd_fidelityfx_upscaler_dx12.amd.dll')}
+        self.log = storage / 'HLX_FSR.log'
+        # A fresh log created by the game's writer after the mirror is mapped.
+        self.hlx_direct_armed()
+        self.assertEqual(self.evidence.sample()['state'], 'mapped')
+        self.hlx_line('loaded (build Oct 28 2026 20:24:22)')
+        self.hlx_line(self.ACTIVE)
+        with patch.object(runtime_status, 'writing_log', return_value=True):
+            status = self.evidence.sample()
+        self.assertEqual((status['state'], status['label']), self.HLX_LABEL)
+        self.assertIn(storage / 'OptiScaler.log', self.evidence.paths)
+        # A relaunch never replays the previous session's mirror log.
+        self.processes = []
+        self.assertEqual(self.evidence.sample()['state'], 'not_running')
+        self.processes, self.session = [self.proc], (123, '2000')
+        with patch.object(runtime_status, 'writing_log', return_value=True):
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            self.hlx_line(self.ACTIVE)
+            self.assertEqual(self.evidence.sample()['state'], 'loaded')
+        # A stale mirror log present when first discovered is a baseline, not evidence.
+        self.log.write_bytes(b'[I] HLX-FSR-4 ' + self.ACTIVE.encode() + b'\r\n')
+        self.hlx_direct_armed()
+        with patch.object(runtime_status, 'writing_log', return_value=True):
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+            self.hlx_line(self.ACTIVE)
+            self.assertEqual(self.evidence.sample()['state'], 'loaded')
+
+    def outside_log(self):
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        other = Path(outside.name)
+        (other / 'HLX_FSR.log').write_bytes(b'')
+        return other
+
+    def test_hlx_mirror_copies_outside_the_game_are_ignored(self):
+        other = self.outside_log()
+        self.maps = {str(self.root / 'amd_fidelityfx_upscaler_dx12.dll'),
+                     str(other / 'amd_fidelityfx_upscaler_dx12.dll'),
+                     str(self.root / '..' / other.name / 'amd_fidelityfx_upscaler_dx12.amd.dll')}
+        self.hlx_direct_armed()
+        self.assertEqual(self.evidence.sample()['state'], 'mapped')
+        self.assertFalse([p for p in self.evidence.paths if other.name in str(p)])
+        self.log = other / 'HLX_FSR.log'
+        self.hlx_line(self.ACTIVE)
+        with patch.object(runtime_status, 'writing_log', return_value=True):
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+
+    def test_hlx_mirror_discovery_uses_the_module_check_maps_snapshot(self):
+        # A second /proc maps read in the same sample could fail and miss the mirror,
+        # whose log the next sample would then treat as old text.
+        storage = self.root / '_storage_'
+        storage.mkdir()
+        snapshot = {str(self.root / 'amd_fidelityfx_upscaler_dx12.dll'),
+                    str(storage / 'amd_fidelityfx_upscaler_dx12.amd.dll')}
+        reads = []
+
+        def maps(*_):
+            reads.append(1)
+            return snapshot if len(reads) == 1 else set()
+
+        self.hlx_direct_armed()
+        with patch.object(runtime_status, 'mapped_paths', REAL_MAPPED_PATHS), \
+                patch.object(runtime_status, 'mapped_files', side_effect=maps):
+            self.assertEqual(self.evidence.sample()['state'], 'mapped')
+        self.assertEqual(len(reads), 1, 'one maps read per sample')
+        self.assertIn(storage, self.evidence.mirrors)
+        self.assertIn(storage / 'HLX_FSR.log', self.evidence.paths)
+
+    def test_hlx_mirror_discovery_is_capped_at_four_folders(self):
+        # The game root's mapped DLL counts toward the limit; the fifth folder is never read.
+        folders = [self.root / f'm{i}' for i in range(1, 5)]
+        for folder in folders:
+            folder.mkdir()
+        self.maps = {str(self.root / 'amd_fidelityfx_upscaler_dx12.dll')} | {
+            str(folder / 'amd_fidelityfx_upscaler_dx12.amd.dll') for folder in folders}
+        self.hlx_direct_armed()
+        self.assertEqual(self.evidence.sample()['state'], 'mapped')
+        self.assertEqual(self.evidence.mirrors, {self.root, *folders[:3]})
+        self.assertFalse([p for p in self.evidence.paths if p.parent == folders[3]])
+
+    def test_hlx_mirror_log_symlink_is_rejected(self):
+        other = self.outside_log()
+        storage = self.root / '_storage_'
+        storage.mkdir()
+        try:
+            (storage / 'HLX_FSR.log').symlink_to(other / 'HLX_FSR.log')
+        except OSError:
+            self.skipTest('Symbolic links are unavailable on this system')
+        self.maps = {str(self.root / 'amd_fidelityfx_upscaler_dx12.dll'),
+                     str(storage / 'amd_fidelityfx_upscaler_dx12.amd.dll')}
+        self.hlx_direct_armed()
+        self.log = other / 'HLX_FSR.log'
+        self.hlx_line(self.ACTIVE)
+        with patch.object(runtime_status, 'writing_log', return_value=True):
+            self.assertEqual(self.evidence.sample()['state'], 'unavailable')
+            self.hlx_line(self.ACTIVE)
+            self.assertEqual(self.evidence.sample()['state'], 'unavailable')
+
+    def test_hlx_scaler_route_ignores_mapped_mirror_copies(self):
+        storage = self.root / '_storage_'
+        self.maps = {str(storage / 'amd_fidelityfx_upscaler_dx12.amd.dll')}
+        self.evidence = runtime_status.RuntimeEvidence(dict(self.game, installed_variant='hlx-fsr4-1-2',
+                                                            route='optiscaler', target=str(self.root)))
+        self.evidence.sample()
+        self.assertEqual(self.evidence.paths, [self.root / 'OptiScaler.log', self.root / 'OptiScaler/HLX_FSR.log'])
+
+    def test_hlx_scaler_reads_hlx_fsr_log_beside_its_dll_when_optiscaler_file_logging_is_off(self):
+        amd = "create: FSR 3.1.6 requested: AMD's original"
+        native = dict(available=True, upscaler='fsr')
+        for settings, message, expected in (
+                ({}, self.ACTIVE, self.HLX_LABEL),
+                (native, amd, ('loaded', 'AMD FSR (native) provider selected; frame processing unverified')),
+                ({}, amd, ('failure', 'Session log reports AMD fallback or an HLX error'))):
+            for stale in (None, b'[I] HLX-FSR-4 ' + self.ACTIVE.encode() + b'\r\n'):
+                with self.subTest(settings=settings, message=message, stale=bool(stale)):
+                    folder = self.root / 'OptiScaler'
+                    folder.mkdir(exist_ok=True)
+                    self.log = folder / 'HLX_FSR.log'
+                    self.log.unlink(missing_ok=True)
+                    if stale:
+                        self.log.write_bytes(stale)
+                    self.evidence = runtime_status.RuntimeEvidence(dict(
+                        self.game, installed_variant='hlx-fsr4-1-2', route='optiscaler', target=str(self.root),
+                        helix_settings=settings))
+                    self.processes = []
+                    self.assertEqual(self.evidence.sample()['state'], 'not_running')
+                    self.processes = [self.proc]
+                    with patch.object(runtime_status, 'writing_log', return_value=True):
+                        self.assertEqual(self.evidence.sample()['state'], 'mapped', 'old text is not this session')
+                        self.hlx_line('loaded (build Oct 28 2026 20:24:22)')
+                        self.hlx_line(message)
+                        status = self.evidence.sample()
+                    self.assertEqual((status['state'], status['label']), expected)
+                    self.assertFalse((self.root / 'OptiScaler.log').exists())
 
     def test_hlx_errors_are_failures_not_fallback_selection(self):
         for message in ("create: AMD's original failed too (code -2147024809)",

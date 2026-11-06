@@ -12,7 +12,11 @@ export class PluginInstaller {
   private acceptingPrompt = false;
   private route: Route;
   private changed: () => void;
-  constructor(route: Route, changed: () => void) { this.route = route; this.changed = changed; }
+  private describe: (error: unknown) => string;
+  constructor(route: Route, changed: () => void,
+    describe = (error: unknown) => error instanceof Error ? error.message : String(error)) {
+    this.route = route; this.changed = changed; this.describe = describe;
+  }
 
   prompt(name: string, version: string, requestId: string, hash: string) {
     if (this.locked || !this.acceptingPrompt) return;
@@ -85,7 +89,7 @@ export class PluginInstaller {
       }
     } catch (error) {
       if (!this.locked)
-        this.message = `Could not open Decky's confirmation: ${error instanceof Error ? error.message : String(error)}. Your downloaded update is retained; cancel it before starting a new attempt.`;
+        this.message = `Could not open Decky's confirmation: ${this.describe(error)}. Your downloaded update is retained; cancel it before starting a new attempt.`;
       this.changed();
       throw error;
     } finally { this.acceptingPrompt = false; }

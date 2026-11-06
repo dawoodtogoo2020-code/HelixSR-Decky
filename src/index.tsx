@@ -15,6 +15,7 @@ import { readLaunchOptions } from "./launchDetails";
 import { HelixSettings, HelixSettingsState } from "./HelixSettings";
 import { overlayShortcut } from "./overlayShortcut";
 import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceForGame, releaseChoiceLabel } from "./releaseChoices";
+import { errorMessage } from "./errorMessage";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -104,6 +105,9 @@ const applyAction = callable<[string], { message: string }>("apply_action");
 const previewLatest = callable<[string, boolean, string?, string?, string?], Preview>("preview_latest");
 let selectedReleaseChoice = DEFAULT_RELEASE_CHOICE;
 let selectedReleaseGame: string | undefined;
+// Explicit model/release choices by game id. Steam unmounts this panel while a
+// dropdown menu is open, so a choice must outlive the panel that received it.
+const chosenModels = new Map<string, { variant?: string; release: string }>();
 let rememberedGameSettingsOpen = false;
 let rememberedTuningOpen = false;
 const installLatest = callable<[string], Job>("install_latest");
@@ -166,7 +170,7 @@ const pluginInstaller = new PluginInstaller(async (route, ...args) => {
   if (typeof DeckyBackend === "undefined" || typeof DeckyBackend.callable !== "function")
     throw new Error("Decky's installer is unavailable. Install the release ZIP through Decky Settings → Developer.");
   return DeckyBackend.callable<unknown[], unknown>(route)(...args);
-}, () => interactionListeners.forEach(listener => listener()));
+}, () => interactionListeners.forEach(listener => listener()), errorMessage);
 function nativeUpdatePrompt(name: string, version: string, requestId: string, hash: string) {
   pluginInstaller.prompt(name, version, requestId, hash);
 }
@@ -229,7 +233,7 @@ function queueFolders(next: string[]) {
 }
 let watchedJobs: Job[] = [];
 const jobTracker = new JobTracker();
-const installSession = new InstallSession();
+const installSession = new InstallSession(errorMessage);
 let jobTimer: ReturnType<typeof setInterval> | undefined;
 let jobPolling = false;
 let pluginDisposed = false;
@@ -262,7 +266,8 @@ function watchJobs(next: Job[], expectedRevision?: number, submittedId?: string)
   }
 }
 function Content() {
-  const [releaseChoice, setReleaseChoice] = useState(selectedReleaseChoice);
+  const [releaseChoice, setReleaseChoice] = useState(chosenModels.get(lastSelected)?.release
+    ?? releaseChoiceForGame(selectedReleaseChoice, selectedReleaseGame, lastSelected));
   const [submission, setSubmission] = useState(installSession.snapshot);
   const [overlay, setOverlay] = useState(latestOverlayStatus);
   const [data, setData] = useState<Library | undefined>(cachedLibrary);
@@ -277,7 +282,7 @@ function Content() {
   const [folders, setFolders] = useState<string[]>(pendingFolders);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dx12, setDx12] = useState(false);
-  const [variant, setVariant] = useState<string>();
+  const [variant, setVariant] = useState<string | undefined>(chosenModels.get(lastSelected)?.variant);
   const [diagnostics, setDiagnostics] = useState(false);
   const [setupDetailsOpen, setSetupDetailsOpen] = useState(false);
   const [discoveryNotes, setDiscoveryNotes] = useState(false);
@@ -349,7 +354,7 @@ function Content() {
     setBusy(true); setError("");
     try { return await fn(); }
     catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = errorMessage(e);
       setError(message);
       toaster.toast({ title: 'HelixSR action could not complete', body: message, duration: 10000 });
       return undefined;
@@ -361,7 +366,7 @@ function Content() {
     setLibraryLoading(true); setLibraryError("");
     const result = await run(async () => {
       try { return await (force ? libraryRead.refresh() : libraryRead.get()); }
-      catch (e) { setLibraryError(e instanceof Error ? e.message : String(e)); throw e; }
+      catch (e) { setLibraryError(errorMessage(e)); throw e; }
       finally { setLibraryLoading(false); }
     });
     if (result) {
@@ -404,9 +409,13 @@ function Content() {
   useEffect(() => {
     const models = data?.model_catalog;
     if (!game || !models) return;
+    const chosen = chosenModels.get(game.id);
     const installed = models.variants.find(v => v.id === game.installed_variant);
-    if (installed) chooseModel(installed, false);
-    else chooseRelease(releaseChoiceForGame(selectedReleaseChoice, selectedReleaseGame, game.id));
+    if (chosen && models.variants.some(v => v.id === chosen.variant)) { setVariant(chosen.variant); setReleaseChoice(chosen.release); }
+    // A release chosen before the catalog loaded has no model yet; resolve it now.
+    else if (chosen && chosen.variant === undefined) chooseRelease(chosen.release, false);
+    else if (installed) chooseModel(installed, false);
+    else chooseRelease(releaseChoiceForGame(selectedReleaseChoice, selectedReleaseGame, game.id), false);
   }, [game?.id, game?.installed_variant, data?.model_catalog?.default]);
   useEffect(() => {
     const changed = (next: Job[], finished: boolean) => { setJobs(next); if (finished) void refresh(true); };
@@ -466,21 +475,28 @@ function Content() {
     selectedReleaseGame = game?.id;
     setReleaseChoice(choice);
   }
+  function rememberModel(variantId: string | undefined, choice: string) {
+    // The dropdowns are usable before the remounted panel has the game's details.
+    if (selected) chosenModels.set(selected, { variant: variantId, release: choice });
+  }
   function chooseModel(model: Model, remember = true) {
     setVariant(model.id);
+    let choice = releaseChoice;
     if (model.release_choices?.length && !model.release_choices.includes(releaseChoice)) {
-      const choice = model.release_choices[0];
+      choice = model.release_choices[0];
       if (remember) rememberRelease(choice);
       else setReleaseChoice(choice);
     }
+    if (remember) rememberModel(model.id, choice);
   }
-  function chooseRelease(choice: string) {
+  function chooseRelease(choice: string, remember = true) {
     rememberRelease(choice);
     const models = data?.model_catalog?.variants || [];
     const pinned = choice === "latest" ? data?.release_choices?.find(c => c.version === data?.release.version)?.id : choice;
     const fits = (v: Model) => !pinned || pinned === "latest" || !v.release_choices || v.release_choices.includes(pinned);
     const model = models.find(v => v.id === variant && fits(v)) || models.find(fits);
     setVariant(model?.id);
+    if (remember) rememberModel(model?.id, choice);
   }
   async function installOrUpdate() {
     if (!game || installSession.snapshot.pending || watchedJobs.some(j => j.state === "running")) return;
@@ -489,7 +505,7 @@ function Content() {
     const review = async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
       setBusy(true);
       try { return await fn(); }
-      catch (e) { setInstallError(e instanceof Error ? e.message : String(e)); return undefined; }
+      catch (e) { setInstallError(errorMessage(e)); return undefined; }
       finally { setBusy(false); }
     };
     if (releaseChoice === "latest") {
@@ -584,7 +600,7 @@ function Content() {
         after = proxyOptions(before);
         if (after === before) { toaster.toast({ title: "HelixSR Decky", body: "OptiScaler proxy launch option is already configured" }); return; }
       }
-    } catch (e) { setError(String(e)); return; }
+    } catch (e) { setError(errorMessage(e)); return; }
     openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={restore ? "Restore previous launch options" : "Enable Proton OptiScaler proxy"}
       strDescription={<div style={{ overflowWrap: "anywhere" }}><p>Before: {before || "empty"}</p><p>After: {after || "empty"}</p></div>}
       onOK={() => { if (!beginReview()) return; void run(async () => {

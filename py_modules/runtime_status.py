@@ -55,16 +55,21 @@ def regular_beneath(path, root):
     return stream, info
 
 
-def mapped_paths(pid, paths):
-    """An exact mapped path establishes module presence, never rendered output."""
+def mapped_files(pid):
     try:
         with (Path('/proc') / str(pid) / 'maps').open() as stream:
             source = stream.read(4 << 20)
-        mapped = {line.split(None, 5)[5].removesuffix(' (deleted)')
-                  for line in source.splitlines() if len(line.split(None, 5)) == 6}
-        return any(str(path) in mapped for path in paths)
     except OSError:
-        return False
+        return set()
+    return {line.split(None, 5)[5].removesuffix(' (deleted)')
+            for line in source.splitlines() if len(line.split(None, 5)) == 6}
+
+
+def mapped_paths(pid, paths, mapped=None):
+    """An exact mapped path establishes module presence, never rendered output."""
+    if mapped is None:
+        mapped = mapped_files(pid)
+    return any(str(path) in mapped for path in paths)
 
 
 def executable_session(proc, expected):
@@ -111,6 +116,10 @@ def writing_log(pid, info):
     return False
 
 
+HLX_DIRECT_LOGS = ('HLX_FSR.log', 'OptiScaler.log')
+HLX_MODULES = ('amd_fidelityfx_upscaler_dx12.dll', 'amd_fidelityfx_upscaler_dx12.amd.dll')
+
+
 class RuntimeEvidence:
     def __init__(self, game):
         self.game = dict(game)
@@ -128,14 +137,20 @@ class RuntimeEvidence:
         settings = game.get('helix_settings') if isinstance(game.get('helix_settings'), dict) else {}
         self.native = bool(self.hlx and scaler and settings.get('upscaler') == 'fsr')
         self.provider = None
+        # Direct HLX writes to an existing OptiScaler.log, else to HLX_FSR.log
+        # beside the DLL it loaded, which may be a copy the game mirrors.
+        self.mirrors = set() if self.hlx and not scaler else None
         if self.hlx:
-            logs = ('OptiScaler.log',) if scaler else ('HLX_FSR.log',)
+            logs = ('OptiScaler.log',) if scaler else HLX_DIRECT_LOGS
             self.modules = ([target / 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll'] if scaler else
                             [Path(p) for p in game.get('targets', []) if Path(p).name.lower() == 'amd_fidelityfx_upscaler_dx12.dll'])
         else:
             logs = ('helixsr.log', 'HelixSR/helixsr.log', 'HelixSR-fsrfg/helixsr.log')
             self.modules = [Path(p) for p in game.get('targets', [])]
         self.paths = sorted({d / suffix for d in directories for suffix in logs}, key=str)
+        if scaler and self.hlx:
+            # With OptiScaler's file log off, HLX writes beside its own DLL.
+            self.paths.append(target / 'OptiScaler/HLX_FSR.log')
         if scaler and not self.hlx:
             if (game.get('installed_version') or game.get('version')) == '2.0.0':
                 self.modules.append(target / 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll')
@@ -172,6 +187,26 @@ class RuntimeEvidence:
             except (OSError, ValueError):
                 self.cursors.pop(str(path), None)
                 self.absent.discard(str(path))
+
+    def _discover(self, mapped):
+        """Watch logs beside mapped HLX DLL copies beneath the game, e.g. _storage_/."""
+        for name in sorted(mapped):
+            path = Path(name)
+            if path.name.lower() not in HLX_MODULES or path.parent in self.mirrors or len(self.mirrors) >= 4:
+                continue
+            try:
+                # Lexical check; regular_beneath still rejects symlinks when reading.
+                if '..' in path.parent.relative_to(self.root).parts:
+                    continue
+            except ValueError:
+                continue
+            self.mirrors.add(path.parent)
+            for log in (path.parent / suffix for suffix in HLX_DIRECT_LOGS):
+                if log not in self.paths:
+                    self.paths.append(log)
+                    if not os.path.lexists(log):
+                        # Like a prelaunch absence: only the game's own new writer counts.
+                        self.absent.add(str(log))
 
     def _read(self, path, proc):
         startup = (str(path) in self.startup_reads and self.startup_deadline is not None
@@ -287,7 +322,10 @@ class RuntimeEvidence:
             self.startup_reads.clear()
             return dict(base, state='disabled', label='Recorded installation disabled',
                         detail='Close the game and enable HelixSR before testing again.')
-        if not self.game.get('managed') or not mapped_paths(proc['pid'], self.modules):
+        # One maps snapshot per sample: the module check and mirror discovery
+        # must not disagree because a second read failed or raced the loader.
+        mapped = mapped_files(proc['pid']) if self.game.get('managed') else set()
+        if not self.game.get('managed') or not mapped_paths(proc['pid'], self.modules, mapped):
             # Keep armed prelaunch positions while the module is still loading.
             self.event = None
             self.ready.clear()
@@ -296,6 +334,8 @@ class RuntimeEvidence:
                         detail='No managed HelixSR module mapping verified. File installation alone is not output evidence.')
         if self.startup_reads and self.startup_deadline is None:
             self.startup_deadline = time.monotonic() + 15
+        if self.mirrors is not None:
+            self._discover(mapped)
         errors = []
         for path in self.paths:
             try:

@@ -237,7 +237,8 @@ def _hlx_report(directory, route, options, values, error):
                 'overlay shortcut disabled' if shortcut_key == '-1' else 'configured ShortcutKey=' + shortcut_key)
     checks = []
     if direct:
-        checks.append('Select AMD FSR in the DX12 game. Check a fresh HLX_FSR.log for the active HLX runtime or fallback to the original AMD provider.')
+        checks.append('Select AMD FSR in the DX12 game. Check a fresh HLX_FSR.log, or an existing OptiScaler.log, beside the DLL the game loaded '
+                      '(some games load a copy from a folder such as _storage_) for the active HLX runtime or fallback to the original AMD provider.')
         configured, paths_match = False, not missing
         fg = None
         backend = 'Native FSR 3.1 input'
@@ -248,7 +249,9 @@ def _hlx_report(directory, route, options, values, error):
         backend = {'0': 'HLX FSR 4 (FSR 4.1.2)', '1': 'AMD FSR (native)'}.get(values.get('UpscalerIndex')) if output == 'ffx' and paths_match else None
         configured = bool(backend and not missing and not error)
         backend = backend or 'Custom or unknown Scaler output'
-        checks.append(f'Configured output: {backend}. Select a supported DLSS, FSR or XeSS input in the DX12 game. Check a fresh OptiScaler.log to identify the active provider.')
+        checks.append(f'Configured output: {backend}. Select a supported DLSS, FSR or XeSS input in the DX12 game. Check a fresh log to identify the active provider: '
+                      'HLX writes OptiScaler/HLX_FSR.log, or OptiScaler.log when OptiScaler file logging is on (LogToFile=true; also set LogLevel=2, '
+                      'because the default Trace level grows too fast for the status monitor). Turn file logging off for benchmarks.')
         if launch != 'correct':
             checks.append('DXGI launch override: ' + launch + '. Review the proxy launch option in Steam or your launcher.')
         if error:
