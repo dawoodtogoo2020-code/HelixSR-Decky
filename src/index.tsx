@@ -104,6 +104,9 @@ const applyAction = callable<[string], { message: string }>("apply_action");
 const previewLatest = callable<[string, boolean, string?, string?, string?], Preview>("preview_latest");
 let selectedReleaseChoice = DEFAULT_RELEASE_CHOICE;
 let selectedReleaseGame: string | undefined;
+// Explicit model/release choices by game id. Steam unmounts this panel while a
+// dropdown menu is open, so a choice must outlive the panel that received it.
+const chosenModels = new Map<string, { variant?: string; release: string }>();
 let rememberedGameSettingsOpen = false;
 let rememberedTuningOpen = false;
 const installLatest = callable<[string], Job>("install_latest");
@@ -262,7 +265,8 @@ function watchJobs(next: Job[], expectedRevision?: number, submittedId?: string)
   }
 }
 function Content() {
-  const [releaseChoice, setReleaseChoice] = useState(selectedReleaseChoice);
+  const [releaseChoice, setReleaseChoice] = useState(chosenModels.get(lastSelected)?.release
+    ?? releaseChoiceForGame(selectedReleaseChoice, selectedReleaseGame, lastSelected));
   const [submission, setSubmission] = useState(installSession.snapshot);
   const [overlay, setOverlay] = useState(latestOverlayStatus);
   const [data, setData] = useState<Library | undefined>(cachedLibrary);
@@ -277,7 +281,7 @@ function Content() {
   const [folders, setFolders] = useState<string[]>(pendingFolders);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [dx12, setDx12] = useState(false);
-  const [variant, setVariant] = useState<string>();
+  const [variant, setVariant] = useState<string | undefined>(chosenModels.get(lastSelected)?.variant);
   const [diagnostics, setDiagnostics] = useState(false);
   const [setupDetailsOpen, setSetupDetailsOpen] = useState(false);
   const [discoveryNotes, setDiscoveryNotes] = useState(false);
@@ -404,9 +408,11 @@ function Content() {
   useEffect(() => {
     const models = data?.model_catalog;
     if (!game || !models) return;
+    const chosen = chosenModels.get(game.id);
     const installed = models.variants.find(v => v.id === game.installed_variant);
-    if (installed) chooseModel(installed, false);
-    else chooseRelease(releaseChoiceForGame(selectedReleaseChoice, selectedReleaseGame, game.id));
+    if (chosen && models.variants.some(v => v.id === chosen.variant)) { setVariant(chosen.variant); setReleaseChoice(chosen.release); }
+    else if (installed) chooseModel(installed, false);
+    else chooseRelease(releaseChoiceForGame(selectedReleaseChoice, selectedReleaseGame, game.id), false);
   }, [game?.id, game?.installed_variant, data?.model_catalog?.default]);
   useEffect(() => {
     const changed = (next: Job[], finished: boolean) => { setJobs(next); if (finished) void refresh(true); };
@@ -466,21 +472,28 @@ function Content() {
     selectedReleaseGame = game?.id;
     setReleaseChoice(choice);
   }
+  function rememberModel(variantId: string | undefined, choice: string) {
+    // The dropdowns are usable before the remounted panel has the game's details.
+    if (selected) chosenModels.set(selected, { variant: variantId, release: choice });
+  }
   function chooseModel(model: Model, remember = true) {
     setVariant(model.id);
+    let choice = releaseChoice;
     if (model.release_choices?.length && !model.release_choices.includes(releaseChoice)) {
-      const choice = model.release_choices[0];
+      choice = model.release_choices[0];
       if (remember) rememberRelease(choice);
       else setReleaseChoice(choice);
     }
+    if (remember) rememberModel(model.id, choice);
   }
-  function chooseRelease(choice: string) {
+  function chooseRelease(choice: string, remember = true) {
     rememberRelease(choice);
     const models = data?.model_catalog?.variants || [];
     const pinned = choice === "latest" ? data?.release_choices?.find(c => c.version === data?.release.version)?.id : choice;
     const fits = (v: Model) => !pinned || pinned === "latest" || !v.release_choices || v.release_choices.includes(pinned);
     const model = models.find(v => v.id === variant && fits(v)) || models.find(fits);
     setVariant(model?.id);
+    if (remember) rememberModel(model?.id, choice);
   }
   async function installOrUpdate() {
     if (!game || installSession.snapshot.pending || watchedJobs.some(j => j.state === "running")) return;

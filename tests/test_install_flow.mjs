@@ -569,6 +569,101 @@ test("an explicit HLX choice for one game is kept on refresh but never preselect
   assert.equal(control("HelixSR model").props.selectedOption, models[0].id);
 });
 
+const MODEL_E = "helixsr-model-e", HLX = "hlx-fsr4-1-2";
+function modelChoiceHarness(games, overrides = {}) {
+  const models = [
+    {id: MODEL_E, label: "Model E", release_choices: ["reviewed-2.0.0", "reviewed-1.9.3", "compatible-1.8.1", "latest"]},
+    {id: HLX, label: "HLX FSR 4", release_choices: ["reviewed-3.2.0"]}
+  ];
+  let list;
+  const h = harness({
+    library: () => ({...h.library(), games: list.map(g => ({...g})),
+      model_catalog: {default: MODEL_E, variants: models},
+      release_choices: [{id: "reviewed-2.0.0", version: "2.0.0"}, {id: "reviewed-3.2.0", version: "3.2.0"}]}),
+    game_details: id => ({...list.find(g => g.id === id)}),
+    preview_latest: (gid, _dx12, id, _exe, choice) => ({token: "preview", name: gid, files: [], variant_id: id,
+      model: id, route: "direct", select_upscaler: "Helix SR", release_version: choice}),
+    ...overrides });
+  list = games(h.game);
+  const control = label => h.walk(h.render(), n => n.type === "DropdownItem" && n.props.label === label)[0];
+  const shown = () => [control("HelixSR model").props.selectedOption, control("Release to install").props.selectedOption];
+  // Steam closes the quick-access panel while a dropdown menu is open: the option
+  // reaches the unmounted panel's callback and a fresh panel mounts afterwards.
+  async function pickInMenu(label, data) {
+    const dropdown = control(label); h.unmount();
+    dropdown.props.onChange({data});
+    h.mount(); const remounted = shown();
+    await flush(); h.render(); await flush(); h.render();
+    return remounted;
+  }
+  async function refresh() {
+    h.walk(h.render(), n => n.type === "ButtonItem" && /Refresh library and status/.test(h.text(n)))[0].props.onClick();
+    await flush(); h.render(); await flush(); h.render();
+  }
+  async function update() {
+    const button = h.walk(h.render(), n => n.type === "ButtonItem" && /Update this game's HelixSR/.test(h.text(n)))[0];
+    assert.ok(button); assert.equal(button.props.disabled, false);
+    button.props.onClick(); await flush(); h.render();
+    return h.calls.filter(call => call.route === "preview_latest").at(-1).args;
+  }
+  return {...h, control, shown, pickInMenu, refresh, update};
+}
+
+test("an explicit HLX choice on a managed Model E game survives the dropdown remount and Refresh", async () => {
+  const h = modelChoiceHarness(game => [Object.assign(game, {managed: true, enabled: true,
+    installed_version: "2.0.0", installed_model: "HelixSR Model E", installed_variant: MODEL_E})]);
+  await h.ready();
+  assert.deepEqual(h.shown(), [MODEL_E, "reviewed-2.0.0"], "without a choice the installed model is shown");
+  assert.deepEqual(await h.pickInMenu("HelixSR model", HLX), [HLX, "reviewed-3.2.0"], "remounted panel starts with the choice");
+  assert.deepEqual(h.shown(), [HLX, "reviewed-3.2.0"], "installed Model E does not override the choice");
+  await h.refresh();
+  assert.deepEqual(h.shown(), [HLX, "reviewed-3.2.0"]);
+  h.unmount(); h.mount(); await flush(); h.render(); await flush(); h.render();
+  assert.deepEqual(h.shown(), [HLX, "reviewed-3.2.0"]);
+  const args = await h.update();
+  assert.deepEqual([args[2], args[4]], [HLX, "reviewed-3.2.0"], "Update reviews the Model E to HLX upgrade");
+  // The review dialog also remounts the panel; choose before it has the game's details.
+  h.unmount(); h.mount(); await flush();
+  assert.deepEqual(await h.pickInMenu("HelixSR model", MODEL_E), [MODEL_E, "reviewed-2.0.0"]);
+  assert.deepEqual(h.shown(), [MODEL_E, "reviewed-2.0.0"], "choosing the installed model again leaves no stale HLX state");
+});
+
+test("an explicit Model E choice on an HLX game survives the remount so Update reaches the downgrade guard", async () => {
+  const downgrade = "HelixSR 3.2.0 is installed for this game; installing 2.0.0 would downgrade it. Close the game and use Remove to restore the original files, then install the selected model. No files were changed.";
+  const h = modelChoiceHarness(game => [Object.assign(game, {managed: true, enabled: true,
+    installed_version: "3.2.0", installed_model: "HLX FSR 4 (FSR 4.1.2 Lite)", installed_variant: HLX})], {
+    preview_latest: (_gid, _dx12, id, _exe, choice) => {
+      assert.deepEqual([id, choice], [MODEL_E, "reviewed-2.0.0"]);
+      throw Error(downgrade);
+    } });
+  await h.ready();
+  assert.deepEqual(h.shown(), [HLX, "reviewed-3.2.0"], "without a choice the installed model is shown");
+  assert.deepEqual(await h.pickInMenu("HelixSR model", MODEL_E), [MODEL_E, "reviewed-2.0.0"]);
+  assert.deepEqual(h.shown(), [MODEL_E, "reviewed-2.0.0"], "installed HLX does not override the choice");
+  await h.refresh();
+  assert.deepEqual(h.shown(), [MODEL_E, "reviewed-2.0.0"]);
+  const args = await h.update();
+  assert.deepEqual([args[2], args[4]], [MODEL_E, "reviewed-2.0.0"]);
+  assert.match(h.text(h.render()), /installing 2\.0\.0 would downgrade it/);
+  assert.equal(h.count("install_latest"), 0);
+});
+
+test("an explicit HLX choice for uninstalled game A survives remounts and Refresh but never preselects game B", async () => {
+  const h = modelChoiceHarness(game => [game, {...game, id: "other", name: "Other game", folder: "/games/Other"}]);
+  await h.ready();
+  assert.deepEqual(h.shown(), [MODEL_E, "reviewed-2.0.0"]);
+  assert.deepEqual(await h.pickInMenu("HelixSR model", HLX), [HLX, "reviewed-3.2.0"]);
+  assert.deepEqual(h.shown(), [HLX, "reviewed-3.2.0"]);
+  await h.refresh();
+  assert.deepEqual(h.shown(), [HLX, "reviewed-3.2.0"], "same game keeps its explicit opt-in across Refresh");
+  assert.deepEqual(await h.pickInMenu("Game", "other"), [MODEL_E, "reviewed-2.0.0"], "B's remounted panel never starts on A's prerelease");
+  assert.deepEqual(h.shown(), [MODEL_E, "reviewed-2.0.0"], "B shows the default");
+  await h.refresh();
+  assert.deepEqual(h.shown(), [MODEL_E, "reviewed-2.0.0"]);
+  assert.deepEqual(await h.pickInMenu("Game", "pragmata"), [HLX, "reviewed-3.2.0"]);
+  assert.deepEqual(h.shown(), [HLX, "reviewed-3.2.0"], "A keeps its own choice after B was viewed");
+});
+
 test("HLX Scaler exposes native AMD as a separate output and only available FG providers", async () => {
   const h = harness();
   enableSettings(h, {family: "hlx-fsr", upscaler: "hlx-fsr", provider: "off"});
