@@ -215,7 +215,36 @@ class RuntimeEvidenceTests(unittest.TestCase):
         self.evidence = runtime_status.RuntimeEvidence(dict(self.game, installed_variant='hlx-fsr4-1-2',
                                                             route='optiscaler', target=str(self.root)))
         self.evidence.sample()
-        self.assertEqual(self.evidence.paths, [self.root / 'OptiScaler.log'])
+        self.assertEqual(self.evidence.paths, [self.root / 'OptiScaler.log', self.root / 'OptiScaler/HLX_FSR.log'])
+
+    def test_hlx_scaler_reads_hlx_fsr_log_beside_its_dll_when_optiscaler_file_logging_is_off(self):
+        amd = "create: FSR 3.1.6 requested: AMD's original"
+        native = dict(available=True, upscaler='fsr')
+        for settings, message, expected in (
+                ({}, self.ACTIVE, self.HLX_LABEL),
+                (native, amd, ('loaded', 'AMD FSR (native) provider selected; frame processing unverified')),
+                ({}, amd, ('failure', 'Session log reports AMD fallback or an HLX error'))):
+            for stale in (None, b'[I] HLX-FSR-4 ' + self.ACTIVE.encode() + b'\r\n'):
+                with self.subTest(settings=settings, message=message, stale=bool(stale)):
+                    folder = self.root / 'OptiScaler'
+                    folder.mkdir(exist_ok=True)
+                    self.log = folder / 'HLX_FSR.log'
+                    self.log.unlink(missing_ok=True)
+                    if stale:
+                        self.log.write_bytes(stale)
+                    self.evidence = runtime_status.RuntimeEvidence(dict(
+                        self.game, installed_variant='hlx-fsr4-1-2', route='optiscaler', target=str(self.root),
+                        helix_settings=settings))
+                    self.processes = []
+                    self.assertEqual(self.evidence.sample()['state'], 'not_running')
+                    self.processes = [self.proc]
+                    with patch.object(runtime_status, 'writing_log', return_value=True):
+                        self.assertEqual(self.evidence.sample()['state'], 'mapped', 'old text is not this session')
+                        self.hlx_line('loaded (build Oct 28 2026 20:24:22)')
+                        self.hlx_line(message)
+                        status = self.evidence.sample()
+                    self.assertEqual((status['state'], status['label']), expected)
+                    self.assertFalse((self.root / 'OptiScaler.log').exists())
 
     def test_hlx_errors_are_failures_not_fallback_selection(self):
         for message in ("create: AMD's original failed too (code -2147024809)",

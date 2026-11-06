@@ -59,7 +59,8 @@ def setup_guidance(game):
         steps = ['This native FSR replacement does not need an OptiScaler proxy launch option.']
     if managed and game.get('enabled'):
         if hlx:
-            log = 'OptiScaler.log' if route == 'optiscaler' else 'HLX_FSR.log'
+            log = ('OptiScaler/HLX_FSR.log, or OptiScaler.log when OptiScaler file logging is on,' if route == 'optiscaler' else
+                   'HLX_FSR.log, or an existing OptiScaler.log, beside the DLL the game loaded (some games load a copy from a folder such as _storage_)')
             steps.append(f"Check a fresh {log} for an active HLX FSR 4 runtime or fallback to AMD. A GPU dispatch capture can confirm frame processing. Check frame generation separately.")
         else:
             steps.append('Installed files are not runtime proof. The optional status overlay needs fresh HelixSR log evidence to report neural output.')

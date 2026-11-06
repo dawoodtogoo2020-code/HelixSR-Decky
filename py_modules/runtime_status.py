@@ -147,6 +147,9 @@ class RuntimeEvidence:
             logs = ('helixsr.log', 'HelixSR/helixsr.log', 'HelixSR-fsrfg/helixsr.log')
             self.modules = [Path(p) for p in game.get('targets', [])]
         self.paths = sorted({d / suffix for d in directories for suffix in logs}, key=str)
+        if scaler and self.hlx:
+            # With OptiScaler's file log off, HLX writes beside its own DLL.
+            self.paths.append(target / 'OptiScaler/HLX_FSR.log')
         if scaler and not self.hlx:
             if (game.get('installed_version') or game.get('version')) == '2.0.0':
                 self.modules.append(target / 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll')
