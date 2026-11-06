@@ -42,7 +42,7 @@ For a managed game, **Recorded route** describes its existing installation. New 
 
 ## Updates and removal
 
-The **HelixSR model** dropdown on the Games tab supports Model E and, in the 0.1.21 source included with Decky 0.1.38, HLX FSR 4 (FSR 4.1.2 Lite). Select a model to choose its reviewed release. See [HLX FSR on SteamOS](docs/hlx-fsr.md) for setup, testing and recovery.
+The **HelixSR model** dropdown on the Games tab supports Model E and, in the 0.1.21 source included with Decky 0.1.39, HLX FSR 4 (FSR 4.1.2 Lite). Select a model to choose its reviewed release. See [HLX FSR on SteamOS](docs/hlx-fsr.md) for setup, testing and recovery.
 
 **Enable** uses the recorded package instead of silently choosing a newer cache. For older disabled records whose exact package cannot be proven, use **Update HelixSR** and review the change. Model metadata problems do not prevent restoring owned originals through Disable or Remove. For model support, update both managers to Decky **0.1.9** and desktop **0.1.5** or newer before using them on the same game.
 
