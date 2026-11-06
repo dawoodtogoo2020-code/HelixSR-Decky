@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { GameDetailsRead } from '../src/gameDetailsRead.ts';
+import { errorMessage } from '../src/errorMessage.ts';
 
 function deferred() {
   let resolve, reject;
@@ -18,8 +19,8 @@ test('details deadline releases the actual panel action busy state and reports r
   const action = source.slice(start, end).replace(
     'async function run<T>(fn: () => Promise<T>): Promise<T | undefined>', 'async function run(fn)');
   let busy = false, error = '';
-  const run = Function('setBusy', 'setError', 'toaster', `${action}; return run;`)(
-    value => { busy = value; }, value => { error = value; }, { toast() {} });
+  const run = Function('setBusy', 'setError', 'toaster', 'errorMessage', `${action}; return run;`)(
+    value => { busy = value; }, value => { error = value; }, { toast() {} }, errorMessage);
   const pending = deferred();
   const reads = new GameDetailsRead(() => pending.promise, 10);
   const result = run(() => reads.get('a'));

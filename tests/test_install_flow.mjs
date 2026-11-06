@@ -146,7 +146,7 @@ function harness(overrides = {}) {
     assert.ok(dropdown, "Game executable selector is visible");
     dropdown.props.onChange({ data: path }); await flush(); render();
   }
-  return { game, library, calls, toasts, intervals, timeouts, ready, render, mount, unmount, text, openInstall,
+  return { game, library, calls, toasts, intervals, timeouts, context, ready, render, mount, unmount, text, openInstall,
     chooseExecutable, menuToggle, openMenuChange, openAdvanced, walk, installButton,
     count: route => calls.filter(call => call.route === route).length };
 }
@@ -648,6 +648,29 @@ test("an explicit Model E choice on an HLX game survives the remount so Update r
   assert.equal(h.count("install_latest"), 0);
 });
 
+// Decky 3.3 rejects a failed backend call with a PyError: an Error of the panel's
+// own realm whose message is empty; the exception text is only in pythonTraceback.
+function pyError(h, message, type = "Exception") {
+  const PyError = vm.runInContext(`(class PyError extends Error {
+    constructor(traceback) { super(""); this.name = "Python Exception"; this.pythonTraceback = traceback; } })`, h.context);
+  return new PyError('Traceback (most recent call last):\n  File "decky_loader/plugin/messages.py", line 44, in wait_for_result\n'
+    + `${type}: ${message}\n`);
+}
+
+test("Decky's empty-message PyError still shows the downgrade guard text after Update", async () => {
+  const downgrade = "HelixSR 3.2.0 is installed for this game; installing 2.0.0 would downgrade it. Close the game and use Remove to restore the original files, then install the selected model. No files were changed.";
+  const h = modelChoiceHarness(game => [Object.assign(game, {managed: true, enabled: true,
+    installed_version: "3.2.0", installed_model: "HLX FSR 4 (FSR 4.1.2 Lite)", installed_variant: HLX})], {
+    preview_latest: () => { throw pyError(h, downgrade); } });
+  await h.ready();
+  await h.pickInMenu("HelixSR model", MODEL_E);
+  const args = await h.update();
+  assert.deepEqual([args[2], args[4]], [MODEL_E, "reviewed-2.0.0"]);
+  const alerts = h.walk(h.render(), n => n.props?.role === "alert").map(n => h.text(n));
+  assert.ok(alerts.includes(downgrade), `alert shows the backend text: ${JSON.stringify(alerts)}`);
+  assert.equal(h.count("install_latest"), 0);
+});
+
 test("an explicit HLX choice for uninstalled game A survives remounts and Refresh but never preselects game B", async () => {
   const h = modelChoiceHarness(game => [game, {...game, id: "other", name: "Other game", folder: "/games/Other"}]);
   await h.ready();
@@ -730,4 +753,14 @@ test("Helix settings exposes save failures and disables edits during a running j
   settingsDropdown(editable, "Upscaler").props.onChange({ data: "fsr" }); await flush();
   assert.match(editable.text(editable.render()), /Settings changed; refresh before saving/);
   assert.ok(editable.toasts.some(toast => /action could not complete/.test(toast.title)));
+});
+
+test("a failed panel action shows and toasts the PyError's traceback message", async () => {
+  const message = "Settings changed; refresh before saving";
+  const h = harness({ set_game_settings: () => { throw pyError(h, message, "ValueError"); } });
+  enableSettings(h); await h.ready(); h.openAdvanced();
+  settingsDropdown(h, "Upscaler").props.onChange({ data: "fsr" }); await flush();
+  const toast = h.toasts.find(item => /action could not complete/.test(item.title));
+  assert.equal(toast?.body, message);
+  assert.match(h.text(h.render()), new RegExp(message));
 });

@@ -8,6 +8,8 @@ export type InstallSubmission = { pending: boolean; gid: string; name: string;
 export class InstallSession {
   private state: InstallSubmission = { pending: false, gid: "", name: "", message: "", error: "" };
   private listeners = new Set<(state: InstallSubmission) => void>();
+  private describe: (error: unknown) => string;
+  constructor(describe = (error: unknown) => error instanceof Error ? error.message : String(error)) { this.describe = describe; }
 
   get snapshot(): InstallSubmission { return { ...this.state }; }
 
@@ -34,7 +36,7 @@ export class InstallSession {
       await task();
       return true;
     } catch (error) {
-      this.state.error = error instanceof Error ? error.message : String(error);
+      this.state.error = this.describe(error);
       return false;
     } finally {
       this.state.pending = false;

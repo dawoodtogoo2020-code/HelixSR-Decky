@@ -15,6 +15,7 @@ import { readLaunchOptions } from "./launchDetails";
 import { HelixSettings, HelixSettingsState } from "./HelixSettings";
 import { overlayShortcut } from "./overlayShortcut";
 import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceForGame, releaseChoiceLabel } from "./releaseChoices";
+import { errorMessage } from "./errorMessage";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -169,7 +170,7 @@ const pluginInstaller = new PluginInstaller(async (route, ...args) => {
   if (typeof DeckyBackend === "undefined" || typeof DeckyBackend.callable !== "function")
     throw new Error("Decky's installer is unavailable. Install the release ZIP through Decky Settings → Developer.");
   return DeckyBackend.callable<unknown[], unknown>(route)(...args);
-}, () => interactionListeners.forEach(listener => listener()));
+}, () => interactionListeners.forEach(listener => listener()), errorMessage);
 function nativeUpdatePrompt(name: string, version: string, requestId: string, hash: string) {
   pluginInstaller.prompt(name, version, requestId, hash);
 }
@@ -232,7 +233,7 @@ function queueFolders(next: string[]) {
 }
 let watchedJobs: Job[] = [];
 const jobTracker = new JobTracker();
-const installSession = new InstallSession();
+const installSession = new InstallSession(errorMessage);
 let jobTimer: ReturnType<typeof setInterval> | undefined;
 let jobPolling = false;
 let pluginDisposed = false;
@@ -353,7 +354,7 @@ function Content() {
     setBusy(true); setError("");
     try { return await fn(); }
     catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = errorMessage(e);
       setError(message);
       toaster.toast({ title: 'HelixSR action could not complete', body: message, duration: 10000 });
       return undefined;
@@ -365,7 +366,7 @@ function Content() {
     setLibraryLoading(true); setLibraryError("");
     const result = await run(async () => {
       try { return await (force ? libraryRead.refresh() : libraryRead.get()); }
-      catch (e) { setLibraryError(e instanceof Error ? e.message : String(e)); throw e; }
+      catch (e) { setLibraryError(errorMessage(e)); throw e; }
       finally { setLibraryLoading(false); }
     });
     if (result) {
@@ -502,7 +503,7 @@ function Content() {
     const review = async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
       setBusy(true);
       try { return await fn(); }
-      catch (e) { setInstallError(e instanceof Error ? e.message : String(e)); return undefined; }
+      catch (e) { setInstallError(errorMessage(e)); return undefined; }
       finally { setBusy(false); }
     };
     if (releaseChoice === "latest") {
@@ -597,7 +598,7 @@ function Content() {
         after = proxyOptions(before);
         if (after === before) { toaster.toast({ title: "HelixSR Decky", body: "OptiScaler proxy launch option is already configured" }); return; }
       }
-    } catch (e) { setError(String(e)); return; }
+    } catch (e) { setError(errorMessage(e)); return; }
     openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={restore ? "Restore previous launch options" : "Enable Proton OptiScaler proxy"}
       strDescription={<div style={{ overflowWrap: "anywhere" }}><p>Before: {before || "empty"}</p><p>After: {after || "empty"}</p></div>}
       onOK={() => { if (!beginReview()) return; void run(async () => {
