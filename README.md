@@ -1,8 +1,10 @@
 # HelixSR Decky
 
+**0.1.41 controls update:** Disable, Enable and Remove are visible directly below the selected game's install/update button. Action reviews explain restoration and use explicit confirmation buttons.
+
 **0.1.40 recovery fixes:** adds a reviewed **Reset HelixSR setup** action for stale native installations and shorter warning cards with expandable details. See the [recovery steps](STATUS_GUIDE.md#resetting-a-native-installation-after-a-game-update). Automated checks passed; Cyberpunk recovery and gameplay still need an on-device retest.
 
-**Latest:** Decky **0.1.40** includes **HLX FSR 4 (AMD FSR 4.1.2 Lite)** through the reviewed HelixSR 3.2.0 prerelease. Install [HelixSR-Decky-0.1.40.zip](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.40/HelixSR-Decky-0.1.40.zip) from the [v0.1.40 release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.40). Select the HLX model explicitly; Model E / HelixSR 2.0.0 remains the default. SteamOS gameplay, image quality, performance and frame generation with HLX remain unverified. See [installation, testing and rollback](docs/hlx-fsr.md). Desktop 0.1.21 changes are included in source; no 0.1.21 AppImage is published.
+**Latest:** Decky **0.1.41** includes **HLX FSR 4 (AMD FSR 4.1.2 Lite)** through the reviewed HelixSR 3.2.0 prerelease. Install [HelixSR-Decky-0.1.41.zip](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.41/HelixSR-Decky-0.1.41.zip) from the [v0.1.41 release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.41). Select the HLX model explicitly; Model E / HelixSR 2.0.0 remains the default. SteamOS gameplay, image quality, performance and frame generation with HLX remain unverified. See [installation, testing and rollback](docs/hlx-fsr.md). Desktop 0.1.21 changes are included in source; no 0.1.21 AppImage is published.
 
 Decky **0.1.36** reuses the library list when opening dropdowns, selects **HelixSR 2.0.0** by default and offers a verified repair for missing managed files. **Refresh library and status** still rescans the library. Older releases are labeled explicitly, and package review is explained separately from game installation warnings. Frame-generation controls do not establish gameplay compatibility; see [settings and validation limits](UPGRADE_2.0.md).
 
@@ -12,7 +14,7 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 
 [Support Blackheart909 on Ko-fi](https://ko-fi.com/blackheart909). Optional support helps with my work on this independent plugin and my other projects. HelixSR is developed separately by Lone Wolf.
 
-[Download Decky 0.1.40 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.40/HelixSR-Decky-0.1.40.zip) · [All releases](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Desktop AppImage and guide](DESKTOP_GUIDE.md) · [OptiScaler setup](OPTISCALER_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
+[Download Decky 0.1.41 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.41/HelixSR-Decky-0.1.41.zip) · [All releases](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Desktop AppImage and guide](DESKTOP_GUIDE.md) · [OptiScaler setup](OPTISCALER_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
 
 Use the **install ZIP** in Decky. Developer source archives, including older `-source.zip` files and GitHub's **Source code** downloads, cannot run as a plugin. If Decky reports **Failed to fetch dynamically imported module**, follow the [repair steps](INSTALL_GUIDE.md#failed-to-fetch-dynamically-imported-module).
 
