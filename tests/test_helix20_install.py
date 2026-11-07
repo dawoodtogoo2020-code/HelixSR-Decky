@@ -82,6 +82,18 @@ class Helix20InstallTests(Fixtures):
         self.assertEqual(after, before)
         self.assertFalse(self.m.record(self.game))
 
+    def test_native_reset_after_game_update_preserves_new_dll(self):
+        self.game['build'] = '100'
+        self.modern20_package()
+        self.action('install')
+        self.game['build'] = '101'
+        updated = pe(ffx=True) + b'new native game build'
+        write(self.native, updated)
+        self.action('reset')
+        self.assertEqual(self.native.read_bytes(), updated)
+        self.assertFalse(self.m.record(self.game))
+        self.assertEqual(self.m.assess(self.game)['compatibility'], 'candidate')
+
     def test_19_to_20_migration_settings_journal_and_restore(self):
         self.scaler_game()
         self.modern19_package()

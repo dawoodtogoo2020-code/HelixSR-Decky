@@ -12,6 +12,9 @@ ADVISORY_CODES = frozenset({'dx12_unconfirmed', 'legacy_installation'})
 
 def _steam_build_steps(game):
     steps = [
+        ('Use Reset HelixSR setup to clear the old setup, then verify files in Steam and reinstall.'
+         if game.get('reset_eligible') else game.get('reset_reason') or
+         'Finish Steam updates and close the game, then refresh to check recovery options.'),
         'HelixSR file changes stay blocked after this game build change. Install, Update, Disable, and Remove cannot safely change old files; Remove would restore saved originals from the recorded build, which may replace files from the current build.',
         'Let Steam finish updating, close the game normally, then refresh the game status.',
         'Steam file verification may restore current game files, but does not reconcile HelixSR\'s installation receipt.',
@@ -22,7 +25,7 @@ def _steam_build_steps(game):
         if (isinstance(recorded, str) and isinstance(current, str)
                 and re.fullmatch(r'(?:[0-9]+|unavailable)', recorded)
                 and re.fullmatch(r'(?:[0-9]+|unavailable)', current)):
-            steps.insert(0, f'Recorded Steam build: {recorded}; current Steam build: {current}.')
+            steps.insert(1, f'Recorded Steam build: {recorded}; current Steam build: {current}.')
         states = {'installed bytes match', 'saved-original bytes match', 'missing',
                   'externally changed', 'retained configuration'}
         files = report.get('files')
@@ -62,6 +65,13 @@ def _issue(reason, game=None):
         return ('steam_update', 'Steam update in progress',
                 ['Let Steam finish the installation or update, then refresh.'])
     if 'managed files changed' in lower or 'ownership needs review' in lower:
+        if (game or {}).get('reset_eligible'):
+            title = ('Original file restored' if lower.endswith('(current state: matches recorded original)')
+                     else 'Game files no longer match the old setup')
+            return ('managed_files_changed', title,
+                    ['Use Reset HelixSR setup. Your current game DLL is kept unchanged.',
+                     'The reset removes only unchanged files added by HelixSR and archives the old installation record.',
+                     'Then verify game files in Steam, refresh, and install HelixSR again.'])
         if lower.endswith('(current state: matches recorded original)'):
             return ('managed_files_changed', 'Original file restored',
                     ['This file matches the original recorded before HelixSR installation, rather than the installed HelixSR file. Game verification or another installer may have restored it.',
@@ -174,9 +184,13 @@ def installation_status(game):
         game.get('restore_eligible') and not running and not recovery or
         compatibility == 'unsupported' and game.get('renderer_unsupported') and not running and not recovery)
     can_repair = bool(game.get('repair_eligible')) and not running and not recovery
+    can_reset = bool(game.get('reset_eligible')) and not running and not recovery
+    if can_reset:
+        label = 'Reset setup available'
+        summary = 'The old HelixSR setup can be reset without restoring old game files.'
     if can_restore and game.get('restore_eligible'):
         summary = ('Some plugin-created files are already absent. Disable or Remove can finish restoring '
                    'the recorded originals; installation and updates stay blocked.')
     return dict(state=state, label=label, summary=summary, running=running,
                 selectable=selectable, can_modify=state == 'ready', can_restore=can_restore,
-                can_repair=can_repair, issues=issues)
+                can_repair=can_repair, can_reset=can_reset, issues=issues)

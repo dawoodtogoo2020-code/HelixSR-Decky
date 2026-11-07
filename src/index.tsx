@@ -52,14 +52,14 @@ type FG = { source: string; key: string; value: string; enabled: boolean | null;
 type Game = { id: string; name: string; folder: string; source: string; compatibility: string;
   helix_settings?: HelixSettingsState;
   installation_status?: { state: "ready" | "running" | "review" | "unsupported" | "recovery"; label: string; summary: string;
-    running: boolean; selectable: boolean; can_modify: boolean; can_restore?: boolean; can_repair?: boolean; issues: {code: string; title: string; reason: string; steps: string[]; blocking: boolean}[] };
+    running: boolean; selectable: boolean; can_modify: boolean; can_restore?: boolean; can_repair?: boolean; can_reset?: boolean; issues: {code: string; title: string; reason: string; steps: string[]; blocking: boolean}[] };
   appid?: string;
   reasons: string[]; route: string | null; inputs: string[]; managed: boolean; enabled: boolean;
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
   main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
   executable_choices?: { path: string; dx12: boolean }[]; selected_executable?: string; executable_selection_needed?: boolean;
   menu_labels?: { available: boolean; supported: boolean; enabled: boolean; reason: string; label: string; experimental: boolean };
-  repair_eligible?: boolean; repair_files?: string[];
+  repair_eligible?: boolean; repair_files?: string[]; reset_eligible?: boolean; reset_files?: string[]; reset_preserved_files?: string[]; reset_reason?: string;
   awareness_warnings?: string[];
   awareness_deferred?: boolean;
   setup_guidance?: {action: string; headline: string; steps: string[]; notes: string[]; links: {label: string; url: string}[]};
@@ -79,7 +79,7 @@ type LauncherImport = { launcher: string; found: number; added: number; candidat
 type Library = { games: Game[]; warnings: string[]; release: Release; license_accepted: boolean; jobs: Job[];
   launcher_import?: LauncherImport; model_catalog?: ModelCatalog; release_choices?: ReleaseChoice[] };
 type Preview = { token: string; name: string; action: string; route: string; files: string[];
-  warning: string; select_upscaler: string; model?: string; variant_id?: string; release_version?: string;
+  warning: string; select_upscaler: string; preserved_files?: string[]; model?: string; variant_id?: string; release_version?: string;
   license_url?: string; license_accepted?: boolean; selected_executable?: string };
 const library = callable<[], Library>("library");
 const libraryRead = new LibraryRead(library);
@@ -556,13 +556,14 @@ function Content() {
     if (!p) return;
     const actionTitle = name === "labels_enable" ? "Enable Helix SR menu labels"
       : name === "labels_disable" ? "Restore original menu labels"
-      : name === "repair" ? "Repair HelixSR files" : name.toUpperCase();
-    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`${actionTitle}: ${p.name}`}
+      : name === "repair" ? "Repair HelixSR files" : name === "reset" ? "Reset HelixSR setup" : name.toUpperCase();
+    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={name === "reset" ? actionTitle : `${actionTitle}: ${p.name}`}
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
-        <p>{p.warning}</p><p>Route: {p.route}. In game: select {p.select_upscaler}.</p>
+        <p>{p.warning}</p>{name !== "reset" && <p>Route: {p.route}. In game: select {p.select_upscaler}.</p>}
         {p.selected_executable && <p>Game executable: {p.selected_executable}</p>}
-        <p>Files: {p.files.join(", ")}</p>
-      </div>} strOKButtonText={name === "repair" ? "Repair missing files" : "Apply reviewed change"} strCancelButtonText="Cancel"
+        <p>{name === "reset" ? "Files to remove" : "Files"}: {p.files.join(", ") || "None"}</p>
+        {name === "reset" && !!p.preserved_files?.length && <p>Files preserved: {p.preserved_files.join(", ")}</p>}
+      </div>} strOKButtonText={name === "reset" ? "Reset setup" : name === "repair" ? "Repair missing files" : "Apply reviewed change"} strCancelButtonText="Cancel"
       onOK={() => { if (!beginReview()) return; void run(() => applyAction(p.token)).then(async result => {
         if (result) toaster.toast({ title: "HelixSR Decky", body: result.message });
         await refresh(true);
@@ -650,6 +651,7 @@ function Content() {
     : selectedStatus?.summary;
   const summaryRepeatedInIssue = !!selectedSummary && !!game?.installation_status?.issues.some(issue => selectedSummary.includes(issue.reason));
   const installState = game ? installReadiness(game, dx12) : undefined;
+  const resetReady = !!game?.reset_eligible && !!game?.installation_status?.can_reset;
   const repairReady = !!game?.repair_eligible && !!game?.installation_status?.can_repair;
   const installReasonRepeatedInIssue = !!installState?.reason && !!game?.installation_status?.issues.some(issue => installState.reason.includes(issue.reason));
   const latestUnsupported = releaseChoice === "latest" && data?.release?.supported === false;
@@ -665,6 +667,7 @@ function Content() {
   const guidance = submission.pending ? undefined : nextStep(game?.setup_guidance, jobs.find(job => job.state === "running"));
   const guidanceNeedsAttention = selectedStatus?.review || installState?.allowed === false;
   const hasMoreSetup = !!guidance && (guidance.steps.length > 1 || guidance.notes.length > 0 || guidance.links.length > 0);
+  const hasIssueDetails = !!game?.installation_status?.issues.some(issue => !!issue.reason || issue.steps.length > 1);
   const dx12OnlyReason = game?.dx12_confirmation_needed && !dx12
     && installState?.reason?.startsWith("Confirm DirectX 12 above");
   const infoStyle = { fontSize: "13px", lineHeight: "1.45", overflowWrap: "anywhere" as const, whiteSpace: "pre-wrap" as const };
@@ -692,8 +695,8 @@ function Content() {
         {selectedStatus?.label}{selectedSummary && selectedSummary !== selectedStatus?.label && !summaryRepeatedInIssue ? ` · ${selectedSummary}` : ""}
       </div></PanelSectionRow>}
       {game && <>
-        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || (!repairReady && (!installState?.allowed || latestUnsupported || routeUnsupported))}
-          onClick={() => void interact(repairReady ? () => action("repair") : installOrUpdate)}>{submission.pending ? "Starting installation…" : repairReady ? "Repair HelixSR files" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
+        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || (!resetReady && !repairReady && (!installState?.allowed || latestUnsupported || routeUnsupported))}
+          onClick={() => void interact(resetReady ? () => action("reset") : repairReady ? () => action("repair") : installOrUpdate)}>{submission.pending ? "Starting installation…" : resetReady ? "Reset HelixSR setup" : repairReady ? "Repair HelixSR files" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
       </>}
       {installError && <PanelSectionRow><div role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>{installError}</div></PanelSectionRow>}
       {latestUnsupported && <PanelSectionRow><div role="alert" className="helix-card" style={{ ...infoStyle, borderLeftColor: "#f1ca7e" }}>
@@ -722,15 +725,17 @@ function Content() {
           <strong>Next step: {guidance.headline}</strong>{"\n"}
           {guidance.steps[0]}
         </div></PanelSectionRow>}
-        {guidanceNeedsAttention && hasMoreSetup && <PanelSectionRow><ButtonItem layout="below" onClick={() => setSetupDetailsOpen(!setupDetailsOpen)}>
+        {(guidanceNeedsAttention && hasMoreSetup || hasIssueDetails) && <PanelSectionRow><ButtonItem layout="below" onClick={() => setSetupDetailsOpen(!setupDetailsOpen)}>
           {setupDetailsOpen ? "Hide setup details" : "Setup details"}</ButtonItem></PanelSectionRow>}
         {guidanceNeedsAttention && setupDetailsOpen && guidance?.steps.slice(1).map((step, index) => <PanelSectionRow key={index}><div className="helix-muted" style={infoStyle}>{step}</div></PanelSectionRow>)}
         {guidanceNeedsAttention && setupDetailsOpen && guidance?.notes.map((note, index) => <PanelSectionRow key={index}><div className="helix-muted" style={infoStyle}>{note}</div></PanelSectionRow>)}
         {guidanceNeedsAttention && setupDetailsOpen && guidance?.links.map(link => <PanelSectionRow key={link.url}><ButtonItem layout="below" disabled={modalOpen}
           onClick={() => SteamClient.System.OpenInSystemBrowser(link.url)}>{link.label}</ButtonItem></PanelSectionRow>)}
         {game.installation_status?.issues.filter(issue => issue.blocking || issue.code !== "dx12_unconfirmed" || !game.dx12_confirmation_needed).map((issue, index) => <PanelSectionRow key={`${issue.code}-${index}`}><div className="helix-card" style={{ ...infoStyle, borderLeftColor: issue.blocking ? "#f1ca7e" : "#53c5d0" }}>
-          <strong>{issue.title}</strong>{"\n"}{issue.reason}{"\n"}Next: {issue.steps.join(" ")}
+          <strong>{issue.title}</strong>{issue.steps[0] && <>{"\n"}Next: {issue.steps[0]}</>}
+          {setupDetailsOpen && <>{issue.reason && <>{"\n"}{issue.reason}</>}{issue.steps.slice(1).map((step, stepIndex) => <span key={stepIndex}>{"\n"}{step}</span>)}</>}
         </div></PanelSectionRow>)}
+        {game.managed && !resetReady && game.reset_reason && !game.installation_status?.issues.some(issue => issue.reason.includes(game.reset_reason!) || issue.steps.some(step => step.includes(game.reset_reason!))) && <PanelSectionRow><div className="helix-muted" style={infoStyle}>{game.reset_reason}</div></PanelSectionRow>}
         {!game.managed && game.route === "optiscaler" && !!game.executable_choices?.length && (game.executable_choices.length > 1 || !game.executable_choices.some(choice => choice.path === game.selected_executable)) && <>
           <PanelSectionRow><DropdownItem layout="below" label="Game executable" menuLabel="Choose the executable you launch"
             selectedOption={game.selected_executable} strDefaultLabel="Choose a game executable" disabled={disabled}
