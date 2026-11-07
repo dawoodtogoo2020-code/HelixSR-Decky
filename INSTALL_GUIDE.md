@@ -2,7 +2,7 @@
 
 ## Finding controls in Decky
 
-Choose **Game** and **Release to install** at the top. HelixSR version checks sit with the game installation controls. Plugin version and updates are grouped immediately below, followed by **Import games**. Expand **Advanced game settings** for model settings, the overlay, optional menu labels, diagnostics, **Disable HelixSR** and **Remove and restore originals**.
+Choose **Game** at the top. For an installed game, **Disable HelixSR** (or **Enable HelixSR** when disabled) and **Remove and restore originals** sit directly below the install/update button, without opening any settings. Disable restores the saved original files and keeps the setup for enabling again. Remove restores those files and clears the managed setup. Each action opens a review before changing files. **Upscaling and frame generation** settings are visible below the Games section. Expand **More game settings** for the overlay, optional menu labels and diagnostics. Plugin updates and game imports have their own sections.
 
 **HelixSR 2.0.0 (recommended)** is already selected. The older releases are optional compatibility choices, not additional components you need to install. [What release review means](UPGRADE_2.0.md#release-choices-and-review).
 

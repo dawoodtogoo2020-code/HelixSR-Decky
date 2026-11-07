@@ -1,5 +1,7 @@
 # HelixSR Decky
 
+**0.1.41 candidate (unpublished):** Disable, Enable and Remove are visible directly below the selected game's install/update button. Action reviews explain restoration and use explicit confirmation buttons. The latest published download remains 0.1.40 below.
+
 **0.1.40 recovery fixes:** adds a reviewed **Reset HelixSR setup** action for stale native installations and shorter warning cards with expandable details. See the [recovery steps](STATUS_GUIDE.md#resetting-a-native-installation-after-a-game-update). Automated checks passed; Cyberpunk recovery and gameplay still need an on-device retest.
 
 **Latest:** Decky **0.1.40** includes **HLX FSR 4 (AMD FSR 4.1.2 Lite)** through the reviewed HelixSR 3.2.0 prerelease. Install [HelixSR-Decky-0.1.40.zip](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.40/HelixSR-Decky-0.1.40.zip) from the [v0.1.40 release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.40). Select the HLX model explicitly; Model E / HelixSR 2.0.0 remains the default. SteamOS gameplay, image quality, performance and frame generation with HLX remain unverified. See [installation, testing and rollback](docs/hlx-fsr.md). Desktop 0.1.21 changes are included in source; no 0.1.21 AppImage is published.

@@ -156,6 +156,75 @@ function job(state = "running") {
     state, message: state === "running" ? "Building local network" : "Files verified", log: "" };
 }
 
+for (const route of ["direct", "optiscaler"]) {
+  for (const enabled of [true, false]) {
+    for (const action of [enabled ? "disable" : "enable", "remove"]) {
+    test(`${route} ${enabled ? "enabled" : "disabled"} setup exposes ${action} before optional settings and requires review`, async () => {
+      const h = harness({preview_action: (_id, action) => ({token: "restore-token", action,
+        name: "PRAGMATA", route, files: ["saved-original.dll"], warning: "Close the game.", select_upscaler: "AMD FSR"})});
+      Object.assign(h.game, {managed: true, enabled, route});
+      await h.ready();
+      const buttons = () => h.walk(h.render(), n => n.type === "ButtonItem");
+      const named = label => buttons().filter(n => h.text(n) === label);
+      const toggle = enabled ? "Disable HelixSR" : "Enable HelixSR";
+      for (const label of [toggle, "Remove and restore originals"]) {
+        assert.equal(named(label).length, 1);
+        assert.equal(named(label)[0].props.disabled, false);
+        const labels = buttons().map(n => h.text(n));
+        assert.ok(labels.indexOf(label) < labels.indexOf("Refresh library and status"),
+          "restoration is beside the primary action, before settings and library controls");
+      }
+      assert.equal(named(enabled ? "Enable HelixSR" : "Disable HelixSR").length, 0);
+      h.openAdvanced();
+      assert.equal(named(toggle).length, 1, "opening optional settings does not duplicate controls");
+      assert.equal(named("Remove and restore originals").length, 1);
+      {
+        const label = action === "remove" ? "Remove and restore originals" : toggle;
+        const before = h.count("apply_action");
+        named(label)[0].props.onClick(); await flush();
+        assert.equal(h.calls.filter(c => c.route === "preview_action").at(-1).args[1], action);
+        assert.equal(h.count("apply_action"), before, "opening the review does not change game files");
+        const modal = h.currentModal();
+        assert.equal(modal.element.props.strOKButtonText, label);
+        if (action !== "enable") {
+          assert.match(h.text(modal.element.props.strDescription), /files saved before HelixSR was installed/);
+          assert.doesNotMatch(h.text(modal.element.props.strDescription), /In game: select/);
+          if (route === "optiscaler") assert.match(h.text(modal.element.props.strDescription), /Restore plugin launch-option change/);
+        }
+        modal.element.props.onOK(); await flush();
+        assert.equal(h.count("apply_action"), before + 1);
+        assert.equal(h.calls.filter(c => c.route === "apply_action").at(-1).args[0], "restore-token");
+        modal.options.fnOnClose(); await flush();
+      }
+    });
+    }
+  }
+}
+
+test("visible restoration controls retain file review, running job and plugin update guards", async () => {
+  for (const state of ["file-review", "running-game", "install-job", "plugin-update"]) {
+    const h = harness(state === "install-job" ? {library: () => ({...h.library(), jobs: [job()]})}
+      : state === "plugin-update" ? {plugin_update_status: () => ({current_version: "0.1.41", pending: {version: "0.1.42"}})} : {});
+    Object.assign(h.game, {managed: true, enabled: true});
+    if (["file-review", "running-game"].includes(state)) h.game.installation_status = {
+      state: state === "running-game" ? "running" : "review", label: "Needs review", summary: "Close game or resolve file conflict",
+      running: state === "running-game", can_modify: false, can_restore: false, issues: []};
+    await h.ready();
+    for (const label of ["Disable HelixSR", "Remove and restore originals"]) {
+      const button = h.walk(h.render(), n => n.type === "ButtonItem" && h.text(n) === label)[0];
+      assert.ok(button, `${state}: action remains discoverable`);
+      assert.equal(button.props.disabled, true, `${state}: action stays blocked`);
+    }
+    assert.equal(h.count("apply_action"), 0);
+  }
+});
+
+test("unmanaged games do not offer managed restoration controls", async () => {
+  const h = harness(); await h.ready();
+  assert.equal(h.walk(h.render(), n => n.type === "ButtonItem" &&
+    ["Disable HelixSR", "Enable HelixSR", "Remove and restore originals"].includes(h.text(n))).length, 0);
+});
+
 test("protected games remain in the dropdown with diagnostics and installation blocked", async () => {
   const h = harness();
   Object.assign(h.game, {name: "skate", appid: "123456", compatibility: "blocked", route: "optiscaler",

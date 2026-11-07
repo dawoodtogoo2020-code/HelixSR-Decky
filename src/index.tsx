@@ -556,14 +556,21 @@ function Content() {
     if (!p) return;
     const actionTitle = name === "labels_enable" ? "Enable Helix SR menu labels"
       : name === "labels_disable" ? "Restore original menu labels"
-      : name === "repair" ? "Repair HelixSR files" : name === "reset" ? "Reset HelixSR setup" : name.toUpperCase();
+      : name === "repair" ? "Repair HelixSR files" : name === "reset" ? "Reset HelixSR setup"
+      : name === "disable" ? "Disable HelixSR" : name === "remove" ? "Remove HelixSR and restore originals"
+      : name === "enable" ? "Enable HelixSR" : name.toUpperCase();
     openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={name === "reset" ? actionTitle : `${actionTitle}: ${p.name}`}
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
-        <p>{p.warning}</p>{name !== "reset" && <p>Route: {p.route}. In game: select {p.select_upscaler}.</p>}
+        {name === "disable" && <p>Restore the files saved before HelixSR was installed. Keep this setup so you can enable it again.</p>}
+        {name === "remove" && <p>Restore the files saved before HelixSR was installed and remove its setup for this game. You will need to install HelixSR again to use it.</p>}
+        <p>{p.warning}</p>{!["reset", "disable", "remove"].includes(name) && <p>Route: {p.route}. In game: select {p.select_upscaler}.</p>}
+        {["disable", "remove"].includes(name) && p.route === "optiscaler" && <p>If you applied the plugin's Proton launch option, use Restore plugin launch-option change separately.</p>}
         {p.selected_executable && <p>Game executable: {p.selected_executable}</p>}
         <p>{name === "reset" ? "Files to remove" : "Files"}: {p.files.join(", ") || "None"}</p>
         {name === "reset" && !!p.preserved_files?.length && <p>Files preserved: {p.preserved_files.join(", ")}</p>}
-      </div>} strOKButtonText={name === "reset" ? "Reset setup" : name === "repair" ? "Repair missing files" : "Apply reviewed change"} strCancelButtonText="Cancel"
+      </div>} strOKButtonText={name === "reset" ? "Reset setup" : name === "repair" ? "Repair missing files"
+        : name === "disable" ? "Disable HelixSR" : name === "remove" ? "Remove and restore originals"
+        : name === "enable" ? "Enable HelixSR" : "Apply reviewed change"} strCancelButtonText="Cancel"
       onOK={() => { if (!beginReview()) return; void run(() => applyAction(p.token)).then(async result => {
         if (result) toaster.toast({ title: "HelixSR Decky", body: result.message });
         await refresh(true);
@@ -697,6 +704,15 @@ function Content() {
       {game && <>
         <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || (!resetReady && !repairReady && (!installState?.allowed || latestUnsupported || routeUnsupported))}
           onClick={() => void interact(resetReady ? () => action("reset") : repairReady ? () => action("repair") : installOrUpdate)}>{submission.pending ? "Starting installation…" : resetReady ? "Reset HelixSR setup" : repairReady ? "Repair HelixSR files" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
+        {game.managed && <>
+          {game.enabled ? <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)}
+            onClick={() => void interact(() => action("disable"))}>Disable HelixSR</ButtonItem></PanelSectionRow>
+            : <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
+              onClick={() => void interact(() => action("enable"))}>Enable HelixSR</ButtonItem></PanelSectionRow>}
+          <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)}
+            onClick={() => void interact(() => action("remove"))}>Remove and restore originals</ButtonItem></PanelSectionRow>
+          <PanelSectionRow><div className="helix-muted">{game.enabled ? "Disable restores saved originals and keeps the setup for re-enabling. " : "HelixSR is disabled. Enable uses this game's saved setup. "}Remove restores saved originals and clears the setup.</div></PanelSectionRow>
+        </>}
       </>}
       {installError && <PanelSectionRow><div role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>{installError}</div></PanelSectionRow>}
       {latestUnsupported && <PanelSectionRow><div role="alert" className="helix-card" style={{ ...infoStyle, borderLeftColor: "#f1ca7e" }}>
@@ -748,8 +764,6 @@ function Content() {
         {installState?.reason && !dx12OnlyReason && !installReasonRepeatedInIssue && <PanelSectionRow><div role="status" style={infoStyle}>{installState.reason}</div></PanelSectionRow>}
         {game.recovery_available && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running} onClick={() => void interact(() => action("recover"))}>Recover interrupted file transaction</ButtonItem></PanelSectionRow>}
         {!!pluginUpdate?.pending && <PanelSectionRow><div style={infoStyle}>Finish or cancel the downloaded plugin update in Plugin updates before installing game files.</div></PanelSectionRow>}
-        {game.managed && !game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
-          onClick={() => void interact(() => action("enable"))}>Enable HelixSR</ButtonItem></PanelSectionRow>}
         {game.managed && game.enabled && game.route === "optiscaler" && game.appid && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
           onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>}
       </>}
@@ -851,9 +865,6 @@ function Content() {
             onChange={enabled => void interact(() => action(enabled ? "labels_enable" : "labels_disable"))} /></PanelSectionRow>
           <PanelSectionRow><div className="helix-muted">{game.menu_labels.reason} This changes menu text only and does not verify the active upscaler.</div></PanelSectionRow>
         </>}
-        {game.enabled && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)}
-          onClick={() => void interact(() => action("disable"))}>Disable HelixSR</ButtonItem></PanelSectionRow>}
-        <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)} onClick={() => void interact(() => action("remove"))}>Remove and restore originals</ButtonItem></PanelSectionRow>
       </>}
       {game.source === "Imported" && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.managed}
         onClick={() => void run(() => forgetGame(game.id)).then(result => { if (result) { setData(cacheLibrary(result)); chooseGame(""); } })}>Forget imported folder</ButtonItem></PanelSectionRow>}
