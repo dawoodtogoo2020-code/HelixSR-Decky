@@ -77,6 +77,21 @@ class LifecycleTests(Fixtures):
         self.assertFalse(fallback.exists())
         self.assertFalse(self.m.record(self.game))
 
+    def test_direct_reset_after_game_update_preserves_new_dll(self):
+        self.game['build'] = '100'
+        self.install()
+        self.game['build'] = '101'
+        updated = pe(ffx=True) + b'new native game build'
+        self.native.write_bytes(updated)
+        review = self.m.preview(self.game['id'], 'reset')
+        self.assertIn('amd_fidelityfx_upscaler_dx12.amd.dll', review['files'])
+        self.m.execute(review['token'])
+        self.assertEqual(self.native.read_bytes(), updated)
+        self.assertFalse(self.m.record(self.game))
+        self.assertFalse(self.native.with_name('amd_fidelityfx_upscaler_dx12.amd.dll').exists())
+        review = self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice='reviewed-3.2.0')
+        self.assertIn('cannot prove the DLL is stock', review['warning'])
+
     def test_scaler_native_selection_survives_disable_and_is_distinct_from_fg(self):
         self.m.set_installation_route(self.game['id'], 'optiscaler')
         self.install()

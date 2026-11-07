@@ -895,7 +895,7 @@ class Manager:
                         managed=False, enabled=False, inputs=[],
                         executable_choices=[], selected_executable=None, executable_selection_needed=False,
                         recovery_available=self.recovery_available(game),
-                        repair_eligible=False, repair_files=[],
+                        repair_eligible=False, repair_files=[], reset_eligible=False,
                         optiscaler={'present': False, 'involved': False, 'helix_configured': False,
                                     'runtime': 'unknown', 'dlls': []},
                         framegen=[], framegen_summary='No supported per-game evidence',
@@ -1158,6 +1158,15 @@ class Manager:
                     **aware)
         if not detailed:
             data.pop('logs', None)
+        data.update(reset_eligible=False, reset_files=[], reset_preserved_files=[], reset_reason=None)
+        if detailed and rec.get('route') == 'direct' and any(
+                reason.startswith(('Steam build changed', 'Managed files changed')) for reason in blocked):
+            try:
+                reset = self.reset_plan(game, data, rec)
+                data.update(reset_eligible=True, reset_files=reset['remove'],
+                            reset_preserved_files=reset['preserve'])
+            except (ValueError, OSError, TypeError, KeyError) as exc:
+                data['reset_reason'] = str(exc)
         data['installation_status'] = installation_status(data)
         data['setup_guidance'] = setup_guidance(data)
         data['menu_labels'] = self.menu_status(game, data, rec, detailed)
@@ -1467,7 +1476,7 @@ class Manager:
                         license_accepted=self.cfg.get('license') == license_key(release, selected['id']),
                         files=self.planned_paths(game, data, 'latest', release=release),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
-                        warning=('You explicitly selected the reviewed HelixSR 1.8.1 compatibility release. '
+                        warning=self.native_install_warning(data) + ('You explicitly selected the reviewed HelixSR 1.8.1 compatibility release. '
                                  'This does not install the latest upstream 1.9 Scaler engine. '
                                  if choice == COMPATIBLE_CHOICE else '') +
                                 ('Fetch the pinned pre-release and verify the SDK-built HLX provider. The native fallback may run on unsupported hardware. No HelixSR FG is included. Close the game.'
@@ -1764,6 +1773,9 @@ class Manager:
     def action_compatible(data, action):
         # An unsupported renderer can still restore owned originals. Any other
         # assessment blocker (build, hashes, process, staging) remains decisive.
+        if action == 'reset':
+            return bool(data.get('reset_eligible') and data.get('managed')
+                        and not data.get('recovery_available'))
         return (data['compatibility'] == 'candidate' or
                 action == 'repair' and data.get('repair_eligible')
                 and data.get('managed') and not data.get('recovery_available') or
@@ -1775,7 +1787,7 @@ class Manager:
     def preview(self, gid, action, dx12_confirmed=False, executable=None):
         with self.lock:
             game = self.get_game(gid)
-            if action not in ('install', 'update', 'enable', 'disable', 'remove', 'adopt', 'recover', 'repair') + menu_labels.ACTIONS:
+            if action not in ('install', 'update', 'enable', 'disable', 'remove', 'adopt', 'recover', 'repair', 'reset') + menu_labels.ACTIONS:
                 raise ValueError('Unknown action')
             if action == 'recover':
                 journal = self.companion(game) / 'transaction/journal.json'
@@ -1797,7 +1809,10 @@ class Manager:
             self.menu_change_guard(game, rec.get('baseline', {}))
             package = None
             if not self.action_compatible(data, action):
-                raise ValueError('; '.join(data['reasons']))
+                raise ValueError(data.get('reset_reason') if action == 'reset' and data.get('reset_reason')
+                                 else '; '.join(data['reasons']))
+            if action == 'reset':
+                self.reset_plan(game, data, rec)
             if action in menu_labels.ACTIONS:
                 menu_labels.plan(self, game, data, rec, action)
             if action in ('install', 'update', 'enable', 'repair'):
@@ -1846,9 +1861,17 @@ class Manager:
                                        expires=time.time()+120, dx12=dx12_confirmed)
             return dict(token=token, action=action, name=game['name'], route=data['route'],
                         selected_executable=data['selected_executable'],
-                        files=self.planned_paths(game, data, action, package),
+                        files=(data['reset_files'] if action == 'reset' else
+                               self.planned_paths(game, data, action, package)),
+                        preserved_files=data.get('reset_preserved_files', []) if action == 'reset' else [],
                         select_upscaler=(menu_labels.LABEL if action == 'labels_enable' else 'AMD FSR') if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
-                        warning=('Cosmetic menu label only; it does not prove HelixSR is running. '
+                        warning=(self.native_install_warning(data) if action == 'install' else '') +
+                                ('Reset the old HelixSR setup without restoring old game files. '
+                                 'Only unchanged files added by HelixSR are removed. Existing game files are kept as-is; '
+                                 'this does not verify that they are original. The old record and saved originals are archived. '
+                                 'Then verify game files in Steam, refresh, and install HelixSR again before playing.'
+                                 if action == 'reset' else
+                                 'Cosmetic menu label only; it does not prove HelixSR is running. '
                                  'Close the game. Original menu bytes are restored when this option or HelixSR is disabled. '
                                  'Quality modes and frame-generation labels are unchanged.' if action in menu_labels.ACTIONS else
                                  'Close the game. Originals are retained for disable/remove. '
@@ -2038,6 +2061,7 @@ class Manager:
             raise ValueError('Interrupted transaction exists; recover it first')
         label_plan = menu_labels.plan(self, game, data, self.record(game), action) if action in menu_labels.ACTIONS else None
         self.menu_change_guard(game, self.record(game).get('baseline', {}))
+        reset_plan = self.reset_plan(game, data, self.record(game)) if action == 'reset' else None
         if package is AUTO_PACKAGE:
             rec = self.record(game)
             package = None
@@ -2070,6 +2094,33 @@ class Manager:
         atomic_json(tx / 'journal.json', journal)
         self.transaction = (root, tx, journal)
         try:
+            if reset_plan is not None:
+                # Archive before retiring the receipt. Originals remain in place
+                # until commit, so rollback never depends on the archive.
+                archive = self.archive_reset(game, previous, reset_plan)
+                if self.reset_plan(game, data, previous, in_transaction=True) != reset_plan:
+                    raise ValueError('Game changed during reset; refresh and review again')
+                for rel in reset_plan['remove']:
+                    path = checked_path(root, rel)
+                    self.reset_file_hash(path)
+                    if sha(path) != previous['current'][rel]:
+                        raise ValueError('Reset file changed before cleanup: ' + rel)
+                    self.unlink_managed(path)
+                for rel, expected in before.items():
+                    actual = self.reset_file_hash(checked_path(root, rel))
+                    if actual != (None if rel in reset_plan['remove'] else expected):
+                        raise ValueError('Game changed during reset: ' + rel)
+                self.record_path(game).unlink()
+                sync_directory(self.record_path(game).parent)
+                current = {rel: self.reset_file_hash(checked_path(root, rel)) for rel in paths}
+                atomic_json(archive / 'result.json', dict(action='reset', verified=current,
+                            next_step='Verify game files in Steam, refresh, then reinstall HelixSR.'))
+                journal.update(state='committed', committed_current=current, committed_record=None)
+                atomic_json(tx / 'journal.json', journal)
+                self.transaction = None
+                shutil.rmtree(tx)
+                return dict(message='HelixSR setup reset. Verify game files in Steam, refresh, then install HelixSR again.',
+                            enabled=False, version=None)
             if not previous:
                 baseline = {}
                 for rel in paths:
@@ -2386,6 +2437,121 @@ class Manager:
             sync_directory(dst.parent)
         finally:
             temp.unlink(missing_ok=True)
+
+    @staticmethod
+    def native_install_warning(data):
+        if data.get('route') == 'direct' and not data.get('managed') and not data.get('legacy'):
+            return ('Before confirming, verify game files in Steam and restore any other mods. '
+                    'Installation replaces the current native DLL and saves those current bytes for removal. '
+                    'File checks cannot prove the DLL is stock. ')
+        return ''
+
+    @staticmethod
+    def reset_file_hash(path):
+        """Reset never follows links or treats directories as absent files."""
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return None
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError('Reset needs a regular, unlinked file: ' + str(path.name))
+        return sha(path)
+
+    def reset_plan(self, game, data, rec, in_transaction=False):
+        """Retire a stale native receipt without adopting or overwriting game bytes."""
+        if rec.get('route') != 'direct' or not rec:
+            raise ValueError('Reset is available only for an existing native HelixSR setup.')
+        if self.closing.is_set():
+            raise ValueError('The plugin is closing; reopen it before resetting.')
+        if self.recovery_available(game) and not (in_transaction and self.transaction
+                and self.transaction[0] == Path(game['folder'])
+                and self.transaction[2].get('action') == 'reset'):
+            raise ValueError('Recover the interrupted transaction first.')
+        if data.get('processes') or active_processes(game['folder'], game.get('appid', '')):
+            raise ValueError('Close the game, then refresh to reset its setup.')
+        reasons = data.get('reasons', [])
+        stale = ('Steam build changed', 'Managed files changed')
+        if not any(reason.startswith(stale) for reason in reasons):
+            raise ValueError('This setup does not need a reset.')
+        other = [reason for reason in reasons if not reason.startswith(stale)]
+        if other:
+            raise ValueError(other[0])
+        if (rec.get('menu_labels') or {}).get('enabled'):
+            raise ValueError('Restore the HelixSR menu-label change before resetting this setup.')
+        baseline, current = rec.get('baseline'), rec.get('current')
+        if (not isinstance(baseline, dict) or not baseline or not isinstance(current, dict)
+                or set(baseline) != set(current)):
+            raise ValueError('The installation record is incomplete; keep it for review.')
+        root, companion = Path(game['folder']), self.companion(game)
+        self.reset_file_hash(checked_path(companion, 'records/install.json'))
+        remove, preserve, originals, live = [], [], {}, {}
+        for rel, original in baseline.items():
+            expected = current[rel]
+            for digest in (original, expected):
+                if digest is not None and (not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest)):
+                    raise ValueError('The installation record has an invalid file hash.')
+            actual = self.reset_file_hash(checked_path(root, rel))
+            live[rel] = actual
+            if original is not None:
+                # These files existed before installation. Never restore the
+                # old build or call their replacement bytes trusted originals.
+                preserve.append(rel)
+                backup = checked_path(companion, str(Path('originals') / rel))
+                if self.reset_file_hash(backup) != original:
+                    raise ValueError('Saved original needs review before reset: ' + rel)
+                originals[rel] = original
+            elif actual is not None:
+                if actual != expected:
+                    raise ValueError('Another tool changed this added file; restore it with that tool, then refresh: ' + rel)
+                remove.append(rel)
+        if not rec.get('targets'):
+            raise ValueError('The recorded native DLL target is missing.')
+        for target in rec['targets']:
+            rel = str(Path(target).relative_to(root))
+            path = checked_path(root, rel)
+            if rel not in preserve or live[rel] is None:
+                raise ValueError('Verify game files in Steam, then refresh to enable Reset HelixSR setup: ' + rel)
+            api = pe_info(path)
+            if (api['arch'] != 'x64' or not api['ffx'] or api['helix'] or api.get('hlx_fsr')
+                    or live[rel] == hlx_fsr_release.OUTPUT_SHA256
+                    or live[rel] == current[rel] and current[rel] != baseline[rel]):
+                raise ValueError('The native DLL still contains HelixSR or is unrecognized. Verify game files in Steam, then refresh: ' + rel)
+        # An enabled managed resource beyond the native DLL must not be silently
+        # orphaned when its ownership record is retired.
+        targets = {str(Path(target).relative_to(root)) for target in rec['targets']}
+        for rel in preserve:
+            if rel not in targets and live[rel] == current[rel] and current[rel] != baseline[rel]:
+                raise ValueError('Restore this managed game file before resetting: ' + rel)
+        manifest = None
+        if game.get('manifest'):
+            from library import vdf
+            manifest = sha(game['manifest'])
+            state = vdf(text(game['manifest'])).get('AppState', {})
+            if state.get('StateFlags') != '4' or state.get('buildid') != data.get('build'):
+                raise ValueError('Steam changed during the check; finish updates and refresh.')
+            staging = Path(game['library']) / 'steamapps/downloading' / str(game['appid'])
+            if staging.is_dir() and any(staging.iterdir()):
+                raise ValueError('Wait for Steam download staging to finish, then refresh.')
+        return dict(remove=remove, preserve=preserve, originals=originals, live=live, manifest=manifest)
+
+    def archive_reset(self, game, rec, plan):
+        companion = self.companion(game)
+        size = sum(checked_path(companion, str(Path('originals') / rel)).stat().st_size
+                   for rel in plan['originals'])
+        if shutil.disk_usage(companion).free < size + (128 << 20):
+            raise ValueError('Insufficient space to preserve the old installation record.')
+        archive = checked_path(companion, 'records/reset-' + uuid.uuid4().hex)
+        if archive.exists():
+            raise ValueError('Reset archive already exists; retry with a fresh preview.')
+        durable_directory(archive)
+        for rel, expected in plan['originals'].items():
+            source = checked_path(companion, str(Path('originals') / rel))
+            if self.reset_file_hash(source) != expected:
+                raise ValueError('Saved original changed while archiving: ' + rel)
+            durable_copy(source, checked_path(archive, str(Path('originals') / rel)), expected)
+        atomic_json(archive / 'install.json', rec)
+        atomic_json(archive / 'plan.json', plan)
+        return archive
 
     def repair_sources(self, game, rec, package):
         """Map reproducible installed paths to immutable, hash-checked sources."""

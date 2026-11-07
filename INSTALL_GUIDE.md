@@ -8,11 +8,13 @@ Choose **Game** and **Release to install** at the top. HelixSR version checks si
 
 Opening a dropdown reuses the game list. Selecting a game still checks its current status. After installing or moving games in Steam, use **Refresh library and status** to rescan. If a managed DLL is missing, use **Repair HelixSR files** when offered. It shows exactly which files will be restored and uses the verified package from that installation. [Missing-file and review guidance](STATUS_GUIDE.md#why-changes-are-blocked).
 
+**0.1.40** adds **Reset HelixSR setup** for stale native installation records after game updates or Steam verification, plus shorter warning cards. [Recovery steps and limits](STATUS_GUIDE.md#resetting-a-native-installation-after-a-game-update). Automated checks passed; this release does not establish a new Steam Deck gameplay result.
+
 HelixSR 2.0 restores DLSS frame generation through Scaler. Select Light or Full, provider and supported multiplier in the application. HelixSR FG requires a DirectX 12 game with DLSS FG enabled in-game. 3× is exposed only for XeSS FG. Native FSR replacement remains upscaling-only. Remove and restore originals before changing between native and Scaler routes.
 
 ## Installation error mentioning LICENSE-APACHE-2.0
 
-**Latest:** Decky **0.1.39** adds **HLX FSR 4 (AMD FSR 4.1.2 Lite)** through the reviewed HelixSR 3.2.0 prerelease. Install [HelixSR-Decky-0.1.39.zip](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.39/HelixSR-Decky-0.1.39.zip) from the [v0.1.39 release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.39). Select the HLX model explicitly; Model E / HelixSR 2.0.0 remains the default. SteamOS gameplay, image quality, performance and frame generation with HLX remain unverified. See [installation, testing and rollback](docs/hlx-fsr.md). Desktop 0.1.21 changes are included in source; no 0.1.21 AppImage is published.
+**Latest:** Decky **0.1.40** includes **HLX FSR 4 (AMD FSR 4.1.2 Lite)** through the reviewed HelixSR 3.2.0 prerelease. Install [HelixSR-Decky-0.1.40.zip](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.40/HelixSR-Decky-0.1.40.zip) from the [v0.1.40 release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.40). Select the HLX model explicitly; Model E / HelixSR 2.0.0 remains the default. SteamOS gameplay, image quality, performance and frame generation with HLX remain unverified. See [installation, testing and rollback](docs/hlx-fsr.md). Desktop 0.1.21 changes are included in source; no 0.1.21 AppImage is published.
 
 Decky **0.1.36** reuses the library list when opening dropdowns, selects **HelixSR 2.0.0** by default and offers a verified repair for missing managed files. **Refresh library and status** still rescans the library. Older releases are labeled explicitly, and package review is explained separately from game installation warnings. Frame-generation controls do not establish gameplay compatibility; see [settings and validation limits](UPGRADE_2.0.md).
 
@@ -24,7 +26,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Download the [Decky 0.1.39 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.39/HelixSR-Decky-0.1.39.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
+3. Download the [Decky 0.1.40 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.40/HelixSR-Decky-0.1.40.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed

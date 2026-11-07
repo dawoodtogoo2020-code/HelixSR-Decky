@@ -148,6 +148,7 @@ function harness(overrides = {}) {
   }
   return { game, library, calls, toasts, intervals, timeouts, context, ready, render, mount, unmount, text, openInstall,
     chooseExecutable, menuToggle, openMenuChange, openAdvanced, walk, installButton,
+    currentModal: () => modal,
     count: route => calls.filter(call => call.route === route).length };
 }
 function job(state = "running") {
@@ -245,13 +246,66 @@ test("eligible missing managed files use the existing reviewed repair action", a
         steps: ["Choose Repair HelixSR files."], blocking: true}]}});
   await h.ready();
   const tree = h.render();
-  assert.equal((h.text(tree).match(/Managed HelixSR files are missing/g) || []).length, 1);
+  assert.doesNotMatch(h.text(tree), /Managed HelixSR files are missing/);
+  assert.match(h.text(tree), /Choose Repair HelixSR files/);
+  const details = h.walk(tree, node => node.type === "ButtonItem" && h.text(node) === "Setup details")[0];
+  assert.ok(details);
+  details.props.onClick();
+  assert.match(h.text(h.render()), /Managed HelixSR files are missing/);
   const button = h.walk(tree, node => node.type === "ButtonItem" && /Repair HelixSR files/.test(h.text(node)))[0];
   assert.ok(button, h.text(tree));
   assert.equal(button.props.disabled, false);
   button.props.onClick(); await flush();
   assert.equal(h.calls.filter(call => call.route === "preview_action").at(-1).args[1], "repair");
   assert.equal(h.count("apply_action"), 0);
+});
+
+function resetGame(h, eligible = true, canReset = true) {
+  Object.assign(h.game, {managed: true, enabled: true, compatibility: "blocked", reset_eligible: eligible,
+    repair_eligible: true, reset_reason: eligible ? undefined : "Close Steam before resetting.",
+    installation_status: {state: "review", label: "Needs review", selectable: true, running: false,
+      can_modify: false, can_repair: true, can_reset: canReset, summary: "Game build changed",
+      issues: [{code: "steam_build_changed", title: "Game build changed", reason: "Old build recorded",
+        steps: ["Use Reset HelixSR setup."], blocking: true}]}});
+}
+
+test("reset is the primary action ahead of repair and requires reviewed confirmation", async () => {
+  const warning = "Reset keeps the current DLL. Verify files in Steam before reinstalling.";
+  const h = harness({preview_action: (_id, action) => ({token: "reset-token", action, name: "PRAGMATA",
+    route: "direct", warning, files: ["added.dll"], preserved_files: ["native.dll"], select_upscaler: "AMD FSR"})});
+  resetGame(h); await h.ready();
+  const button = () => h.walk(h.render(), n => n.type === "ButtonItem" && h.text(n) === "Reset HelixSR setup")[0];
+  assert.ok(button()); assert.equal(button().props.disabled, false);
+  button().props.onClick(); await flush();
+  const modal = h.currentModal();
+  assert.equal(h.calls.filter(c => c.route === "preview_action").at(-1).args[1], "reset");
+  assert.equal(modal.element.props.strTitle, "Reset HelixSR setup");
+  assert.equal(modal.element.props.strOKButtonText, "Reset setup");
+  const description = h.text(modal.element.props.strDescription);
+  assert.ok(description.includes(warning));
+  assert.match(description, /added\.dll/); assert.match(description, /native\.dll/);
+  assert.doesNotMatch(description, /In game: select|AMD FSR/);
+  modal.options.fnOnClose(); await flush();
+  assert.equal(h.count("apply_action"), 0);
+  button().props.onClick(); await flush();
+  const confirmation = h.currentModal();
+  confirmation.element.props.onOK(); confirmation.element.props.onOK();
+  confirmation.options.fnOnClose(); await flush();
+  assert.equal(h.count("apply_action"), 1);
+  assert.equal(h.calls.filter(c => c.route === "apply_action")[0].args[0], "reset-token");
+});
+
+test("reset is unavailable unless both backend eligibility and status allow it", async () => {
+  for (const [eligible, canReset] of [[false, true], [true, false]]) {
+    const h = harness(); resetGame(h, eligible, canReset); h.game.repair_eligible = false;
+    h.game.installation_status.can_repair = false;
+    await h.ready();
+    const tree = h.render();
+    assert.equal(h.walk(tree, n => n.type === "ButtonItem" && h.text(n) === "Reset HelixSR setup").length, 0);
+    const update = h.walk(tree, n => n.type === "ButtonItem" && h.text(n) === "Update this game's HelixSR")[0];
+    assert.ok(update); assert.equal(update.props.disabled, true);
+    assert.equal(h.count("preview_action"), 0); assert.equal(h.count("apply_action"), 0);
+  }
 });
 
 test("unsupported menu profiles are disabled with an explanation", async () => {

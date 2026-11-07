@@ -8,15 +8,25 @@ The Decky plugin and desktop app show the exact reason and next step beside the 
 | --- | --- |
 | Game running | The game can keep running. Install, update, disable and remove stay paused to protect its files. Close the game normally, then refresh. This message does not mean HelixSR stopped working. |
 | Steam update in progress | Let Steam finish downloading or updating, then refresh. Do not delete its download staging folder. |
-| Steam build changed | Steam reports a different build from the one recorded when HelixSR was installed. **Remove** restores saved originals, which may now belong to an older build, so file changes remain blocked. Close the game, finish Steam's update and refresh. The game details show recorded/current build IDs and relative file states in Decky 0.1.15 and Desktop 0.1.11. Include this check in your bug report. Steam verification may restore current game files but does not reconcile the HelixSR receipt; matching an old saved original does not prove that it belongs to the current build. Do not edit the build ID or erase records to unlock controls. |
+| Steam build changed | Steam updated the game since HelixSR was installed. Close it and finish Steam updates. In Decky 0.1.40, native installations can offer **Reset HelixSR setup** after the native DLL has been restored. If Reset is unavailable, follow its specific reason. Reset never restores old-build files. See the recovery steps below. |
 | HelixSR files are missing | In Decky 0.1.36, choose **Repair HelixSR files** when offered, review the listed files and confirm. The plugin restores only absent files that it can reproduce exactly from the recorded package or verified originals. Existing changed files, a changed Steam build, a running game or an incomplete update still block repair. If repair is unavailable, follow the specific reason in the file-status card. Steam verification checks Steam's game files; it does not reinstall files added by HelixSR or reconcile HelixSR's installation record. |
-| Managed files changed | The named file differs from the bytes recorded when HelixSR installed it. This is not a Linux file-owner or administrator check. If another mod changed it, restore it through that mod's own manager and refresh. Otherwise report the affected filename for review. Do not delete DLLs or the installation record to bypass the guard. |
+| Managed files changed | A file no longer matches the old setup. Use **Reset HelixSR setup** when offered for a native installation. If another tool changed a file added by HelixSR, restore it through that tool first. Reset preserves current game files and does not grant ownership of another mod's files. |
 | Existing injector or configuration | Review the named files with the tool that installed them before adding another injector. |
 | Recovery needed | Close the game and finish Steam updates, then review the existing recovery action. Recovery stops if it cannot verify the current files. |
 | Choose executable / DX12 needs confirmation | Choose the x64 Windows DX12 executable you actually launch. Confirm DX12 only after selecting it in the game. |
 | Anti-cheat restriction / Supported route unavailable | Injection stays blocked. Administrator access cannot make this route compatible. |
 
 Several reasons can apply at once. Resolving one does not bypass the others. Unavailable games retain their reasons and next steps; recorded installations retain their enabled/disabled state separately from permission to modify them.
+
+### Resetting a native installation after a game update
+
+1. Close the game and let Steam finish its update. Verify game files in Steam, then use **Refresh library and status**.
+2. Choose **Reset HelixSR setup** when offered. Review the files to remove and the files to keep. This removes only unchanged files that HelixSR added, preserves preexisting game files byte-for-byte, and archives the old receipt and saved originals in the game's companion folder under `HelixSR-Decky/records/reset-*`.
+3. Verify game files in Steam again if needed, restore any other mods through their own manager, refresh, and explicitly install the chosen HelixSR model. The install confirmation explains that it replaces the current native DLL and saves its current bytes for later removal. Compatibility checks cannot prove that this DLL is stock.
+
+Reset is separate from **Repair HelixSR files**, which reproduces missing files for the same recorded build. Reset does not run a download, install HelixSR, change launch options, or prove the game is ready to play. Missing or identified HelixSR native DLLs, unknown changes to added files, active games, Steam updates, incomplete records and interrupted transactions still require the displayed next step. Enabled menu-label patches must be restored before reset. Scaler installations keep their existing recovery rules.
+
+Decky 0.1.40 shows a short next step on each warning card. Open **Setup details** for the exact diagnostic, Steam build IDs, file states and additional instructions.
 
 **Review** has two separate meanings. The install confirmation lets you inspect proposed changes before applying them. A **reviewed release** is a package whose archive identity, layout and preparation steps are supported by the plugin, not a promise of tested gameplay in every title. Neither is a queue waiting for a maintainer to approve your game.
 
