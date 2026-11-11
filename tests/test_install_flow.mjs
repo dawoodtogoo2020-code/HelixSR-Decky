@@ -902,3 +902,18 @@ test("a failed panel action shows and toasts the PyError's traceback message", a
   assert.equal(toast?.body, message);
   assert.match(h.text(h.render()), new RegExp(message));
 });
+
+test("upscaler overlay toggle saves the Scaler overlay with the current revision for Model E and HLX", async () => {
+  for (const [settings, wording] of [[{overlay: "off"}, /FSR rather than HelixSR/],
+                                      [{family: "hlx-fsr", upscaler: "hlx-fsr", provider: "off", overlay: "upscaler"}, /FSR 4/]]) {
+    const h = harness({ set_game_settings: () => h.game });
+    enableSettings(h, settings); await h.ready();
+    const toggle = h.walk(renderedHelixSettings(h), n => n.type === "ToggleField" && n.props.label === "Show upscaler overlay in game")[0];
+    assert.ok(toggle, "overlay toggle is visible in Upscaling and frame generation");
+    assert.equal(toggle.props.checked, settings.overlay === "upscaler");
+    assert.match(toggle.props.description, wording);
+    toggle.props.onChange(!toggle.props.checked); await flush();
+    assert.deepEqual(JSON.parse(JSON.stringify(h.calls.at(-1))), { route: "set_game_settings",
+      args: ["pragmata", { overlay: settings.overlay === "upscaler" ? "off" : "upscaler" }, "settings-rev-7"] });
+  }
+});

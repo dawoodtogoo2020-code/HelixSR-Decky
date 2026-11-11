@@ -83,5 +83,22 @@ class HelixSettingsTests(unittest.TestCase):
         self.assertIn('CustomTone=keep', model_e)
 
 
+    def test_upscaler_overlay_toggles_only_scaler_fps_overlay_keys(self):
+        self.assertEqual(helix_settings.read_settings(SOURCE)['overlay'], 'off')
+        on = helix_settings.update_settings(SOURCE, {'overlay': 'upscaler'})
+        self.assertIn('[Menu]\r\nFpsOverlayType=1\r\nShowFps=true\r\n', on)
+        self.assertEqual(helix_settings.read_settings(on)['overlay'], 'upscaler')
+        self.assertIn('Custom=unchanged', on)
+        off = helix_settings.update_settings(on, {'overlay': 'off'})
+        self.assertIn('ShowFps=false', off)
+        self.assertIn('FpsOverlayType=auto', off)
+        self.assertEqual(helix_settings.read_settings(off)['overlay'], 'off')
+        fps_only = SOURCE + '[Menu]\r\nShowFps=true\r\nFpsOverlayType=0\r\n'
+        self.assertEqual(helix_settings.read_settings(fps_only)['overlay'], 'custom')
+        for value in ('custom', True, 'on'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                helix_settings.update_settings(SOURCE, {'overlay': value})
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

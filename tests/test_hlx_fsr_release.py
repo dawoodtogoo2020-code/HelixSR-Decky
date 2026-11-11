@@ -85,6 +85,16 @@ class HlxReleaseTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 hlx.update_settings(config, changes)
 
+    def test_upscaler_overlay_is_available_for_hlx_without_touching_its_upscaler(self):
+        src = TEMPLATE.replace('\n', '\r\n')
+        config = hlx.configuration(src, src)
+        self.assertEqual(hlx.read_settings(config)['overlay'], 'off')
+        on = hlx.update_settings(config, {'overlay': 'upscaler'})
+        state = hlx.read_settings(on)
+        self.assertEqual((state['overlay'], state['upscaler'], state['provider']), ('upscaler', 'hlx-fsr', 'off'))
+        self.assertEqual(parse_config(on).get('Menu', 'ShowFps'), 'true')
+        self.assertEqual(parse_config(on).get('Menu', 'FpsOverlayType'), '1')
+
     def test_migration_fails_before_discarding_helix_fg_or_custom_sr(self):
         active = TEMPLATE.replace('Enabled=auto', 'Enabled=true').replace(
             'FGInput=auto', 'FGInput=nvngxfg').replace('FGNvngxReplacement=auto','FGNvngxReplacement=HelixSR')

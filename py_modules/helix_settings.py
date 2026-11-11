@@ -2,6 +2,10 @@
 import re
 from optiscaler_setup import parse_config
 
+# FpsOverlayType values whose FPS row ends with "input -> upscaler version"
+# (Simple through Reflex timings in Scaler's menu_common.cpp OverlayRows).
+OVERLAY_TYPES = ('1', '2', '3', '4', '5', '6')
+
 
 def read_settings(source):
     p = parse_config(source)
@@ -19,6 +23,10 @@ def read_settings(source):
         provider = 'fsr'
     else:
         provider = 'unsupported'
+    # Scaler's FPS overlay names the upscaler it drives from the Simple type (1) up.
+    show, kind = get('Menu', 'ShowFps', 'auto'), get('Menu', 'FpsOverlayType', 'auto')
+    overlay = ('off' if show in ('auto', 'false', 'off', '0') else
+               'upscaler' if show in ('true', 'on', '1') and kind in OVERLAY_TYPES else 'custom')
     count = get('XeFG', 'InterpolationCount', '1')
     try:
         multiplier = 2 if count == 'auto' else int(count) + 1
@@ -33,6 +41,7 @@ def read_settings(source):
                           'helixsr' if get('Upscalers', 'Dx12Upscaler', 'auto') in ('auto', 'ffx')
                           and get('FSR', 'UpscalerIndex', 'auto') in ('auto', '0') else 'unsupported'),
                 int8=get('HelixSR', 'Int8', 'auto'), wave_size=get('HelixSR', 'WaveSize', 'auto'),
+                overlay=overlay,
                 restart_required=True, multiplier_choices=[2, 3] if provider == 'xess' else [2],
                 notes='HelixSR FG needs a DirectX 12 game with DLSS frame generation enabled in-game. 3x uses XeSS FG.')
 
@@ -63,7 +72,8 @@ def _patch(source, section, key, value):
 def update_settings(source, changes):
     choices = dict(provider=('off', 'helixsr', 'fsr', 'xess'), model=('light', 'full'),
                    quick_flow=('off', 'fast', 'fastest'), multiplier=(2, 3),
-                   upscaler=('helixsr', 'fsr'), int8=('auto', 'on', 'off'), wave_size=('auto', '32', '64'))
+                   upscaler=('helixsr', 'fsr'), int8=('auto', 'on', 'off'), wave_size=('auto', '32', '64'),
+                   overlay=('off', 'upscaler'))
     if not isinstance(changes, dict) or not set(changes) <= set(choices):
         raise ValueError('Unknown HelixSR setting')
     for k, v in changes.items():
@@ -91,6 +101,11 @@ def update_settings(source, changes):
                'int8': ('HelixSR', 'Int8', state['int8']),
                'wave_size': ('HelixSR', 'WaveSize', state['wave_size'])}
     edits.extend(mapping[k] for k in changes if k in mapping)
+    if 'overlay' in changes:
+        # Simple: "API | FPS: n, ms | input -> upscaler"; off restores Scaler's default type.
+        on = changes['overlay'] == 'upscaler'
+        edits.extend([('Menu', 'ShowFps', 'true' if on else 'false'),
+                      ('Menu', 'FpsOverlayType', '1' if on else 'auto')])
     if 'upscaler' in changes:
         edits.extend([('Libraries', 'FfxDx12SRPath', 'auto'),
                       ('FSR', 'UpscalerIndex', '0' if state['upscaler'] == 'helixsr' else '1')])

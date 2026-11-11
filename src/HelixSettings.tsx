@@ -1,9 +1,16 @@
-import { ButtonItem, DropdownItem, PanelSectionRow } from '@decky/ui';
+import { ButtonItem, DropdownItem, PanelSectionRow, ToggleField } from '@decky/ui';
 
 export type HelixSettingsState = {
   available: boolean; reason?: string; revision?: string; provider?: string; model?: string; family?: string;
-  quick_flow?: string; multiplier?: number; upscaler?: string; int8?: string; wave_size?: string;
+  quick_flow?: string; multiplier?: number; upscaler?: string; int8?: string; wave_size?: string; overlay?: string;
 };
+
+export function overlayDescription(overlay: string | undefined, hlx: boolean): string {
+  const name = hlx ? 'HLX answers through the FSR 4 path, so it may read FSR 4.' :
+    'Model E answers through the FSR 3.1 path, so it may read FSR rather than HelixSR.';
+  return (overlay === 'custom' ? 'Scaler\'s FPS overlay is on without the upscaler row. ' : '') +
+    `Scaler's in-game FPS overlay shows the active upscaler path. ${name} Page Up hides it in game. Close the game to save.`;
+}
 
 export function HelixSettings({ settings, disabled, save, advanced = false, toggleAdvanced }: {
   settings: HelixSettingsState; disabled: boolean; save: (changes: Record<string, string | number>) => void;
@@ -39,6 +46,9 @@ export function HelixSettings({ settings, disabled, save, advanced = false, togg
        'A custom frame-generation route is configured. Select a provider to replace it.'}
       {' '}Close the game to save. Restart to apply. Saved settings do not confirm generated frames.
     </div></PanelSectionRow>
+    <PanelSectionRow><ToggleField label="Show upscaler overlay in game" disabled={disabled}
+      description={overlayDescription(settings.overlay, hlx)} checked={settings.overlay === 'upscaler'}
+      onChange={checked => save({ overlay: checked ? 'upscaler' : 'off' })} /></PanelSectionRow>
     {!hlx && toggleAdvanced && <PanelSectionRow><ButtonItem layout="below" onClick={toggleAdvanced}>{advanced ? 'Hide advanced tuning' : 'Advanced tuning'}</ButtonItem></PanelSectionRow>}
     {!hlx && advanced && <>
       {select('INT8 math', 'int8', settings.int8, [['Automatic', 'auto'], ['On', 'on'], ['Off', 'off']])}

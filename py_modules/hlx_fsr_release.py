@@ -145,7 +145,7 @@ def configuration(source, template, previous_version=None):
 
 
 def update_settings(source, changes):
-    if not isinstance(changes, dict) or set(changes) - {'provider', 'upscaler', 'multiplier'}:
+    if not isinstance(changes, dict) or set(changes) - {'provider', 'upscaler', 'multiplier', 'overlay'}:
         raise ValueError('Unsupported HLX FSR setting')
     if 'provider' in changes and changes['provider'] not in ('off', 'fsr', 'xess'):
         raise ValueError('HelixSR 3.2.0 supports Off, FSR FG or XeSS FG')

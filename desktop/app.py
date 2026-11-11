@@ -741,11 +741,13 @@ class MainWindow(QMainWindow):
             'multiplier': ('Multiplier (3× is XeSS only)', [('2×', 2), ('3×', 3)]),
             'int8': ('INT8', [('Automatic', 'auto'), ('On', 'on'), ('Off', 'off')]),
             'wave_size': ('Wave size', [('Automatic', 'auto'), ('32', '32'), ('64', '64')]),
+            'overlay': ('In-game upscaler overlay (Scaler FPS overlay; Page Up hides it)',
+                        [('Off', 'off'), ('On', 'upscaler')]),
         }
         if hlx:
             choices['upscaler'] = ('Upscaler', [('HLX FSR 4 (FSR 4.1.2 Lite)', 'hlx-fsr'), ('AMD FSR (native)', 'fsr')])
             choices['provider'] = ('Frame generation', [('Off', 'off'), ('AMD FSR FG', 'fsr'), ('Intel XeSS FG', 'xess')])
-            choices = {k: choices[k] for k in ('upscaler', 'provider', 'multiplier')}
+            choices = {k: choices[k] for k in ('upscaler', 'provider', 'multiplier', 'overlay')}
         for key, (label, options) in choices.items():
             layout.addWidget(QLabel(label))
             combo = QComboBox()
