@@ -22,7 +22,7 @@ Created by Blackheart909. HelixSR is developed separately by [Lone Wolf](https:/
 
 [Support Blackheart909 on Ko-fi](https://ko-fi.com/blackheart909). Optional support helps with my work on this independent plugin and my other projects. HelixSR is developed separately by Lone Wolf.
 
-[Download Decky 0.1.44 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.44/HelixSR-Decky-0.1.44.zip) · [All releases](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Desktop AppImage and guide](DESKTOP_GUIDE.md) · [OptiScaler setup](OPTISCALER_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
+[Download Decky 0.1.44 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.44/HelixSR-Decky-0.1.44.zip) · [All releases](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases) · [Step-by-step installation guide](INSTALL_GUIDE.md) · [Video setup guide by Deck Wizard](https://www.youtube.com/watch?v=lI_TUm_fPKU) · [Desktop AppImage and guide](DESKTOP_GUIDE.md) · [OptiScaler setup](OPTISCALER_GUIDE.md) · [Report a problem](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/issues/new?template=bug_report.yml)
 
 Use the **install ZIP** in Decky. Developer source archives, including older `-source.zip` files and GitHub's **Source code** downloads, cannot run as a plugin. If Decky reports **Failed to fetch dynamically imported module**, follow the [repair steps](INSTALL_GUIDE.md#failed-to-fetch-dynamically-imported-module).
 
@@ -100,4 +100,6 @@ The native Linux AppImage is available separately from Decky. Follow the [deskto
 
 **[Deck Wizard](https://www.youtube.com/c/DeckWizard)** (DeckWiz) tests HelixSR Decky across several Steam Decks and many games, and that feedback led to the one-time network build in 0.1.42.
 
-Videos showcasing the plugin and game tests are on [Deck Wizard's YouTube channel](https://www.youtube.com/c/DeckWizard). Individual videos will be listed here as they are published.
+Videos showcasing the plugin and game tests are on [Deck Wizard's YouTube channel](https://www.youtube.com/c/DeckWizard):
+
+* [NVIDIA DLSS on Steam Deck Is HERE! Ultimate Setup Guide!](https://www.youtube.com/watch?v=lI_TUm_fPKU) (11 November 2026): installing Decky Loader and HelixSR Decky, first-time setup, restoring or removing HelixSR, Cyberpunk 2077 and Stellar Blade setup, Lossless Scaling frame generation, and tests in Cyberpunk 2077, God of War Ragnarök, Resident Evil Requiem and Stellar Blade.
