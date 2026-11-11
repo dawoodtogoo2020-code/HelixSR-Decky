@@ -725,7 +725,9 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(dialog)
         hlx = state.get('family') == 'hlx-fsr'
         note = QLabel("Close the game before saving and restart to apply. " +
-                      ("HLX FSR 4 uses AMD's FSR 4.1.2 Lite model. AMD FSR (native) selects the AMD provider. "
+                      ("HLX FSR 4 uses AMD's FSR 4.1.2 Lite model. " +
+                       ("HLX FSR 4 Full runs the full FSR 4.1.2 network: sharper and slower. " if state.get('full_available') else "") +
+                       "AMD FSR (native) selects the AMD provider. "
                        "Keep in-game frame generation off when enabling a Scaler FG provider." if hlx else
                        "HelixSR FG needs DX12 and DLSS FG enabled in-game. Light and Full are frame generation models.") +
                       " 3× uses XeSS FG.")
@@ -745,7 +747,9 @@ class MainWindow(QMainWindow):
                         [('Off', 'off'), ('On', 'upscaler')]),
         }
         if hlx:
-            choices['upscaler'] = ('Upscaler', [('HLX FSR 4 (FSR 4.1.2 Lite)', 'hlx-fsr'), ('AMD FSR (native)', 'fsr')])
+            choices['upscaler'] = ('Upscaler', [('HLX FSR 4 (FSR 4.1.2 Lite)', 'hlx-fsr')]
+                                   + ([('HLX FSR 4 Full (sharper, slower)', 'hlx-fsr-full')] if state.get('full_available') else [])
+                                   + [('AMD FSR (native)', 'fsr')])
             choices['provider'] = ('Frame generation', [('Off', 'off'), ('AMD FSR FG', 'fsr'), ('Intel XeSS FG', 'xess')])
             choices = {k: choices[k] for k in ('upscaler', 'provider', 'multiplier', 'overlay')}
         for key, (label, options) in choices.items():

@@ -3,6 +3,7 @@ import { ButtonItem, DropdownItem, PanelSectionRow, ToggleField } from '@decky/u
 export type HelixSettingsState = {
   available: boolean; reason?: string; revision?: string; provider?: string; model?: string; family?: string;
   quick_flow?: string; multiplier?: number; upscaler?: string; int8?: string; wave_size?: string; overlay?: string;
+  release?: string; full_available?: boolean;
 };
 
 export function overlayDescription(overlay: string | undefined, hlx: boolean): string {
@@ -26,7 +27,12 @@ export function HelixSettings({ settings, disabled, save, advanced = false, togg
   return <>
     {select('Upscaler', 'upscaler', settings.upscaler,
       [...(settings.upscaler === 'unsupported' ? [['Existing custom upscaler', 'unsupported'] as [string, string]] : []),
-       hlx ? ['HLX FSR 4 (FSR 4.1.2 Lite)', 'hlx-fsr'] : ['HelixSR Model E', 'helixsr'], ['AMD FSR (native)', 'fsr']])}
+       hlx ? ['HLX FSR 4 (FSR 4.1.2 Lite)', 'hlx-fsr'] : ['HelixSR Model E', 'helixsr'],
+       ...(hlx && settings.full_available ? [['HLX FSR 4 Full (sharper, slower)', 'hlx-fsr-full'] as [string, string]] : []),
+       ['AMD FSR (native)', 'fsr']])}
+    {hlx && settings.upscaler === 'hlx-fsr-full' && <PanelSectionRow><div className="helix-muted">
+      HLX FSR 4 Full runs the full FSR 4.1.2 network through Scaler: sharper than HLX FSR 4 and slower. Upstream lists the Steam Deck as supported but has not tested it there. Close the game to save.
+    </div></PanelSectionRow>}
     {select('Frame generation', 'provider', settings.provider,
       [...(settings.provider === 'unsupported' ? [['Existing custom provider', 'unsupported'] as [string, string]] : []),
        ['Off', 'off'], ...(hlx ? [] : [['HelixSR DLSS FG', 'helixsr'] as [string, string]]), ['AMD FSR FG', 'fsr'], ['Intel XeSS FG', 'xess']],

@@ -149,8 +149,8 @@ def setup_report(target, route, options, proxy_files=()):
             if not marker.is_symlink() and marker.stat().st_size <= 4096:
                 record = json.loads(marker.read_text())
                 installed = record.get('helixsr')
-                if installed == '3.2.0' and (record.get('variant') or {}).get('id') == 'hlx-fsr4-1-2':
-                    return _hlx_report(directory, route, options, values, error)
+                if installed in ('3.2.0', '3.3.0') and (record.get('variant') or {}).get('id') == 'hlx-fsr4-1-2':
+                    return _hlx_report(directory, route, options, values, error, installed)
                 modern = installed in ('1.9.3', '2.0.0')
                 modern20 = installed == '2.0.0'
         except (OSError, ValueError, AttributeError):
@@ -223,9 +223,11 @@ def setup_report(target, route, options, proxy_files=()):
                                    'not selected; runtime unknown' if modern20 else 'not provided by this release'))
 
 
-def _hlx_report(directory, route, options, values, error):
+def _hlx_report(directory, route, options, values, error, version='3.2.0'):
     """Report the configured SR and FG providers without promising runtime success."""
-    from hlx_fsr_release import scaler_pairs
+    from hlx_fsr_release import FULL_NAME, RELEASES
+    release = RELEASES[version]
+    scaler_pairs = release.scaler_pairs
     direct = route == 'direct'
     upscaler = 'amd_fidelityfx_upscaler_dx12.dll'
     amd = 'amd_fidelityfx_upscaler_dx12.amd.dll'
@@ -246,7 +248,8 @@ def _hlx_report(directory, route, options, values, error):
         paths_match = (all(values.get(k, 'auto').lower() == 'auto' for k in ('OptiDllPath', 'FfxDx12Path', 'FfxDx12SRPath'))
                        and all((directory / 'OptiScaler' / dll).is_file() for dll in (upscaler, amd)))
         output = values.get('Dx12Upscaler', '').lower()
-        backend = {'0': 'HLX FSR 4 (FSR 4.1.2)', '1': 'AMD FSR (native)'}.get(values.get('UpscalerIndex')) if output == 'ffx' and paths_match else None
+        backend = ({'0': 'HLX FSR 4 (FSR 4.1.2)', '1': 'AMD FSR (native)'}.get(values.get('UpscalerIndex')) if output == 'ffx' and paths_match
+                   else FULL_NAME if release.FULL and output == FULL_NAME.lower() and paths_match else None)
         configured = bool(backend and not missing and not error)
         backend = backend or 'Custom or unknown Scaler output'
         checks.append(f'Configured output: {backend}. Select a supported DLSS, FSR or XeSS input in the DX12 game. Check a fresh log to identify the active provider: '

@@ -23,7 +23,7 @@ def setup_guidance(game):
     pragmata = (game.get('source') == 'Steam' and str(game.get('appid')) == '3357650') or (
         exe == 'pragmata.exe' and str(game.get('name', '')).casefold() == 'pragmata')
     if pragmata and route == 'optiscaler':
-        notes.append('PRAGMATA requires a compatible REFramework build for Scaler. Without it the game can exit during startup. This app does not install or verify that dependency. Follow the linked game guide and enable its dinput8 loader alongside dxgi on Proton. Keep existing mods and launch options. Game updates can require a newer REFramework build.')
+        notes.append('PRAGMATA requires a compatible REFramework build for Scaler. Without it the game can exit during startup. Add REFramework loader can add the latest nightly; an existing dinput8.dll is kept and not verified. Enable its dinput8 loader alongside dxgi on Proton (Review dinput8 launch option). Keep existing mods and launch options. Game updates can require a newer REFramework build.')
         links.append(dict(label='PRAGMATA setup guide', url=PRAGMATA_GUIDE))
     if game.get('awareness_deferred'):
         action, headline, steps = 'inspect', 'Checking this game before installation', ['Wait for the selected game details to finish loading.']

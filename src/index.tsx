@@ -3,7 +3,8 @@ import { ButtonItem, DropdownItem, PanelSection, PanelSectionRow, TextField,
 import { callable, definePlugin, openFilePicker, toaster } from "@decky/api";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { FaAdjust } from "react-icons/fa";
-import { proxyOptions } from "./launchOptions";
+import { hasOverride, overrideOptions, OverrideDll } from "./launchOptions";
+import { OVERLAY_NATIVE_NOTE, ReframeworkState, reframeworkText, showReframework } from "./reframework";
 import { PluginInstaller, PluginArtifact } from "./pluginInstaller";
 import { canRestore, gameStatus, installReadiness, nextStep } from "./gameStatus";
 import { executableSession } from "./executableSession";
@@ -59,6 +60,7 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
   main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
   executable_choices?: { path: string; dx12: boolean }[]; selected_executable?: string; executable_selection_needed?: boolean;
   menu_labels?: { available: boolean; supported: boolean; enabled: boolean; reason: string; label: string; experimental: boolean };
+  reframework?: ReframeworkState | null;
   repair_eligible?: boolean; repair_files?: string[]; reset_eligible?: boolean; reset_files?: string[]; reset_preserved_files?: string[]; reset_reason?: string;
   awareness_warnings?: string[];
   awareness_deferred?: boolean;
@@ -93,6 +95,11 @@ const details = callable<[string, string?], Game>("game_details");
 const gameDetailsRead = new GameDetailsRead(details);
 const setGameSettings = callable<[string, Record<string, string | number>, string], Game>("set_game_settings");
 const setInstallationRoute = callable<[string, string], Game>("set_installation_route");
+type ReframeworkPreview = { tag: string; build: number; commit: string; sha256: string; size: number; page: string;
+  file: string; game: string; tested: boolean; override: string };
+const reframeworkPreview = callable<[string], ReframeworkPreview>("reframework_preview");
+const installReframework = callable<[string, string], Game>("install_reframework");
+const removeReframework = callable<[string], Game>("remove_reframework");
 const checkUpdates = callable<[boolean], Release>("check_updates");
 const forgetGame = callable<[string], Library>("forget_game");
 const importFolders = callable<[string[]], Library>("import_folders");
@@ -539,7 +546,7 @@ function Content() {
       strOKButtonText={(p.license_accepted ?? data?.license_accepted) ? "Install / update HelixSR" : "Accept terms and install"}
       onOK={() => { if (!beginReview()) return;
         void installSession.start(game.id, p.name, async () => {
-          toaster.toast({ title: "Starting HelixSR installation", body: `${p.name}: starting the reviewed request. Please wait; you do not need to press Install again.`, duration: 6000 });
+          toaster.toast({ title: "Starting HelixSR installation", body: `${p.name}: starting the reviewed request. You do not need to press Install again. You can close this panel while it runs; a notification appears when it finishes. Stay in Gaming Mode and keep the game closed until then.`, duration: 8000 });
           await setLicense(true, p.token);
           const job = await installLatest(p.token);
           if (cachedLibrary && releaseChoice === "latest") cacheLibrary({ ...cachedLibrary, license_accepted: true });
@@ -586,10 +593,44 @@ function Content() {
       toaster.toast({ title: 'HelixSR settings saved', body: 'Restart the game to apply the change.' });
     }
   }
-  async function launchChange(restore = false) {
+  async function reframeworkInstall() {
+    if (!game?.reframework) return;
+    const id = game.id;
+    const p = await run(() => reframeworkPreview(id));
+    if (!p) return;
+    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`Add REFramework loader: ${p.game}`}
+      strDescription={<div style={{ overflowWrap: "anywhere" }}>
+        <p>Downloads REFramework nightly {p.build} ({p.commit.slice(0, 7)}, {(p.size / 1048576).toFixed(1)} MB) from github.com/praydog/REFramework-nightly and checks GitHub's SHA-256 digest {p.sha256.slice(0, 12)}….</p>
+        <p>Adds only {p.file}. Existing files are never replaced. Remove REFramework loader deletes only this exact file.</p>
+        <p>Proton also needs the launch option {p.override}. Review it with Review dinput8 launch option afterwards.</p>
+        <p>REFramework is a separate open-source mod by praydog. A game update can need a newer build: if the game stops at the Capcom logo after an update, remove the loader and add it again.</p>
+        {!p.tested && <p>This game has not been checked with HLX FSR 4 and REFramework on a Steam Deck yet.</p>}
+      </div>} strOKButtonText="Download and add" strCancelButtonText="Cancel"
+      onOK={() => { if (!beginReview()) return; void run(() => installReframework(id, p.sha256)).then(updated => {
+        if (!updated) return;
+        toaster.toast({ title: "REFramework loader added", body: `${p.game}: review the dinput8 launch option if it is not set yet.` });
+        if (mountedRef.current && selectedRef.current === id) setGame(updated);
+      }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
+  }
+  async function reframeworkRemove() {
+    if (!game?.reframework) return;
+    const id = game.id, r = game.reframework;
+    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`Remove REFramework loader: ${r.game}`}
+      strDescription={<div style={{ overflowWrap: "anywhere" }}>
+        <p>Deletes {r.file}, the exact file HelixSR added. Other REFramework files, scripts and settings stay.</p>
+        <p>The dinput8 launch option stays in Steam until you restore the plugin launch-option change or edit it in Steam.</p>
+        <p>Without the loader, HLX FSR 4 can crash this game at startup.</p>
+      </div>} strOKButtonText="Remove loader" strCancelButtonText="Cancel"
+      onOK={() => { if (!beginReview()) return; void run(() => removeReframework(id)).then(updated => {
+        if (!updated) return;
+        toaster.toast({ title: "REFramework loader removed", body: `${r.game}: dinput8.dll removed.` });
+        if (mountedRef.current && selectedRef.current === id) setGame(updated);
+      }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
+  }
+  async function launchChange(restore = false, dll: OverrideDll = "dxgi") {
     if (!game?.appid) return;
     if (!restore && (game.compatibility !== "candidate" || game.installation_status?.can_modify === false)) {
-      setError("Resolve this game's review reasons before enabling the Proton proxy.");
+      setError(`Resolve this game's review reasons before enabling the ${dll === "dxgi" ? "Proton proxy" : "REFramework loader override"}.`);
       return;
     }
     const appid = Number(game.appid);
@@ -606,11 +647,11 @@ function Content() {
         if (!receipt || receipt.after !== before) throw new Error("Launch options changed outside the plugin. Review them in Steam.");
         after = receipt.before;
       } else {
-        after = proxyOptions(before);
-        if (after === before) { toaster.toast({ title: "HelixSR Decky", body: "OptiScaler proxy launch option is already configured" }); return; }
+        after = overrideOptions(before, dll);
+        if (after === before) { toaster.toast({ title: "HelixSR Decky", body: dll === "dxgi" ? "OptiScaler proxy launch option is already configured" : "REFramework loader launch option is already configured" }); return; }
       }
     } catch (e) { setError(errorMessage(e)); return; }
-    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={restore ? "Restore previous launch options" : "Enable Proton OptiScaler proxy"}
+    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={restore ? "Restore previous launch options" : dll === "dxgi" ? "Enable Proton OptiScaler proxy" : "Enable REFramework loader (dinput8)"}
       strDescription={<div style={{ overflowWrap: "anywhere" }}><p>Before: {before || "empty"}</p><p>After: {after || "empty"}</p></div>}
       onOK={() => { if (!beginReview()) return; void run(async () => {
         const current = await liveLaunchOptions(appid);
@@ -770,6 +811,7 @@ function Content() {
       </>}
       {jobs.filter(job => job.state === "running").slice().reverse().map(job => <PanelSectionRow key={job.id}><div className="helix-card" style={infoStyle} role="status">
         <strong>{job.game}: {job.state === "running" ? "Installing / preparing HelixSR…" : job.state}</strong>{"\n"}{job.message}
+        {job.state === "running" && <div className="helix-muted">You can close this panel; it keeps running and a notification appears when it finishes. Stay in Gaming Mode and keep the game closed until then.</div>}
         {job.state === "running" && <ButtonItem layout="below" disabled={busy || modalOpen} onClick={() => void interact(async () => openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle="Cancel preparation?"
           strDescription="No game files are changed during preparation. Temporary build files will be removed."
           onOK={() => void run(() => cancelJob(job.id))} />))}>Cancel preparation</ButtonItem>}
@@ -782,9 +824,11 @@ function Content() {
           const id = game.id;
           const updated = await run(() => setInstallationRoute(id, game.route === 'direct' ? 'optiscaler' : 'auto'));
           if (updated && selectedRef.current === id) setGame(updated);
-        })}>{game.route === 'direct' ? 'Use Scaler for frame generation and settings' : 'Use automatic installation route'}</ButtonItem></PanelSectionRow>}
+        })}>{game.route === 'direct' ? 'Use Scaler for frame generation, settings and overlay' : 'Use automatic installation route'}</ButtonItem></PanelSectionRow>}
       {game.managed && game.route === 'direct' && <PanelSectionRow><div className="helix-muted">
         Select AMD FSR in the game for the native input route. To use Scaler settings, remove HelixSR to restore the original files, choose the Scaler route, then install again.</div></PanelSectionRow>}
+      {game.managed && game.route === 'direct' && <PanelSectionRow><ToggleField label="Show upscaler overlay in game" disabled checked={false}
+        description={OVERLAY_NATIVE_NOTE} onChange={() => {}} /></PanelSectionRow>}
       {game.helix_settings && <HelixSettings settings={game.helix_settings}
         disabled={disabled || game.installation_status?.can_modify === false}
         save={changes => void interact(() => saveHelixSettings(changes))}
@@ -818,6 +862,20 @@ function Content() {
         {(game.logs || []).map(l => `${l.path}\n${new Date(l.modified * 1000).toLocaleString()}\n${l.excerpt}`).join("\n\n") || "No supported logs found"}
       </div></PanelSectionRow>}
     </PanelSection>}
+    {game?.reframework && showReframework(game.reframework, game) && (r => { const t = reframeworkText(r, game.launch_options || ""); return <PanelSection title="REFramework loader">
+      <PanelSectionRow><div className="helix-card" style={infoStyle}><strong>{t.headline}</strong>{"\n"}{t.state}</div></PanelSectionRow>
+      <PanelSectionRow><div className="helix-muted">{t.intro}</div></PanelSectionRow>
+      {(r.state === "absent" || r.state === "missing") && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running}
+        onClick={() => void interact(() => reframeworkInstall())}>Add REFramework loader</ButtonItem></PanelSectionRow>}
+      <PanelSectionRow><div className="helix-muted">{t.launch}</div></PanelSectionRow>
+      {["installed", "changed", "foreign"].includes(r.state) && !!game.appid && <PanelSectionRow><ButtonItem layout="below"
+        disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
+        onClick={() => void interact(() => launchChange(false, "dinput8"))}>Review dinput8 launch option</ButtonItem></PanelSectionRow>}
+      {!!game.appid && hasOverride(game.launch_options || "", "dinput8") && game.route !== "optiscaler" && <PanelSectionRow><ButtonItem layout="below" disabled={disabled}
+        onClick={() => void interact(() => launchChange(true))}>Restore plugin launch-option change</ButtonItem></PanelSectionRow>}
+      {r.state === "installed" && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running}
+        onClick={() => void interact(() => reframeworkRemove())}>Remove REFramework loader</ButtonItem></PanelSectionRow>}
+    </PanelSection>; })(game.reframework)}
     {game && <PanelSection title="More game settings">
       <PanelSectionRow><ButtonItem layout="below" onClick={() => {
         rememberedGameSettingsOpen = !advancedOpen; setAdvancedOpen(rememberedGameSettingsOpen);

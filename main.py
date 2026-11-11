@@ -99,6 +99,24 @@ class Plugin:
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.set_game_settings, gid, changes, revision)
 
+    async def reframework_preview(self, gid):
+        # Read-only; the GitHub request runs outside the API lock.
+        self._allow_game_change()
+        return await asyncio.to_thread(self.manager.reframework_preview, gid)
+
+    async def install_reframework(self, gid, sha256):
+        self._allow_game_change()
+        # The download runs outside the API lock so the panel stays responsive.
+        fetched = await asyncio.to_thread(self.manager.fetch_reframework, sha256)
+        async with self.api_lock:
+            self._allow_game_change()
+            return await asyncio.to_thread(self.manager.install_reframework, gid, fetched)
+
+    async def remove_reframework(self, gid):
+        async with self.api_lock:
+            self._allow_game_change()
+            return await asyncio.to_thread(self.manager.remove_reframework, gid)
+
     async def set_installation_route(self, gid, route):
         async with self.api_lock:
             return await asyncio.to_thread(self.manager.set_installation_route, gid, route)

@@ -1,4 +1,8 @@
-"""End-to-end file transactions. Set HELIXSR_VERIFIED_ZIP for the actual SDK runtime."""
+"""End-to-end file transactions for each reviewed HLX release.
+
+Set HELIXSR_VERIFIED_ZIP (3.2.0) or HELIXSR_VERIFIED_ZIP_330 (3.3.0) to run against the actual archive.
+"""
+import contextlib
 import hashlib
 import io
 import os
@@ -13,31 +17,41 @@ from test_backend import Fixtures, pe
 import manager
 import hlx_fsr_release as hlx
 
+ZIP_ENV = {'3.2.0': 'HELIXSR_VERIFIED_ZIP', '3.3.0': 'HELIXSR_VERIFIED_ZIP_330'}
+TEMPLATE = b'[Upscalers]\nDx12Upscaler=auto\n[FSR]\nUpscalerIndex=auto\n[Libraries]\nFfxDx12Path=auto\nFfxDx12SRPath=auto\n[FrameGen]\nEnabled=false\nFGInput=auto\nFGOutput=auto\nFGNvngxReplacement=auto\n'
+
 
 class LifecycleTests(Fixtures):
-    def archive_transport(self):
-        path = os.environ.get('HELIXSR_VERIFIED_ZIP')
+    R = hlx.V320
+    CHOICE = 'reviewed-3.2.0'
+
+    def wire(self, release):
+        """The actual archive when provided, otherwise a fixture with the release's exact member names."""
+        path = os.environ.get(ZIP_ENV[release.MODERN_VERSION])
         if path:
-            path = Path(path)
-            self.assertEqual(path.stat().st_size, hlx.RELEASE_SIZE)
-            return patch('manager.urllib.request.urlopen', side_effect=lambda req, **k: path.open('rb'))
-        payload = {name: name.encode() for name in hlx.PINS}
+            self.assertEqual(Path(path).stat().st_size, release.RELEASE_SIZE)
+            return Path(path).read_bytes()
+        payload = {name: name.encode() for name in release.PINS}
         payload[hlx.OUTPUT_DLL] = payload['helixsr-scaler/OptiScaler/amd_fidelityfx_upscaler_dx12.dll'] = pe(ffx=True, helix=True)
-        payload[hlx.SCALER_INI] = b'[Upscalers]\nDx12Upscaler=auto\n[FSR]\nUpscalerIndex=auto\n[Libraries]\nFfxDx12Path=auto\nFfxDx12SRPath=auto\n[FrameGen]\nEnabled=false\nFGInput=auto\nFGOutput=auto\nFGNvngxReplacement=auto\n'
+        payload[hlx.SCALER_INI] = TEMPLATE
         wire = io.BytesIO()
         with zipfile.ZipFile(wire, 'w') as archive:
             for name, data in payload.items():
-                archive.writestr('HelixSR-3.2.0/' + name, data)
+                archive.writestr(f'HelixSR-{release.MODERN_VERSION}/' + name, data)
         wire = wire.getvalue()
         pins = {name: (len(b), hashlib.sha256(b).hexdigest()) for name, b in payload.items()}
-        self.enterContext(patch.multiple(hlx, PINS=pins, RELEASE_SHA256=hashlib.sha256(wire).hexdigest(),
-                         RELEASE_SIZE=len(wire), OUTPUT_SHA256=pins[hlx.OUTPUT_DLL][1]))
-        return patch('manager.urllib.request.urlopen', side_effect=lambda req, **k: io.BytesIO(wire))
+        self.enterContext(patch.multiple(release, PINS=pins, RELEASE_SHA256=hashlib.sha256(wire).hexdigest(),
+                          RELEASE_SIZE=len(wire), OUTPUT_SHA256=pins[hlx.OUTPUT_DLL][1]))
+        return wire
 
-    def install(self):
-        with self.archive_transport():
-            review = self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice='reviewed-3.2.0')
-            self.assertFalse(review['license_accepted'])
+    def archive_transport(self, *releases):
+        wires = {release.RELEASE_URL: self.wire(release) for release in (releases or (self.R,))}
+        return patch('manager.urllib.request.urlopen', side_effect=lambda req, **k: io.BytesIO(wires[req.full_url]))
+
+    def install(self, release=None, choice=None, transport=True):
+        release, choice = release or self.R, choice or self.CHOICE
+        with (self.archive_transport(release) if transport else contextlib.nullcontext()):
+            review = self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice=choice)
             self.m.accept_license(True, review['token'])
             job = self.m.execute_latest(review['token'])
             self.m.worker.join(180)
@@ -45,10 +59,9 @@ class LifecycleTests(Fixtures):
             self.assertEqual(job['state'], 'completed', job['message'])
         rec = self.m.record(self.game)
         self.assertEqual(rec['variant']['id'], hlx.VARIANT_ID)
-        self.assertEqual(rec['release_sha256'], hlx.RELEASE_SHA256)
+        self.assertEqual((rec['version'], rec['release_sha256']), (release.MODERN_VERSION, release.RELEASE_SHA256))
         self.assertFalse(self.m.cfg['packages'])
         self.assertFalse((self.m.companion(self.game) / 'records/package.json').exists())
-        self.assertEqual(len(self.m.cfg['variant_packages_v1']), 1)
         return rec
 
     def act(self, action):
@@ -59,17 +72,18 @@ class LifecycleTests(Fixtures):
         fg = self.root / 'amd_fidelityfx_framegeneration_dx12.dll'
         fg.write_bytes(b'Game frame generation')
         rec = self.install()
+        self.assertEqual(len(self.m.cfg['variant_packages_v1']), 1)
         fallback = self.native.with_name('amd_fidelityfx_upscaler_dx12.amd.dll')
         self.assertEqual(fallback.read_bytes(), self.original)
-        self.assertEqual(manager.sha(self.native), hlx.OUTPUT_SHA256)
+        self.assertEqual(manager.sha(self.native), self.R.OUTPUT_SHA256)
         self.native.unlink()
         self.act('repair')
-        self.assertEqual(manager.sha(self.native), hlx.OUTPUT_SHA256)
+        self.assertEqual(manager.sha(self.native), self.R.OUTPUT_SHA256)
         self.act('disable')
         self.assertEqual(self.native.read_bytes(), self.original)
         self.assertFalse(fallback.exists())
         self.act('enable')
-        self.assertEqual(manager.sha(self.native), hlx.OUTPUT_SHA256)
+        self.assertEqual(manager.sha(self.native), self.R.OUTPUT_SHA256)
         self.assertEqual(rec['package_selection'], self.m.record(self.game)['package_selection'])
         self.act('remove')
         self.assertEqual(self.native.read_bytes(), self.original)
@@ -89,7 +103,7 @@ class LifecycleTests(Fixtures):
         self.assertEqual(self.native.read_bytes(), updated)
         self.assertFalse(self.m.record(self.game))
         self.assertFalse(self.native.with_name('amd_fidelityfx_upscaler_dx12.amd.dll').exists())
-        review = self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice='reviewed-3.2.0')
+        review = self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice=self.CHOICE)
         self.assertIn('cannot prove the DLL is stock', review['warning'])
 
     def test_scaler_native_selection_survives_disable_and_is_distinct_from_fg(self):
@@ -109,9 +123,9 @@ class LifecycleTests(Fixtures):
         self.assertFalse((self.root / 'OptiScaler.ini').exists())
 
     def test_reject_conflicts_incompatible_models_and_changed_archive_before_game_writes(self):
-        review = lambda: self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice='reviewed-3.2.0')
-        with self.assertRaisesRegex(ValueError, 'requires'):
-            self.m.preview_latest(self.game['id'], release_choice='reviewed-3.2.0')
+        review = lambda: self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice=self.CHOICE)
+        with self.assertRaisesRegex(ValueError, 'needs a reviewed HelixSR 3.3.0 or 3.2.0'):
+            self.m.preview_latest(self.game['id'], release_choice=self.CHOICE)
         fallback = self.native.with_name('amd_fidelityfx_upscaler_dx12.amd.dll')
         fallback.write_bytes(b'unmanaged')
         with self.assertRaisesRegex(ValueError, '(?i)unmanaged'):
@@ -128,3 +142,54 @@ class LifecycleTests(Fixtures):
         self.assertEqual(self.native.read_bytes(), self.original)
         self.assertFalse(self.m.record(self.game))
         self.assertFalse(self.m.cfg.get('variant_packages_v1'))
+
+
+class Lifecycle330Tests(LifecycleTests):
+    """The same transactions with HelixSR 3.3.0, plus its Scaler-only HLX FSR 4 Full."""
+    R = hlx.V330
+    CHOICE = 'reviewed-3.3.0'
+    FULL = 'OptiScaler/custom/HLX FSR 4 Full/ffx/amd_fidelityfx_upscaler_dx12.dll'
+
+    def test_scaler_full_upscaler_is_installed_selectable_and_survives_disable(self):
+        self.m.set_installation_route(self.game['id'], 'optiscaler')
+        self.install()
+        full = self.root / self.FULL
+        self.assertEqual(manager.sha(full), self.R.PINS[hlx.FULL_DIR + 'amd_fidelityfx_upscaler_dx12.dll'][1])
+        self.assertTrue((full.parent / 'hlx_fsr4.ini').is_file())
+        state = self.m.game_settings(self.game)
+        self.assertEqual((state['upscaler'], state['full_available'], state['release']), ('hlx-fsr', True, '3.3.0'))
+        self.m.set_game_settings(self.game['id'], {'upscaler': 'hlx-fsr-full'}, state['revision'])
+        self.assertIn('Dx12Upscaler=HLX FSR 4 Full', (self.root / 'OptiScaler.ini').read_text())
+        self.assertEqual(self.m.game_settings(self.game)['upscaler'], 'hlx-fsr-full')
+        self.act('disable')
+        self.assertFalse(full.exists())
+        self.act('enable')
+        self.assertTrue(full.exists())
+        self.assertEqual(self.m.game_settings(self.game)['upscaler'], 'hlx-fsr-full')
+        self.act('remove')
+        self.assertEqual([f for f in (self.root / 'OptiScaler').rglob('*') if not f.is_dir()], [],
+                         'Remove deletes every added file (existing behavior keeps empty folders)')
+        self.assertFalse((self.root / 'dxgi.dll').exists())
+        self.assertEqual(self.native.read_bytes(), self.original)
+
+    def test_direct_install_uses_the_330_runtime_without_full(self):
+        self.install()
+        self.assertEqual(manager.sha(self.native), self.R.OUTPUT_SHA256)
+        self.assertFalse((self.root / 'OptiScaler').exists(), 'Full is a Scaler upscaler only')
+
+    def test_scaler_upgrade_from_320_keeps_settings_and_adds_full(self):
+        self.m.set_installation_route(self.game['id'], 'optiscaler')
+        with self.archive_transport(hlx.V320, hlx.V330):
+            self.install(hlx.V320, 'reviewed-3.2.0', transport=False)
+            before = self.m.game_settings(self.game)
+            self.assertFalse(before['full_available'])
+            self.m.set_game_settings(self.game['id'], {'upscaler': 'fsr', 'overlay': 'upscaler'}, before['revision'])
+            self.install(hlx.V330, 'reviewed-3.3.0', transport=False)
+        after = self.m.game_settings(self.game)
+        self.assertEqual((after['upscaler'], after['overlay'], after['full_available']), ('fsr', 'upscaler', True))
+        self.assertTrue((self.root / self.FULL).is_file())
+        self.assertEqual(manager.sha(self.root / 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll'), hlx.V330.OUTPUT_SHA256)
+        self.act('remove')
+        self.assertEqual([f for f in (self.root / 'OptiScaler').rglob('*') if not f.is_dir()], [],
+                         'Remove deletes every added file (existing behavior keeps empty folders)')
+        self.assertEqual(self.native.read_bytes(), self.original)

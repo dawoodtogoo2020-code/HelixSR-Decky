@@ -24,7 +24,8 @@ class SetupTests(unittest.TestCase):
 
     def test_hlx_scaler_distinguishes_model_native_fallback_and_fg_configuration(self):
         import json
-        from hlx_fsr_release import scaler_pairs, VARIANT_ID, MODERN_VERSION
+        from hlx_fsr_release import V320, VARIANT_ID
+        scaler_pairs, MODERN_VERSION = V320.scaler_pairs, V320.MODERN_VERSION
         for _, destination in scaler_pairs():
             path = self.root / destination
             path.parent.mkdir(parents=True, exist_ok=True)

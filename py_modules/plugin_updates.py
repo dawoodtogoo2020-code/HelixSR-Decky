@@ -111,6 +111,8 @@ def validate_zip(path, version):
             required.add(f'{FOLDER}/py_modules/discovery_records.py')
         if semver(version) >= (0, 1, 37):
             required.update(f'{FOLDER}/py_modules/{name}.py' for name in ('hlx_fsr_release', 'windows_processes'))
+        if semver(version) >= (0, 1, 44):
+            required.add(f'{FOLDER}/py_modules/reframework.py')
         if not required <= files:
             raise ValueError('Incomplete plugin ZIP')
         for name in ('plugin.json', 'package.json'):

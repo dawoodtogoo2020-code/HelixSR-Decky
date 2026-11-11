@@ -204,6 +204,21 @@ class DesktopWidgetTests(unittest.TestCase):
         self.assertEqual(self.window.release_choice.currentData(), 'reviewed-2.0.0')
         self.assertEqual(self.window.models.currentData(), catalog[0]['id'])
 
+    def test_hlx_settings_offer_full_only_when_the_release_has_it(self):
+        from PySide6.QtWidgets import QComboBox
+        seen = {}
+        def capture(dialog):
+            combos = dialog.findChildren(QComboBox)
+            seen['upscaler'] = [combos[0].itemData(i) for i in range(combos[0].count())]
+            return QDialog.Rejected
+        for full, expected in ((True, ['hlx-fsr', 'hlx-fsr-full', 'fsr']), (False, ['hlx-fsr', 'fsr'])):
+            self.window.game = dict(self.backend.game, helix_settings=dict(
+                available=True, revision='rev', family='hlx-fsr', upscaler='hlx-fsr', provider='off',
+                multiplier=2, overlay='off', full_available=full))
+            with mock.patch.object(QDialog, 'exec', capture):
+                self.window.edit_helix_settings()
+            self.assertEqual(seen['upscaler'], expected)
+
     def test_missing_managed_files_can_be_reviewed_for_repair_without_updates_or_consent(self):
         self.backend.game.update(managed=True, enabled=True, repair_eligible=True, installed_variant='hlx-fsr4-1-2',
                                  installation_status=dict(can_modify=False, can_repair=True, label='Files missing',

@@ -34,10 +34,12 @@ React, React DOM and `@decky/ui` are provided by the Steam/Decky runtime as exte
 
 ## Downloaded game components and local preparation
 
+REFramework is downloaded only when you choose **Add REFramework loader**, from [praydog/REFramework-nightly](https://github.com/praydog/REFramework-nightly) ([source](https://github.com/praydog/REFramework), MIT license). It is not bundled. Only its `dinput8.dll` is placed in the game folder.
+
 HelixSR is downloaded from [lonewolf0622/HelixSR](https://github.com/lonewolf0622/HelixSR). It is not bundled. Downloaded packages retain their HelixSR freeware license, Apache 2.0 setup-script license, OptiScaler GPL 3.0 notices, fakenvapi MIT notices and AMD FidelityFX notices. The build-only adapter truncates only the Apache-licensed shell setup before its interactive game-install stage; all upstream release files remain available alongside the generated network. The modified adapter is temporary and not distributed.
 
 NVIDIA DLSS and generated network files remain subject to NVIDIA's license. Generated weights/kernels are private local installation assets and are excluded from the plugin ZIP and diagnostic exports. No compiled HelixSR binary is reverse engineered or patched by this plugin.
 
 ## Optional HLX FSR 4 runtime
 
-This plugin does not ship the upstream runtime, AMD DLLs, shaders or weights. For a local installation the plugin verifies the complete [official 3.2.0 ZIP](https://github.com/lonewolf0622/HelixSR/releases/tag/v3.2.0) and selected members. The cache includes the upstream Freeware License, third-party notices and Scaler/component licenses. The built-in HLX shaders derive from AMD FSR SDK 2.4.0 (MIT); Scaler 2.1.0 is GPL-3.0. See [pins and usage](docs/hlx-fsr.md).
+This plugin does not ship the upstream runtime, AMD DLLs, shaders or weights. For a local installation the plugin verifies the complete official [3.3.0](https://github.com/lonewolf0622/HelixSR/releases/tag/v3.3.0) or [3.2.0](https://github.com/lonewolf0622/HelixSR/releases/tag/v3.2.0) ZIP and selected members. The cache includes the upstream Freeware License, third-party notices and Scaler/component licenses. The built-in HLX shaders derive from AMD FSR SDK 2.4.0 (MIT); Scaler 2.1.0 (in 3.2.0) and 2.3.0 (in 3.3.0) are GPL-3.0. See [pins and usage](docs/hlx-fsr.md).

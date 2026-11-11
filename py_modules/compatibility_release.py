@@ -7,7 +7,8 @@ LATEST_CHOICE = "latest"
 COMPATIBLE_CHOICE = "compatible-1.8.1"
 COMPATIBLE_VERSION = "1.8.1"
 COMPATIBLE_METADATA_SOURCE = "reviewed-compatibility-release"
-REVIEWED_CHOICES = ('reviewed-2.0.0', 'reviewed-1.9.3', COMPATIBLE_CHOICE, 'reviewed-3.2.0')
+REVIEWED_CHOICES = ('reviewed-2.0.0', 'reviewed-1.9.3', COMPATIBLE_CHOICE, 'reviewed-3.3.0', 'reviewed-3.2.0')
+HLX_CHOICES = {'reviewed-3.3.0': '3.3.0', 'reviewed-3.2.0': '3.2.0'}
 RECOMMENDED_CHOICE = 'reviewed-2.0.0'
 
 _UNSUPPORTED_FROM = (1, 9, 0)
@@ -51,8 +52,9 @@ def reviewed_release(choice):
     choice = selection(choice)
     if choice == COMPATIBLE_CHOICE:
         return compatible_release()
-    if choice == 'reviewed-3.2.0':
-        import hlx_fsr_release as adapter
+    if choice in HLX_CHOICES:
+        import hlx_fsr_release
+        adapter = hlx_fsr_release.RELEASES[HLX_CHOICES[choice]]
     elif choice == 'reviewed-2.0.0':
         import helix20_release as adapter
     elif choice == 'reviewed-1.9.3':
@@ -72,7 +74,9 @@ def release_choices():
         release = reviewed_release(choice)
         recommended = choice == RECOMMENDED_CHOICE
         suffix = 'recommended' if recommended else 'older release'
-        if choice == 'reviewed-3.2.0':
+        if choice == 'reviewed-3.3.0':
+            suffix = 'HLX FSR 4 and HLX FSR 4 Full'
+        elif choice == 'reviewed-3.2.0':
             suffix = 'pre-release, HLX FSR 4 only'
         choices.append(dict(id=choice, label=f"HelixSR {release['version']} ({suffix})",
                             version=release['version'], page=release['page'],
@@ -135,9 +139,9 @@ def require_supported_latest(release):
     if not isinstance(release, Mapping):
         raise ValueError("Latest HelixSR release metadata must be a mapping.")
     version = release.get("version")
-    if version == "3.2.0":
-        from hlx_fsr_release import validate_release
-        validate_release(release)
+    if version in ("3.3.0", "3.2.0"):
+        from hlx_fsr_release import RELEASES
+        RELEASES[version].validate_release(release)
         return release
     if version == "2.0.0":
         from helix20_release import validate_release

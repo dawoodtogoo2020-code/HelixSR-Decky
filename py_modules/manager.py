@@ -36,7 +36,7 @@ import hlx_fsr_release
 
 def release_adapter(record):
     if hlx_fsr_release.modern(record):
-        return hlx_fsr_release
+        return hlx_fsr_release.for_record(record)
     return helix20_release if helix20_release.modern(record) else modern_release
 
 def is_modern(record):
@@ -52,6 +52,7 @@ def manifest_path(record):
         return hlx_fsr_release.MANIFEST_PATH
     return helix20_release.MANIFEST_PATH if helix20_release.modern(record) else 'helixsr_setup.json'
 import helix_settings
+import reframework
 from modern_build import build_script as modern_build_script
 from compatibility_release import (COMPATIBLE_CHOICE, compatible_release, selection,
                                    validate_compatible_release, require_supported_latest,
@@ -151,7 +152,8 @@ def license_key(release, variant_id=None):
 
 def require_model_release(selected, release):
     if (selected['id'] == hlx_fsr_release.VARIANT_ID) != hlx_fsr_release.modern(release):
-        raise ValueError('HLX FSR 4 (FSR 4.1.2) requires the reviewed 3.2.0 package; use an earlier reviewed release for Model E.')
+        raise ValueError('HLX FSR 4 needs a reviewed HelixSR 3.3.0 or 3.2.0 package. Model E needs HelixSR 2.0.0 or an older '
+                         'reviewed release: the HLX DLSS (Model E) build in HelixSR 3.x is not reviewed by this plugin yet.')
 
 
 def direct_backup(target, record):
@@ -678,7 +680,7 @@ class Manager:
         if (record.get('variant') or {}).get('id') == hlx_fsr_release.VARIANT_ID and not hlx_fsr_release.modern(record):
             return None
         if hlx_fsr_release.modern(record) and record.get('files') != {
-                n: digest for n, (_, digest) in hlx_fsr_release.PINS.items()}:
+                n: digest for n, (_, digest) in hlx_fsr_release.for_record(record).PINS.items()}:
             return None
         if 'variant' in record and (not isinstance(record.get('files'), dict)
                                     or manifest_path(record) not in record['files']):
@@ -740,10 +742,11 @@ class Manager:
         if hlx_fsr_release.modern(record):
             # Do not trust a cache record even if it points to a file with its
             # claimed digest: all SR, Scaler and notice bytes have compiled-in pins.
-            if record.get('files') != {n: d for n, (_, d) in hlx_fsr_release.PINS.items()}:
+            adapter = hlx_fsr_release.for_record(record)
+            if record.get('files') != {n: d for n, (_, d) in adapter.PINS.items()}:
                 return False
             try:
-                hlx_fsr_release.verify_outputs(path)
+                adapter.verify_outputs(path)
                 return True
             except (OSError, ValueError):
                 return False
@@ -1214,6 +1217,7 @@ class Manager:
         data['menu_labels'] = self.menu_status(game, data, rec, detailed)
         if detailed:
             data['helix_settings'] = self.game_settings(game, rec)
+            data['reframework'] = reframework.status(game, data, self.companion(game))
         return data
 
     def game_settings(self, game, rec=None):
@@ -1225,7 +1229,7 @@ class Manager:
             if rel not in self.mutable_config_paths(game, rec):
                 raise ValueError('Settings file is not owned by this installation')
             source = self.read_owned_config(game, rel)
-            settings_adapter = hlx_fsr_release if hlx_fsr_release.modern(rec) else helix_settings
+            settings_adapter = hlx_fsr_release.for_record(rec) if hlx_fsr_release.modern(rec) else helix_settings
             return dict(available=True, revision=source['sha256'],
                         **settings_adapter.read_settings(source['content']))
         except (ValueError, OSError) as exc:
@@ -1250,7 +1254,7 @@ class Manager:
                 source = self.read_owned_config(game, rel)
                 if source['sha256'] != revision:
                     raise ValueError('Settings changed; refresh before saving')
-                settings_adapter = hlx_fsr_release if hlx_fsr_release.modern(rec) else helix_settings
+                settings_adapter = hlx_fsr_release.for_record(rec) if hlx_fsr_release.modern(rec) else helix_settings
                 updated = settings_adapter.update_settings(source['content'], changes)
                 self.mutate(game, data, 'settings', None, settings=(rel, updated))
                 return self.assess_safe(game)
@@ -1269,6 +1273,77 @@ class Manager:
                 self.cfg.setdefault('route_preferences', {})[gid] = route
                 self.save()
                 return self.assess_safe(game)
+
+    def reframework_preview(self, gid):
+        """Name the exact REFramework build an install would add. Changes nothing."""
+        with self.lock:
+            game = self.get_game(gid)
+            current = reframework.status(game, self.assess(game), self.companion(game))
+        if not current:
+            raise ValueError('The REFramework loader is not offered for this game')
+        if current['state'] not in ('absent', 'missing'):
+            raise ValueError(current['reason'] or 'The REFramework loader is already set up')
+        release = reframework.latest_release(https_context())
+        return dict(release, file=current['file'], game=current['game'], tested=current['tested'],
+                    override=reframework.OVERRIDE)
+
+    def fetch_reframework(self, sha256):
+        """Download and verify the reviewed REFramework build outside the game lock."""
+        release = reframework.latest_release(https_context())
+        if release['sha256'] != sha256:
+            raise ValueError('A newer REFramework build was published after the review. Review it again.')
+        cache = self.settings / 'reframework'
+        archive = reframework.download(release, cache / f"{release['sha256']}.zip", https_context(), self.closing.is_set)
+        for old in cache.glob('*.zip'):
+            if old != archive:
+                old.unlink(missing_ok=True)
+        payload, revision = reframework.extract(archive)
+        return dict(release, revision=revision, payload=payload)
+
+    def install_reframework(self, gid, fetched):
+        with self.lock:
+            game = self.get_game(gid)
+            companion = self.companion(game)
+            with operation_lock(companion):
+                data = self.assess(game)
+                current = reframework.status(game, data, companion)
+                if not current:
+                    raise ValueError('The REFramework loader is not offered for this game')
+                if current['state'] not in ('absent', 'missing'):
+                    raise ValueError(current['reason'] or 'The REFramework loader is already set up')
+                if active_processes(game['folder'], game.get('appid', '')):
+                    raise ValueError('Close the game before adding the REFramework loader')
+                if self.recovery_available(game):
+                    raise ValueError('Finish the pending HelixSR recovery first')
+                target, relative = reframework.target_path(game['folder'], data.get('main_exe'))
+                payload = fetched['payload']
+                reframework.check_dll(payload)
+                # Ownership is recorded first, so an interruption leaves a
+                # "missing" record, never an unowned file HelixSR wrote.
+                reframework.write_record(companion, dict(
+                    version=1, file=relative, sha256=hashlib.sha256(payload).hexdigest(),
+                    tag=fetched['tag'], revision=fetched['revision']))
+                try:
+                    reframework.install(target, payload)
+                except BaseException:
+                    reframework.write_record(companion, None)
+                    raise
+            return self.assess_safe(game)
+
+    def remove_reframework(self, gid):
+        with self.lock:
+            game = self.get_game(gid)
+            companion = self.companion(game)
+            with operation_lock(companion):
+                record = reframework.read_record(companion)
+                if not record:
+                    raise ValueError('HelixSR has no record of adding a REFramework loader to this game')
+                if active_processes(game['folder'], game.get('appid', '')):
+                    raise ValueError('Close the game before removing the REFramework loader')
+                root = safe_root(game['folder'])
+                reframework.remove(reframework.within(root, root / record['file']), record)
+                reframework.write_record(companion, None)
+            return self.assess_safe(game)
 
     def import_folder(self, folder, name=''):
         return self.import_folders([folder], name)
@@ -1765,7 +1840,7 @@ class Manager:
             record = dict(version=release['version'], path=str(final), release_sha256=release['sha256'],
                           files={n: sha(final / n) for n in payloads}, prepared_at=time.time(), variant=model)
             if hlx_fsr_release.modern(record) and record['files'] != {
-                    n: d for n, (_, d) in hlx_fsr_release.PINS.items()}:
+                    n: d for n, (_, d) in hlx_fsr_release.for_record(record).PINS.items()}:
                 raise ValueError('HLX FSR cache changed before publication; no game files were changed')
             if copied and record['files'] != source[2]['files']:
                 raise ValueError('Copied package changed before publication; no game files were changed')
@@ -1812,7 +1887,7 @@ class Manager:
         if hlx_fsr_release.modern(release):
             # Only consume individually pinned members. Do not run setup, fetch a driver,
             # or execute the Model E converter to prepare the SDK-built FSR payload.
-            hlx_fsr_release.validate_release(release)
+            release_adapter(release).validate_release(release)
             members = release_adapter(release).payload_files()
             with zipfile.ZipFile(archive) as z:
                 for name in members:
@@ -1827,7 +1902,7 @@ class Manager:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     with z.open(matches[0]) as source, path.open('xb') as dest:
                         shutil.copyfileobj(source, dest, 1 << 20)
-            model = hlx_fsr_release.verify_recipe(package)
+            model = release_adapter(release).verify_recipe(package)
         else:
             safe_extract(archive, work / 'unpacked')
             archive.unlink()
@@ -2089,7 +2164,7 @@ class Manager:
                     api = pe_info(original)
                     if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or api['arch'] != 'x64' or not api['ffx'] or api['helix']
                             or api.get('hlx_fsr') or (rec and sha(original) != rec['baseline'].get(str(target.relative_to(root))))
-                            or sha(original) == hlx_fsr_release.OUTPUT_SHA256):
+                            or sha(original) in hlx_fsr_release.output_sha256s()):
                         raise ValueError('Direct HLX FSR requires the original x64 native FidelityFX upscaler, not an installed wrapper.')
                 additions = [target, fallback, target.parent / 'helixsr-install.json']
                 for path in additions:
@@ -2114,13 +2189,13 @@ class Manager:
                 if old.exists() and not (rel in rec.get('baseline', {})
                                          and rec['baseline'][rel] is None):
                     raise ValueError('An unmanaged 2.0 Model E provider would override HLX FSR: ' + rel)
-                if rec and rec.get('version') != hlx_fsr_release.MODERN_VERSION:
+                if rec and rec.get('version') != payload['version']:
                     config_rel = str((target / 'OptiScaler.ini').relative_to(root))
                     current = (self.read_owned_config(game, config_rel)['content'] if rec.get('enabled')
                                else self.retained_config(rec, config_rel))
                     if current:
                         # Validate migration before snapshotting or touching the game.
-                        hlx_fsr_release.validate_scaler_source(current)
+                        release_adapter(payload).validate_scaler_source(current)
             names = [dest for _, dest in release_adapter(payload).scaler_pairs()] + ['OptiScaler.ini', 'HelixSR/helixsr-install.json']
             paths = list(rec.get('baseline', {}))
             for name in names:
@@ -2662,7 +2737,7 @@ class Manager:
                 raise ValueError('Verify game files in Steam, then refresh to enable Reset HelixSR setup: ' + rel)
             api = pe_info(path)
             if (api['arch'] != 'x64' or not api['ffx'] or api['helix'] or api.get('hlx_fsr')
-                    or live[rel] == hlx_fsr_release.OUTPUT_SHA256
+                    or live[rel] in hlx_fsr_release.output_sha256s()
                     or live[rel] == current[rel] and current[rel] != baseline[rel]):
                 raise ValueError('The native DLL still contains HelixSR or is unrecognized. Verify game files in Steam, then refresh: ' + rel)
         # An enabled managed resource beyond the native DLL must not be silently

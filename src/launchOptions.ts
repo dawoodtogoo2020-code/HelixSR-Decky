@@ -17,6 +17,9 @@ function words(input: string): Token[] {
         else value += c;
       } else if (c === "'" || c === '"') quote = c;
       else if (c === " ") break;
+      // A leading ~/ names a home-relative wrapper such as Lossless Scaling's
+      // ~/.lsfg. It never changes word boundaries, and the word is kept verbatim.
+      else if (c === "~" && i === start && input[i + 1] === "/") value += c;
       else {
         if (/[;&|<>()*?\[\]{}#!~]/.test(c)) throw new Error("Ambiguous shell options need manual review.");
         value += c;
@@ -29,7 +32,27 @@ function words(input: string): Token[] {
   return result;
 }
 
+// Proton loads these proxy DLLs from the game folder only with a native-first override.
+const OVERRIDES = {
+  dxgi: { accepted: ["dxgi=n,b"], review: "An existing dxgi override needs review. Preserve it and check OptiScaler.log." },
+  // REFramework's README documents dinput8.dll=n,b; Wine treats both spellings alike.
+  dinput8: { accepted: ["dinput8=n,b", "dinput8.dll=n,b"], review: "An existing dinput8 override needs review. Preserve it and check the REFramework loader." },
+} as const;
+export type OverrideDll = keyof typeof OVERRIDES;
+
+export function hasOverride(options: string, dll: OverrideDll): boolean {
+  try {
+    const value = words(options).find(t => /^WINEDLLOVERRIDES=/.test(t.value))?.value.slice("WINEDLLOVERRIDES=".length) ?? "";
+    return value.split(";").some(rule => (OVERRIDES[dll].accepted as readonly string[]).includes(rule.toLowerCase()));
+  } catch { return false; }
+}
+
 export function proxyOptions(before: string): string {
+  return overrideOptions(before, "dxgi");
+}
+
+export function overrideOptions(before: string, dll: OverrideDll): string {
+  const { accepted, review } = OVERRIDES[dll];
   const tokens = words(before);
   const assignment = (t: Token) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(before.slice(t.start, t.end));
   if (tokens.some(t => /^[A-Za-z_][A-Za-z0-9_]*=/.test(t.value) && !assignment(t)))
@@ -55,15 +78,15 @@ export function proxyOptions(before: string): string {
     const rules = value ? value.split(";") : [];
     if (rules.some(rule => !/^[A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)*=(?:n,b|b,n|n|b|)$/.test(rule)))
       throw new Error("This DLL override needs manual review.");
-    const dxgi = rules.filter(rule => rule.split("=")[0].split(",").some(name => name.toLowerCase().replace(/\.dll$/, "") === "dxgi"));
-    if (dxgi.length) {
-      if (dxgi.length !== 1 || dxgi[0].toLowerCase() !== "dxgi=n,b")
-        throw new Error("An existing dxgi override needs review. Preserve it and check OptiScaler.log.");
+    const existing = rules.filter(rule => rule.split("=")[0].split(",").some(name => name.toLowerCase().replace(/\.dll$/, "") === dll));
+    if (existing.length) {
+      if (existing.length !== 1 || !(accepted as readonly string[]).includes(existing[0].toLowerCase()))
+        throw new Error(review);
     } else {
-      const replacement = `WINEDLLOVERRIDES="${value ? `${value};` : ""}dxgi=n,b"`;
+      const replacement = `WINEDLLOVERRIDES="${value ? `${value};` : ""}${dll}=n,b"`;
       updated = before.slice(0, override.start) + replacement + before.slice(override.end);
     }
-  } else updated = `WINEDLLOVERRIDES="dxgi=n,b"${before ? ` ${before}` : ""}`;
+  } else updated = `WINEDLLOVERRIDES="${dll}=n,b"${before ? ` ${before}` : ""}`;
   if (commandIndex >= 0) return updated;
   if (tokens.slice(leading).some(t => /^[A-Za-z_][A-Za-z0-9_]*=/.test(t.value)) ||
       (tokens[leading] && !tokens[leading].value.startsWith("-")))

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { proxyOptions } from "../src/launchOptions.ts";
+import { hasOverride, overrideOptions, proxyOptions } from "../src/launchOptions.ts";
 import { PluginInstaller } from "../src/pluginInstaller.ts";
 import { canRestore, gameStatus, installReadiness, nextStep } from "../src/gameStatus.ts";
 import { librarySelectable, libraryStatus } from "../src/libraryStatus.ts";
@@ -346,4 +346,46 @@ test("installed model identity remains visible in ready and review states", () =
     installed_version: "3.2.0", installed_model: "HLX FSR 4 (FSR 4.1.2 Lite)"};
   assert.match(gameStatus(g).summary, /3\.2\.0.*HLX FSR 4/);
   assert.match(gameStatus({...g, compatibility: "blocked"}).summary, /Recorded as enabled.*HLX FSR 4/);
+});
+
+
+test("the REFramework dinput8 override is added beside existing overrides without disturbing dxgi", () => {
+  assert.equal(overrideOptions("", "dinput8"), 'WINEDLLOVERRIDES="dinput8=n,b" %command%');
+  assert.equal(overrideOptions('WINEDLLOVERRIDES="dxgi=n,b" %command% -dx12', "dinput8"),
+    'WINEDLLOVERRIDES="dxgi=n,b;dinput8=n,b" %command% -dx12');
+  assert.equal(proxyOptions('WINEDLLOVERRIDES="dinput8=n,b" %command%'), 'WINEDLLOVERRIDES="dinput8=n,b;dxgi=n,b" %command%');
+  for (const original of ['WINEDLLOVERRIDES="dinput8=n,b" %command%', 'WINEDLLOVERRIDES="dinput8.dll=n,b" %command%'])
+    assert.equal(overrideOptions(original, "dinput8"), original, "REFramework's documented spelling is already correct");
+  for (const options of ['WINEDLLOVERRIDES="dinput8=b" %command%', 'WINEDLLOVERRIDES="dinput8,dxgi=n,b" %command%'])
+    assert.throws(() => overrideOptions(options, "dinput8"), /existing dinput8 override needs review/i);
+  assert.throws(() => proxyOptions('WINEDLLOVERRIDES="dxgi.dll=n,b" %command%'), /existing dxgi override needs review/i,
+    "dxgi acceptance is unchanged");
+});
+
+test("override detection reads only literal WINEDLLOVERRIDES rules", () => {
+  assert.equal(hasOverride('WINEDLLOVERRIDES="dxgi=n,b;dinput8.dll=n,b" %command%', "dinput8"), true);
+  assert.equal(hasOverride('WINEDLLOVERRIDES="dxgi=n,b" %command%', "dinput8"), false);
+  assert.equal(hasOverride('FOO=dinput8=n,b %command%', "dinput8"), false);
+  assert.equal(hasOverride('FOO=$(evil) %command%', "dinput8"), false, "unsupported syntax is never treated as configured");
+});
+
+test("Lossless Scaling and other home-relative wrappers are preserved, not refused", () => {
+  assert.equal(overrideOptions("~/.lsfg %command%", "dinput8"), 'WINEDLLOVERRIDES="dinput8=n,b" ~/.lsfg %command%');
+  assert.equal(overrideOptions("SteamDeck=0 gamemoderun ~/.lsfg %command% -dx12", "dinput8"),
+    'WINEDLLOVERRIDES="dinput8=n,b" SteamDeck=0 gamemoderun ~/.lsfg %command% -dx12');
+  assert.equal(overrideOptions('WINEDLLOVERRIDES="dxgi=n,b" ~/lsfg %command%', "dinput8"),
+    'WINEDLLOVERRIDES="dxgi=n,b;dinput8=n,b" ~/lsfg %command%');
+  assert.equal(proxyOptions("~/.local/bin/lsfg %command%"), 'WINEDLLOVERRIDES="dxgi=n,b" ~/.local/bin/lsfg %command%');
+  assert.equal(hasOverride('WINEDLLOVERRIDES="dinput8=n,b" ~/.lsfg %command%', "dinput8"), true);
+  for (const input of ["~ %command%", "~root/lsfg %command%", "FOO=~/x %command%", "a~/b %command%", "~/.lsfg"])
+    assert.throws(() => overrideOptions(input, "dinput8"), /review/i, input);
+});
+
+test("HelixSR 3.3.0 is an HLX opt-in that explains HLX FSR 4 Full", async () => {
+  const choices = await import("../src/releaseChoices.ts");
+  assert.equal(choices.releaseChoiceForGame("reviewed-3.3.0", "game-a", "game-b"), choices.DEFAULT_RELEASE_CHOICE);
+  assert.equal(choices.releaseChoiceForGame("reviewed-3.3.0", "game-a", "game-a"), "reviewed-3.3.0");
+  assert.equal(choices.releaseChoiceLabel({ id: "reviewed-3.3.0", label: "HelixSR 3.3.0 (HLX FSR 4 and HLX FSR 4 Full)", version: "3.3.0" }),
+    "HelixSR 3.3.0 (HLX FSR 4 and HLX FSR 4 Full)");
+  assert.match(choices.releaseChoiceExplanation("reviewed-3.3.0"), /HLX FSR 4 Full.*Model E stays on 2\.0\.0/);
 });

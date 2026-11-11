@@ -8,7 +8,7 @@ Both interfaces use the same model registry and installation engine. The **Helix
 2. Select your game, then choose a supported **HelixSR model**.
 3. Choose **Install HelixSR** or **Update HelixSR**, check the model, release and changed files, then confirm. Wait for completion before launching the game.
 
-The two supported networks are **Model E (NVIDIA DLSS 310.7.0)** and **HLX FSR 4 (AMD FSR 4.1.2 Lite)**. The latter uses the pinned 3.2.0 prebuilt provider. There is no distinct reviewed HLX 4.0 network. AMD-native output and frame generation are independent selections. See [HLX FSR on SteamOS](docs/hlx-fsr.md).
+The two supported networks are **Model E (NVIDIA DLSS 310.7.0)** and **HLX FSR 4 (AMD FSR 4.1.2 Lite)**. The latter uses the pinned prebuilt provider from HelixSR 3.3.0 (default) or the 3.2.0 prerelease. With 3.3.0 and Scaler, **HLX FSR 4 Full** (the full FSR 4.1.2 network) is an extra upscaler setting, not a separate model. Model E stays on the reviewed 2.0.0 build; HelixSR 3.x's HLX DLSS and Preset K builds are not supported yet. There is no distinct reviewed HLX 4.0 network. AMD-native output and frame generation are independent selections. See [HLX FSR on SteamOS](docs/hlx-fsr.md).
 
 [HelixSR 1.8.1](https://github.com/lonewolf0622/HelixSR/releases/tag/v1.8.1) adds an experimental native DLSS input loader using the same network as 1.8.0. That is an input route, not a DLSS 4 model. This app continues to use its reviewed native FSR replacement and OptiScaler routes. It does not install the experimental loader.
 

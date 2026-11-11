@@ -917,3 +917,102 @@ test("upscaler overlay toggle saves the Scaler overlay with the current revision
       args: ["pragmata", { overlay: settings.overlay === "upscaler" ? "off" : "upscaler" }, "settings-rev-7"] });
   }
 });
+
+
+function reframeworkGame(h, state = "absent", extra = {}) {
+  Object.assign(h.game, { source: "Steam", appid: "3764200", name: "Resident Evil Requiem", managed: true, enabled: true,
+    route: "direct", installed_variant: "hlx-fsr4-1-2", reframework: { game: "Resident Evil Requiem", tested: true, state, reason: state === "foreign" ? "An existing dinput8.dll is present" : "",
+      override: 'WINEDLLOVERRIDES="dinput8=n,b" %command%', source: "https://github.com/praydog/REFramework-nightly/releases",
+      file: "dinput8.dll", tag: state === "installed" ? "nightly-01438-f00d6bee503125180621a6666779499f9a30881d" : null,
+      revision: state === "installed" ? "f00d6be" : null }, ...extra });
+}
+const reframeworkReview = { tag: "nightly-01438-f00d6bee503125180621a6666779499f9a30881d", build: 1438,
+  commit: "f00d6bee503125180621a6666779499f9a30881d", sha256: "a".repeat(64), size: 13272997,
+  page: "https://github.com/praydog/REFramework-nightly/releases/tag/x", file: "dinput8.dll",
+  game: "Resident Evil Requiem", tested: true, override: 'WINEDLLOVERRIDES="dinput8=n,b" %command%' };
+const button = (h, label) => h.walk(h.render(), n => n.type === "ButtonItem" && h.text(n) === label)[0];
+
+test("REFramework loader is reviewed with the exact build, then installed with that digest", async () => {
+  const h = harness({ reframework_preview: () => reframeworkReview,
+    install_reframework: () => { reframeworkGame(h, "installed"); return { ...h.game }; } });
+  reframeworkGame(h); await h.ready();
+  const sections = h.walk(h.render(), n => n.type === "PanelSection").map(n => n.props.title);
+  assert.ok(sections.indexOf("Upscaling and frame generation") < sections.indexOf("REFramework loader"));
+  assert.match(h.text(h.render()), /tester confirmed that Resident Evil Requiem needs REFramework's loader/);
+  assert.equal(button(h, "Review dinput8 launch option"), undefined, "the override is offered once the loader exists");
+  button(h, "Add REFramework loader").props.onClick(); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls.at(-1))), { route: "reframework_preview", args: ["pragmata"] });
+  const modal = h.currentModal();
+  const description = h.text(modal.element.props.strDescription);
+  assert.match(description, /nightly\s+1438\s+\(\s*f00d6be\s*,\s+12\.7\s+MB\)/);
+  assert.match(description, /Adds only\s+dinput8\.dll\s*\.\s+Existing files are never replaced/);
+  assert.equal(h.count("install_reframework"), 0, "nothing is downloaded before confirmation");
+  modal.element.props.onOK(); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls.at(-1))), { route: "install_reframework", args: ["pragmata", "a".repeat(64)] });
+  assert.ok(h.toasts.some(t => t.title === "REFramework loader added"));
+  assert.match(h.text(h.render()), /Added by HelixSR: REFramework nightly 1438 \(f00d6be\)/);
+  assert.ok(button(h, "Review dinput8 launch option"));
+  assert.ok(button(h, "Remove REFramework loader"));
+});
+
+test("REFramework removal is confirmed and an existing loader is never offered for replacement", async () => {
+  const h = harness({ remove_reframework: () => { reframeworkGame(h, "absent"); return { ...h.game }; } });
+  reframeworkGame(h, "installed", { launch_options: 'WINEDLLOVERRIDES="dinput8=n,b" %command%' }); await h.ready();
+  assert.match(h.text(h.render()), /Steam launch options include the dinput8 override/);
+  assert.ok(button(h, "Restore plugin launch-option change"));
+  button(h, "Remove REFramework loader").props.onClick(); await flush();
+  assert.match(h.text(h.currentModal().element.props.strDescription), /the exact file HelixSR added/);
+  h.currentModal().element.props.onOK(); await flush();
+  assert.equal(h.count("remove_reframework"), 1);
+  assert.ok(button(h, "Add REFramework loader"));
+
+  const foreign = harness(); reframeworkGame(foreign, "foreign"); await foreign.ready();
+  assert.match(foreign.text(foreign.render()), /Existing dinput8.dll kept/);
+  assert.equal(button(foreign, "Add REFramework loader"), undefined);
+  assert.equal(button(foreign, "Remove REFramework loader"), undefined);
+  assert.ok(button(foreign, "Review dinput8 launch option"));
+});
+
+test("games without a REFramework entry, and native Model E installs, show no loader section", async () => {
+  const section = h => h.walk(h.render(), n => n.type === "PanelSection" && n.props.title === "REFramework loader").length;
+  const h = harness(); await h.ready();
+  assert.equal(section(h), 0);
+  const modelE = harness(); reframeworkGame(modelE, "absent", { installed_variant: "helixsr-model-e" }); await modelE.ready();
+  assert.equal(section(modelE), 0, "Model E worked without REFramework in Requiem");
+  const existing = harness(); reframeworkGame(existing, "foreign", { installed_variant: "helixsr-model-e" }); await existing.ready();
+  assert.equal(section(existing), 1, "an existing loader stays visible");
+  const unmanaged = harness(); reframeworkGame(unmanaged, "absent", { managed: false, enabled: false, installed_variant: undefined }); await unmanaged.ready();
+  assert.equal(section(unmanaged), 1, "shown before choosing a model");
+});
+
+test("native-route installs explain where the upscaler overlay switch went", async () => {
+  const h = harness(); Object.assign(h.game, { managed: true, enabled: true, route: "direct" }); await h.ready();
+  const toggle = h.walk(h.render(), n => n.type === "ToggleField" && n.props.label === "Show upscaler overlay in game")[0];
+  assert.ok(toggle, "the switch stays visible for native installs");
+  assert.equal(toggle.props.disabled, true);
+  assert.equal(toggle.props.checked, false);
+  assert.match(toggle.props.description, /Scaler installs only.*native FSR replacement/);
+});
+
+test("installation tells the user the panel can close while preparation runs", async () => {
+  const h = harness({ library: () => ({ ...h.library(), jobs: [job()] }) }); await h.ready();
+  assert.match(h.text(h.render()), /You can close this panel; it keeps running and a notification appears when it finishes/);
+  const start = harness({ install_latest: () => job() }); await start.ready();
+  const modal = await start.openInstall(); modal.element.props.onOK(); await flush();
+  assert.match(start.toasts.find(t => /Starting HelixSR/.test(t.title)).body, /close this panel while it runs/);
+});
+
+test("HLX FSR 4 Full is offered only by a release that has it and saves its own selection", async () => {
+  const withFull = harness({ set_game_settings: () => withFull.game });
+  enableSettings(withFull, { family: "hlx-fsr", upscaler: "hlx-fsr", provider: "off", full_available: true, release: "3.3.0" }); await withFull.ready();
+  const upscaler = settingsDropdown(withFull, "Upscaler");
+  assert.deepEqual([...upscaler.props.rgOptions.map(o => o.data)], ["hlx-fsr", "hlx-fsr-full", "fsr"]);
+  upscaler.props.onChange({ data: "hlx-fsr-full" }); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(withFull.calls.at(-1))), { route: "set_game_settings", args: ["pragmata", { upscaler: "hlx-fsr-full" }, "settings-rev-7"] });
+  const without = harness();
+  enableSettings(without, { family: "hlx-fsr", upscaler: "hlx-fsr", provider: "off", full_available: false, release: "3.2.0" }); await without.ready();
+  assert.deepEqual([...settingsDropdown(without, "Upscaler").props.rgOptions.map(o => o.data)], ["hlx-fsr", "fsr"]);
+  const selected = harness();
+  enableSettings(selected, { family: "hlx-fsr", upscaler: "hlx-fsr-full", provider: "off", full_available: true }); await selected.ready();
+  assert.match(selected.text(renderedHelixSettings(selected)), /full FSR 4\.1\.2 network/);
+});

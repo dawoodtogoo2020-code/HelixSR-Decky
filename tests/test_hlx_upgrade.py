@@ -17,7 +17,7 @@ class HlxUpgradeTests(Fixtures):
         # Use the production verification path with a small, local fixture manifest.
         folder = self.base / 'prepared-hlx'
         pins = {}
-        for name in hlx.payload_files():
+        for name in hlx.V320.payload_files():
             data = 'fixture ' + name
             if name == hlx.SCALER_INI:
                 data = TEMPLATE
@@ -25,15 +25,15 @@ class HlxUpgradeTests(Fixtures):
                 data = pe(ffx=True) + b'HLX FSR 4 (4.1.2)'
             path = write(folder / name, data)
             pins[name] = (path.stat().st_size, manager.sha(path))
-        gate = patch.object(hlx, 'PINS', pins)
+        gate = patch.object(hlx.V320, 'PINS', pins)
         gate.start()
         self.addCleanup(gate.stop)
         old = patch.object(test_helix20_install.helix20_release, 'verify_outputs', return_value=None)
         old.start()
         self.addCleanup(old.stop)
         self.hlx_dir = folder
-        self.hlx_record = dict(path=str(folder), version='3.2.0', release_sha256=hlx.RELEASE_SHA256,
-                               variant=hlx.verify_recipe(folder), prepared_at=32,
+        self.hlx_record = dict(path=str(folder), version='3.2.0', release_sha256=hlx.V320.RELEASE_SHA256,
+                               variant=hlx.V320.verify_recipe(folder), prepared_at=32,
                                files={n: digest for n, (_, digest) in pins.items()})
         self.m.cfg['variant_packages_v1'] = {str(folder): self.hlx_record}
 

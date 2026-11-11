@@ -38,7 +38,9 @@ jobs:
         run: |
           archive="$RUNNER_TEMP/HelixSR-3.2.0.zip"
           curl --fail --location --retry 2 --output "$archive" https://github.com/lonewolf0622/HelixSR/releases/download/v3.2.0/HelixSR-3.2.0.zip
-          HELIXSR_VERIFIED_ZIP="$archive" python3 -m unittest discover -s tests -p 'test_hlx_lifecycle.py' -v
+          archive330="$RUNNER_TEMP/HelixSR-3.3.0.zip"
+          curl --fail --location --retry 2 --output "$archive330" https://github.com/lonewolf0622/HelixSR/releases/download/v3.3.0/HelixSR-3.3.0.zip
+          HELIXSR_VERIFIED_ZIP="$archive" HELIXSR_VERIFIED_ZIP_330="$archive330" python3 -m unittest discover -s tests -p 'test_hlx_lifecycle.py' -v
       - name: Save code-only plugin package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
