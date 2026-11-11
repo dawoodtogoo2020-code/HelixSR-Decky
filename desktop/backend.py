@@ -53,6 +53,11 @@ class DesktopBackend:
         base = Path(config) if config and Path(config).is_absolute() else self.home / '.config'
         self.settings = Path(settings) if settings is not None else base / 'helixsr-desktop'
         self.settings = self.settings.expanduser().resolve()
+        # Regenerable build tools belong in the cache directory, not with preferences.
+        cache = os.environ.get('XDG_CACHE_HOME')
+        cache = Path(cache) if cache and Path(cache).is_absolute() else self.home / '.cache'
+        self.tools = (cache / 'helixsr-desktop' / 'build-tools' if settings is None
+                      else self.settings / 'build-tools')
         self.settings.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.closed = False
@@ -84,7 +89,7 @@ class DesktopBackend:
                 backup = path.with_name('settings.json.corrupt-' + uuid.uuid4().hex)
                 os.replace(path, backup)
                 self.warnings.append(f'Unreadable desktop settings preserved at {backup}; per-game records remain available.')
-        self.manager = Manager(self.home, self.settings)
+        self.manager = Manager(self.home, self.settings, tools=self.tools)
         self.status_monitor = StatusMonitor(self.manager, frozen_child=bool(getattr(sys, 'frozen', False)))
         self.app_updates = AppUpdates(self.settings)
 

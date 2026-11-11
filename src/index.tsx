@@ -80,7 +80,7 @@ type Library = { games: Game[]; warnings: string[]; release: Release; license_ac
   launcher_import?: LauncherImport; model_catalog?: ModelCatalog; release_choices?: ReleaseChoice[] };
 type Preview = { token: string; name: string; action: string; route: string; files: string[];
   warning: string; select_upscaler: string; preserved_files?: string[]; model?: string; variant_id?: string; release_version?: string;
-  license_url?: string; license_accepted?: boolean; selected_executable?: string };
+  license_url?: string; license_accepted?: boolean; selected_executable?: string; preparation_note?: string };
 const library = callable<[], Library>("library");
 const libraryRead = new LibraryRead(library);
 let cachedLibrary: Library | undefined;
@@ -528,6 +528,7 @@ function Content() {
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
         <p>{p.name}: {p.warning}</p>
         <p>Selected model: {p.model}. HelixSR release: {p.release_version}.</p>
+        {p.preparation_note && <p>{p.preparation_note}</p>}
         <p>Input route: {p.route}. Select in game: {p.select_upscaler}.</p>
         {p.license_url && <p><a href={p.license_url} onClick={event => { event.preventDefault(); SteamClient.System.OpenInSystemBrowser(p.license_url!); }}>Read the license for HelixSR {p.release_version}</a></p>}
         {p.selected_executable && <p>Game executable: {p.selected_executable}</p>}

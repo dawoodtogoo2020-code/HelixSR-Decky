@@ -257,6 +257,37 @@ def version(value):
     return tuple(map(int, m.groups()))
 
 
+REUSE_MESSAGE = 'Reusing the verified prepared package on this drive; nothing is rebuilt'
+COPY_MESSAGE = ('Copying the verified package this device already built on another drive; '
+                'nothing is rebuilt and no games are changed')
+BUILD_MESSAGE = ('Building the local NVIDIA-derived network. This is needed once per device for this '
+                 'HelixSR version and model; other games reuse it. No games are changed.')
+BUILD_PREPARATION_NOTE = ('The first preparation of this HelixSR version and model on this device builds its '
+                          'network locally. This can take several minutes, longer on a Steam Deck. Other games reuse '
+                          'it; a game on another drive, such as a microSD card, gets a verified copy instead of a rebuild.')
+HLX_PREPARATION_NOTE = ('HLX FSR 4 needs no local network build: preparation downloads and verifies the reviewed '
+                        'files, then other games on this drive reuse them.')
+BUILD_IDLE_SECONDS = 600
+BUILD_LIMIT_SECONDS = 3600
+_BUILD_LINE = re.compile(r'^\[helixsr-(setup|fg)\] (.+)$')
+_BUILD_BAR = re.compile(r'^\[[#-]{20}\]\s+(\d{1,3})%\s+\d+:\d\d\s+(.*)$')
+
+
+def build_progress(log):
+    """Latest upstream setup progress for the job card, e.g. 'frame generation 63% (2/4 shaders 120/236)'."""
+    for line in reversed(re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', log or '').replace('\r', '\n').splitlines()):
+        match = _BUILD_LINE.match(line.strip())
+        if not match:
+            continue
+        stage = 'upscaling network' if match.group(1) == 'setup' else 'frame generation'
+        bar = _BUILD_BAR.match(match.group(2))
+        if bar:
+            label = bar.group(2).strip()
+            return stage + ' ' + bar.group(1) + '%' + (' (' + label[:80] + ')' if label else '')
+        return stage + ': ' + match.group(2).strip()[:140]
+    return 'preparing build tools' if (log or '').strip() else None
+
+
 def check_build_exit(returncode, cancelled, log=''):
     if cancelled:
         raise ValueError('Cancelled')
@@ -471,9 +502,12 @@ def safe_extract(archive, destination):
 
 
 class Manager:
-    def __init__(self, home, settings):
+    def __init__(self, home, settings, tools=None):
         self.home, self.settings = Path(home), Path(settings)
         self.settings.mkdir(parents=True, exist_ok=True)
+        # Private build tools (Python, NumPy, DXC and the compiler's Wine prefix) are
+        # shared by every game on this device instead of being fetched per game.
+        self.tools = Path(tools) if tools is not None else self.settings / 'build-tools'
         self.lock = threading.RLock()
         self.entries, self.previews, self.jobs = {}, {}, {}
         self.worker = None
@@ -624,8 +658,14 @@ class Manager:
                 return True
         return False
 
-    def _package_record(self, record, game, owner=None):
-        """Validate untrusted package metadata without changing either game."""
+    @staticmethod
+    def _same_drive(path, game):
+        return Path(path).stat().st_dev == Path(game['folder']).stat().st_dev
+
+    def _package_record(self, record, game, owner=None, any_drive=False):
+        """Validate untrusted package metadata without changing either game.
+
+        any_drive only finds a copy source: installs still consume packages on the game's drive."""
         if not isinstance(record, dict):
             return None
         if 'variant' in record and not valid_variant(record['variant']):
@@ -663,7 +703,7 @@ class Manager:
         path = Path(path)
         try:
             if (not path.is_dir() or self._symlink_in_path(path)
-                    or path.stat().st_dev != Path(game['folder']).stat().st_dev):
+                    or (not any_drive and not self._same_drive(path, game))):
                 return None
             if owner is not None:
                 package_root = Path(owner) / 'packages'
@@ -732,8 +772,10 @@ class Manager:
         except (OSError, ValueError, KeyError, TypeError, struct.error):
             return False
 
-    def package(self, game, route=None, release=None, variant_id=None, selection=None, installed=None):
-        # Packages remain on the same filesystem as the selected game.
+    def package(self, game, route=None, release=None, variant_id=None, selection=None, installed=None,
+                any_drive=False):
+        # Packages remain on the same filesystem as the selected game. any_drive is
+        # only for finding a verified source to copy onto the game's drive.
         selected = select_variant(variant_id)
         choices = []
         for namespace in ('packages', 'variant_packages_v1'):
@@ -741,7 +783,7 @@ class Manager:
             if not isinstance(records, dict):
                 continue
             for record in records.values():
-                candidate = self._package_record(record, game)
+                candidate = self._package_record(record, game, any_drive=any_drive)
                 if candidate:
                     choices.append((*candidate, 0))
         # A separate frontend has separate settings, but package records are kept
@@ -767,7 +809,7 @@ class Manager:
                 if indexed is not None:
                     records.extend(indexed)
                 for record in records:
-                    candidate = self._package_record(record, game, companion)
+                    candidate = self._package_record(record, game, companion, any_drive=any_drive)
                     if candidate:
                         choices.append((*candidate, 1))
             except (ValueError, OSError, RecursionError, KeyError, TypeError):
@@ -1474,6 +1516,7 @@ class Manager:
                         license_url=f'https://github.com/{REPO}/blob/v{release["version"]}/LICENSE',
                         source_terms=selected.get('source_terms'), source_license_url=selected.get('source_license_url'),
                         license_accepted=self.cfg.get('license') == license_key(release, selected['id']),
+                        preparation_note=HLX_PREPARATION_NOTE if hlx_fsr_release.modern(release) else BUILD_PREPARATION_NOTE,
                         files=self.planned_paths(game, data, 'latest', release=release),
                         select_upscaler='AMD FSR' if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
                         warning=self.native_install_warning(data) + ('You explicitly selected the reviewed HelixSR 1.8.1 compatibility release. '
@@ -1589,6 +1632,84 @@ class Manager:
                 os.killpg(self.process.pid, signal.SIGTERM)
         return True
 
+    def build_tools_home(self, companion):
+        """The device-wide build tool cache, or the game's own folder when it is unusable."""
+        try:
+            self.tools.mkdir(parents=True, exist_ok=True)
+            if not self.tools.is_symlink() and shutil.disk_usage(self.tools).free >= (2 << 30):
+                return self.tools
+        except OSError:
+            pass
+        return companion / 'dependencies'
+
+    def other_drive_package(self, game, release, variant_id):
+        """A verified package for this exact release and model on another drive of this device."""
+        found = self.package(game, release=release, variant_id=variant_id, any_drive=True)
+        try:
+            return found if found and not self._same_drive(found[1], game) else None
+        except OSError:
+            return None
+
+    @staticmethod
+    def _payload_names(release, package):
+        """Files a newly published package records for this release."""
+        names = (release_adapter(release).payload_files() if is_modern(release)
+                 else PACKAGE_FILES + ('helixsr_setup.json',))
+        if (package / 'amd-fsr' / AMD_FG).is_file():
+            names += ('amd-fsr/' + AMD_FG,)
+        return names
+
+    @staticmethod
+    def _package_tree(source):
+        """Regular files and folders of a package; links and special files stop a copy."""
+        entries = []
+        for directory, folders, files in os.walk(source, followlinks=False):
+            folders.sort()
+            for name in folders + sorted(files):
+                path = Path(directory) / name
+                mode = path.lstat().st_mode
+                relative = path.relative_to(source)
+                if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+                    raise ValueError('it contains a link or special file: ' + relative.as_posix())
+                entries.append((relative, mode, path.lstat().st_size if stat.S_ISREG(mode) else 0))
+        return entries
+
+    def _copy_other_drive_package(self, source, package, companion, job):
+        """Copy the network this device already built elsewhere, then prove every recorded byte.
+
+        Returns the source model identity, or None after removing a partial copy so
+        preparation can fall back to an ordinary local build."""
+        _, path, record = source
+        try:
+            entries = self._package_tree(path)
+            size = sum(entry[2] for entry in entries)
+            if shutil.disk_usage(companion).free < size + (512 << 20):
+                raise ValueError('this drive needs %d MiB free to copy it' % ((size >> 20) + 512))
+            job['message'] = COPY_MESSAGE
+            package.mkdir(parents=True)
+            for relative, mode, _ in entries:
+                if self.cancel.is_set():
+                    raise ValueError('Cancelled')
+                target = package / relative
+                if stat.S_ISDIR(mode):
+                    target.mkdir()
+                    continue
+                shutil.copyfile(path / relative, target, follow_symlinks=False)
+                target.chmod(stat.S_IMODE(mode) & 0o755 | 0o600)
+            copied = (version(record['version']), package, dict(record, path=str(package)))
+            if not self._verify_package_payloads(copied):
+                raise ValueError('the copy did not match its verified record')
+            if set(record['files']) != set(self._payload_names(record, package)):
+                raise ValueError('it was recorded by an older plugin version')
+            return record['variant']
+        except (OSError, ValueError) as error:
+            if self.cancel.is_set():
+                raise ValueError('Cancelled')
+            shutil.rmtree(package.parent, ignore_errors=True)
+            job['copy_note'] = ('Could not reuse the package built on another drive (' + str(error)[:200]
+                                + '); building it on this drive instead.')
+            return None
+
     @game_locked
     def prepare(self, game, job):
         if os.name == 'posix' and os.geteuid() == 0:
@@ -1606,8 +1727,11 @@ class Manager:
             raise ValueError('Upstream release changed since review; review Install or Update again')
         cached = self.package(game, release=release, variant_id=selected['id'])
         if cached:
-            job['message'] = 'Reusing the verified prepared package on this drive'
+            job['message'] = REUSE_MESSAGE
             return cached
+        # HLX FSR consumes pinned upstream members without a local build; only
+        # locally built networks are worth copying between this device's drives.
+        source = None if hlx_fsr_release.modern(release) else self.other_drive_package(game, release, selected['id'])
         companion = self.companion(game)
         index_path = companion / 'records/packages-v1.json'
         if self._symlink_in_path(index_path) or self._symlink_in_path(companion / 'packages'):
@@ -1617,122 +1741,19 @@ class Manager:
         work = companion / 'staging' / job['id']
         work.mkdir(parents=True, exist_ok=False)
         archive = work / 'release.zip'
-        job['message'] = 'Downloading official release'
+        package = work / 'unpacked' / ('HelixSR-' + release['version'])
+        modern = is_modern(release)
         try:
-            if shutil.disk_usage(companion).free < (3 << 30):
-                raise ValueError('At least 3 GiB free space is required for preparation')
-            with urllib.request.urlopen(urllib.request.Request(release['url'], headers={'User-Agent': 'HelixSR-Decky'}), timeout=30, context=https_context()) as response, archive.open('wb') as out:
-                size = 0
-                while True:
-                    if self.cancel.is_set():
-                        raise ValueError('Cancelled')
-                    chunk = response.read(1 << 20)
-                    if not chunk:
-                        break
-                    size += len(chunk)
-                    if size > release['size']:
-                        raise ValueError('Release exceeds advertised size')
-                    out.write(chunk)
-            if size != release['size'] or sha(archive) != release['sha256']:
-                raise ValueError('Release SHA256 or size mismatch; upstream may have replaced the archive. Check for updates and retry')
-            package = work / 'unpacked' / ('HelixSR-' + release['version'])
-            modern = is_modern(release)
-            if hlx_fsr_release.modern(release):
-                # Only consume individually pinned members. Do not run setup, fetch a driver,
-                # or execute the Model E converter to prepare the SDK-built FSR payload.
-                hlx_fsr_release.validate_release(release)
-                members = release_adapter(release).payload_files()
-                with zipfile.ZipFile(archive) as z:
-                    for name in members:
-                        key = package.name + '/' + name
-                        matches = [entry for entry in z.infolist() if entry.filename == key]
-                        if (len(matches) != 1 or stat.S_ISLNK(matches[0].external_attr >> 16)
-                                or matches[0].file_size > 256 << 20):
-                            raise ValueError('Missing, duplicated or unsafe reviewed archive member: ' + name)
-                        if self.cancel.is_set():
-                            raise ValueError('Cancelled')
-                        path = package / name
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        with z.open(matches[0]) as source, path.open('xb') as dest:
-                            shutil.copyfileobj(source, dest, 1 << 20)
-                model = hlx_fsr_release.verify_recipe(package)
+            copied = source and self._copy_other_drive_package(source, package, companion, job)
+            if copied:
+                model = copied
             else:
-                safe_extract(archive, work / 'unpacked')
-                archive.unlink()
-                layout = (['LICENSE', 'THIRD_PARTY_NOTICES.md', output_dll(release),
-                           'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
-                           'helixsr-scaler/OptiScaler.dll', 'helixsr-scaler/OptiScaler.ini'] if modern else
-                          ['LICENSE', 'LICENSE-APACHE-2.0', 'THIRD_PARTY_NOTICES.md', DLL,
-                             'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
-                             'optiscaler/OptiScaler.dll', 'optiscaler/OptiScaler.ini'])
-                for name in layout:
-                    if not (package / name).is_file():
-                        raise ValueError('Unexpected upstream package layout: ' + name)
-                # Apache-licensed setup adaptation: stop before its interactive game installer.
-                # Complete official release is kept; compiled parts are never patched here.
-                setup = (package / 'helixsr-setup.sh').read_text()
-                build = package / 'decky-build-only.sh'
-                converter = (package / 'setup/helixsr_setup.py').read_text()
-                model = verify_recipe(package, selected['id'])
-                env = dict(os.environ, XDG_DATA_HOME=str(companion / 'dependencies'),
-                           TMPDIR=str(work / 'tmp'), PIP_CACHE_DIR=str(companion / 'dependencies/pip'),
-                           HELIXSR_FORCE_PORTABLE='1', PYTHONUNBUFFERED='1', PYTHONDONTWRITEBYTECODE='1')
-                env = host_environment(env)
-                env.pop('HELIXSR_BUILD_WINE', None)
-                env.pop('HELIXSR_BUILD_DATA', None)
-                job['message'] = 'Checking installed Proton for local preparation'
-                build_wine, runtime_notes = select_build_wine(self.home, env)
-                if self.cancel.is_set():
-                    raise ValueError('Cancelled')
-                if build_wine:
-                    env['HELIXSR_BUILD_WINE'] = str(build_wine)
-                if modern and not build_wine:
-                    raise ValueError('No working installed Proton or Wine was found for shader compilation')
-                build.write_text(modern_build_script() if modern else
-                                 build_only_script(setup, converter, bool(build_wine)), newline='\n')
-                Path(env['TMPDIR']).mkdir()
-                logfile = companion / 'records' / ('build-' + job['id'] + '.log')
-                logfile.parent.mkdir(parents=True, exist_ok=True)
-                job['message'] = 'Building local NVIDIA-derived network; no games are changed'
-                with logfile.open('wb') as output:
-                    if runtime_notes:
-                        output.write(('\n'.join(runtime_notes) + '\n').encode('utf-8'))
-                        output.flush()
-                    self._spawn_compiler(['bash', str(build), '--yes'], cwd=package, env=env,
-                                                    stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
-                                                    start_new_session=True)
-                    deadline = time.monotonic() + 900
-                    while self.process.poll() is None:
-                        job['log'] = text_tail(logfile, 8000)
-                        if self.cancel.is_set() or time.monotonic() > deadline:
-                            import signal
-                            with contextlib.suppress(ProcessLookupError):
-                                os.killpg(self.process.pid, signal.SIGTERM)
-                            try:
-                                self.process.wait(timeout=10)
-                            except subprocess.TimeoutExpired:
-                                with contextlib.suppress(ProcessLookupError):
-                                    os.killpg(self.process.pid, signal.SIGKILL)
-                                self.process.wait()
-                            raise ValueError('Cancelled' if self.cancel.is_set() else 'Build timed out')
-                        time.sleep(0.5)
-                    job['log'] = text_tail(logfile, 8000)
-                    check_build_exit(self.process.returncode, self.cancel.is_set(), job['log'])
-                if self.cancel.is_set():
-                    raise ValueError('Cancelled')
-                for name in (() if helix20_release.modern(release) else NETWORK):
-                    if not (package / name).is_file() or (package / name).stat().st_size < 1024:
-                        raise ValueError('Generated HelixSR model files are missing or incomplete. '
-                                         'See the build log; this is not an internet connection error.')
-                if modern:
-                    release_adapter(release).verify_outputs(package)
-                else:
-                    verify_outputs(package)
+                model = self._download_and_build(release, selected, companion, work, archive, package, modern, job)
             api = pe_info(package / output_dll(release))
             if api['arch'] != 'x64' or not api['ffx']:
                 raise ValueError('Prepared HelixSR DLL has an unsupported installation interface')
             if not hlx_fsr_release.modern(release):
-                build.unlink()
+                (package / 'decky-build-only.sh').unlink(missing_ok=True)
             final = companion / 'packages' / (selected['id'] + '-v' + release['version']
                                               + '-' + release['sha256'][:12] + '-' + model['recipe_sha256'][:12])
             final.parent.mkdir(parents=True, exist_ok=True)
@@ -1740,14 +1761,14 @@ class Manager:
                 # A changed cache can be rebuilt without overwriting the previous owned path.
                 final = final.with_name(final.name + '-' + job['id'][:8])
             os.replace(package, final)
-            payloads = release_adapter(release).payload_files() if modern else PACKAGE_FILES + ('helixsr_setup.json',)
-            if (final / 'amd-fsr' / AMD_FG).is_file():
-                payloads += ('amd-fsr/' + AMD_FG,)
+            payloads = self._payload_names(release, final)
             record = dict(version=release['version'], path=str(final), release_sha256=release['sha256'],
                           files={n: sha(final / n) for n in payloads}, prepared_at=time.time(), variant=model)
             if hlx_fsr_release.modern(record) and record['files'] != {
                     n: d for n, (_, d) in hlx_fsr_release.PINS.items()}:
                 raise ValueError('HLX FSR cache changed before publication; no game files were changed')
+            if copied and record['files'] != source[2]['files']:
+                raise ValueError('Copied package changed before publication; no game files were changed')
             namespace = 'packages' if selected['id'] == DEFAULT_VARIANT else 'variant_packages_v1'
             self.cfg.setdefault(namespace, {})[str(final)] = record
             self.save()
@@ -1768,6 +1789,134 @@ class Manager:
         finally:
             # Work is exclusively owned by this job. Logs and successful package remain.
             shutil.rmtree(work, ignore_errors=True)
+
+    def _download_and_build(self, release, selected, companion, work, archive, package, modern, job):
+        """Download the official release into work and build its network; returns the model identity."""
+        job['message'] = 'Downloading official release'
+        if shutil.disk_usage(companion).free < (3 << 30):
+            raise ValueError('At least 3 GiB free space is required for preparation')
+        with urllib.request.urlopen(urllib.request.Request(release['url'], headers={'User-Agent': 'HelixSR-Decky'}), timeout=30, context=https_context()) as response, archive.open('wb') as out:
+            size = 0
+            while True:
+                if self.cancel.is_set():
+                    raise ValueError('Cancelled')
+                chunk = response.read(1 << 20)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > release['size']:
+                    raise ValueError('Release exceeds advertised size')
+                out.write(chunk)
+        if size != release['size'] or sha(archive) != release['sha256']:
+            raise ValueError('Release SHA256 or size mismatch; upstream may have replaced the archive. Check for updates and retry')
+        if hlx_fsr_release.modern(release):
+            # Only consume individually pinned members. Do not run setup, fetch a driver,
+            # or execute the Model E converter to prepare the SDK-built FSR payload.
+            hlx_fsr_release.validate_release(release)
+            members = release_adapter(release).payload_files()
+            with zipfile.ZipFile(archive) as z:
+                for name in members:
+                    key = package.name + '/' + name
+                    matches = [entry for entry in z.infolist() if entry.filename == key]
+                    if (len(matches) != 1 or stat.S_ISLNK(matches[0].external_attr >> 16)
+                            or matches[0].file_size > 256 << 20):
+                        raise ValueError('Missing, duplicated or unsafe reviewed archive member: ' + name)
+                    if self.cancel.is_set():
+                        raise ValueError('Cancelled')
+                    path = package / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with z.open(matches[0]) as source, path.open('xb') as dest:
+                        shutil.copyfileobj(source, dest, 1 << 20)
+            model = hlx_fsr_release.verify_recipe(package)
+        else:
+            safe_extract(archive, work / 'unpacked')
+            archive.unlink()
+            layout = (['LICENSE', 'THIRD_PARTY_NOTICES.md', output_dll(release),
+                       'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
+                       'helixsr-scaler/OptiScaler.dll', 'helixsr-scaler/OptiScaler.ini'] if modern else
+                      ['LICENSE', 'LICENSE-APACHE-2.0', 'THIRD_PARTY_NOTICES.md', DLL,
+                         'helixsr-setup.sh', 'setup/helixsr_setup.py', 'setup/helixsr_install.py',
+                         'optiscaler/OptiScaler.dll', 'optiscaler/OptiScaler.ini'])
+            for name in layout:
+                if not (package / name).is_file():
+                    raise ValueError('Unexpected upstream package layout: ' + name)
+            # Apache-licensed setup adaptation: stop before its interactive game installer.
+            # Complete official release is kept; compiled parts are never patched here.
+            setup = (package / 'helixsr-setup.sh').read_text()
+            build = package / 'decky-build-only.sh'
+            converter = (package / 'setup/helixsr_setup.py').read_text()
+            model = verify_recipe(package, selected['id'])
+            tools = self.build_tools_home(companion)
+            env = dict(os.environ, XDG_DATA_HOME=str(tools),
+                       TMPDIR=str(work / 'tmp'), PIP_CACHE_DIR=str(tools / 'pip'),
+                       HELIXSR_FORCE_PORTABLE='1', PYTHONUNBUFFERED='1', PYTHONDONTWRITEBYTECODE='1')
+            env = host_environment(env)
+            env.pop('HELIXSR_BUILD_WINE', None)
+            env.pop('HELIXSR_BUILD_DATA', None)
+            job['message'] = 'Checking installed Proton for local preparation'
+            build_wine, runtime_notes = select_build_wine(self.home, env)
+            if self.cancel.is_set():
+                raise ValueError('Cancelled')
+            if build_wine:
+                env['HELIXSR_BUILD_WINE'] = str(build_wine)
+            if modern and not build_wine:
+                raise ValueError('No working installed Proton or Wine was found for shader compilation')
+            build.write_text(modern_build_script() if modern else
+                             build_only_script(setup, converter, bool(build_wine)), newline='\n')
+            Path(env['TMPDIR']).mkdir()
+            logfile = companion / 'records' / ('build-' + job['id'] + '.log')
+            logfile.parent.mkdir(parents=True, exist_ok=True)
+            job['message'] = BUILD_MESSAGE
+            notes = ([job['copy_note']] if job.get('copy_note') else []) + runtime_notes
+            with logfile.open('wb') as output:
+                if notes:
+                    output.write(('\n'.join(notes) + '\n').encode('utf-8'))
+                    output.flush()
+                self._spawn_compiler(['bash', str(build), '--yes'], cwd=package, env=env,
+                                                stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+                                                start_new_session=True)
+                # A Steam Deck build can legitimately take longer than a desktop one; stop
+                # only when the upstream setup stops writing output, or at a generous ceiling.
+                started = last_output = time.monotonic()
+                logged = -1
+                while self.process.poll() is None:
+                    job['log'] = text_tail(logfile, 8000)
+                    progress = build_progress(job['log'])
+                    job['message'] = BUILD_MESSAGE + (' Progress: ' + progress if progress else '')
+                    now = time.monotonic()
+                    with contextlib.suppress(OSError):
+                        if logfile.stat().st_size != logged:
+                            logged, last_output = logfile.stat().st_size, now
+                    stalled = now - last_output > BUILD_IDLE_SECONDS
+                    if self.cancel.is_set() or stalled or now - started > BUILD_LIMIT_SECONDS:
+                        import signal
+                        with contextlib.suppress(ProcessLookupError):
+                            os.killpg(self.process.pid, signal.SIGTERM)
+                        try:
+                            self.process.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            with contextlib.suppress(ProcessLookupError):
+                                os.killpg(self.process.pid, signal.SIGKILL)
+                            self.process.wait()
+                        raise ValueError('Cancelled' if self.cancel.is_set() else
+                                         'Build timed out: no build output for %d minutes. See the build log.'
+                                         % (BUILD_IDLE_SECONDS // 60) if stalled else
+                                         'Build timed out after %d minutes. See the build log.'
+                                         % (BUILD_LIMIT_SECONDS // 60))
+                    time.sleep(0.5)
+                job['log'] = text_tail(logfile, 8000)
+                check_build_exit(self.process.returncode, self.cancel.is_set(), job['log'])
+            if self.cancel.is_set():
+                raise ValueError('Cancelled')
+            for name in (() if helix20_release.modern(release) else NETWORK):
+                if not (package / name).is_file() or (package / name).stat().st_size < 1024:
+                    raise ValueError('Generated HelixSR model files are missing or incomplete. '
+                                     'See the build log; this is not an internet connection error.')
+            if modern:
+                release_adapter(release).verify_outputs(package)
+            else:
+                verify_outputs(package)
+        return model
 
     @staticmethod
     def action_compatible(data, action):
