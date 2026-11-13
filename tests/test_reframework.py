@@ -164,8 +164,15 @@ class ManagerTests(Fixtures):
     def test_only_named_steam_titles_are_offered(self):
         self.assertEqual(self.state()['state'], 'absent')
         self.assertTrue(self.state()['tested'])
+        self.assertIn('unhandled exception', self.state()['evidence'])
+        self.game['appid'] = '3357650'
+        pragmata = self.state()
+        self.assertTrue(pragmata['tested'], 'PRAGMATA was checked on a Steam Deck on 2026-11-13')
+        self.assertIn('no launch option', pragmata['evidence'])
+        self.assertIn('Uses AMD FSR HLX FSR 4 (4.1.2)', pragmata['evidence'])
         self.game['appid'] = '2246340'
         self.assertFalse(self.state()['tested'])
+        self.assertIsNone(self.state()['evidence'])
         self.game['appid'] = '1091500'
         self.assertIsNone(self.state())
         self.game.update(appid='3764200', source='Imported')

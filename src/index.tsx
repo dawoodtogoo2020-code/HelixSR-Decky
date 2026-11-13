@@ -4,7 +4,7 @@ import { callable, definePlugin, openFilePicker, toaster } from "@decky/api";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { FaAdjust } from "react-icons/fa";
 import { hasOverride, overrideOptions, OverrideDll } from "./launchOptions";
-import { OVERLAY_NATIVE_NOTE, ReframeworkState, reframeworkText, showReframework } from "./reframework";
+import { ADD_OVERRIDE, OVERLAY_NATIVE_NOTE, ReframeworkState, reframeworkText, showReframework } from "./reframework";
 import { PluginInstaller, PluginArtifact } from "./pluginInstaller";
 import { canRestore, gameStatus, installReadiness, nextStep } from "./gameStatus";
 import { executableSession } from "./executableSession";
@@ -608,13 +608,13 @@ function Content() {
       strDescription={<div style={{ overflowWrap: "anywhere" }}>
         <p>Downloads REFramework nightly {p.build} ({p.commit.slice(0, 7)}, {(p.size / 1048576).toFixed(1)} MB) from github.com/praydog/REFramework-nightly and checks GitHub's SHA-256 digest {p.sha256.slice(0, 12)}….</p>
         <p>Adds only {p.file}. Existing files are never replaced. Remove REFramework loader deletes only this exact file.</p>
-        <p>Proton also needs the launch option {p.override}. Review it with Review dinput8 launch option afterwards.</p>
+        <p>No launch option is needed: on the tester's Steam Deck, Proton loaded REFramework from the DLL alone. Only if the game still crashes at startup, use {ADD_OVERRIDE} to add {p.override}.</p>
         <p>REFramework is a separate open-source mod by praydog. A game update can need a newer build: if the game stops at the Capcom logo after an update, remove the loader and add it again.</p>
         {!p.tested && <p>This game has not been checked with HLX FSR 4 and REFramework on a Steam Deck yet.</p>}
       </div>} strOKButtonText="Download and add" strCancelButtonText="Cancel"
       onOK={() => { if (!beginReview()) return; void run(() => installReframework(id, p.sha256)).then(updated => {
         if (!updated) return;
-        toaster.toast({ title: "REFramework loader added", body: `${p.game}: review the dinput8 launch option if it is not set yet.` });
+        toaster.toast({ title: "REFramework loader added", body: `${p.game}: launch the game. A launch option is only needed if it still crashes at startup.` });
         if (mountedRef.current && selectedRef.current === id) setGame(updated);
       }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
   }
@@ -896,7 +896,7 @@ function Content() {
       <PanelSectionRow><div className="helix-muted">{t.launch}</div></PanelSectionRow>
       {["installed", "changed", "foreign"].includes(r.state) && !!game.appid && <PanelSectionRow><ButtonItem layout="below"
         disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false}
-        onClick={() => void interact(() => launchChange(false, "dinput8"))}>Review dinput8 launch option</ButtonItem></PanelSectionRow>}
+        onClick={() => void interact(() => launchChange(false, "dinput8"))}>{ADD_OVERRIDE}</ButtonItem></PanelSectionRow>}
       {!!game.appid && hasOverride(game.launch_options || "", "dinput8") && game.route !== "optiscaler" && <PanelSectionRow><ButtonItem layout="below" disabled={disabled}
         onClick={() => void interact(() => launchChange(true))}>Restore plugin launch-option change</ButtonItem></PanelSectionRow>}
       {r.state === "installed" && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !!game.installation_status?.running}

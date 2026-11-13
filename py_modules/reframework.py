@@ -1,9 +1,11 @@
 """Optional REFramework loader for RE Engine games that need it beside HLX FSR 4.
 
 A Steam Deck tester found that Resident Evil Requiem shows an unhandled exception
-at startup with HLX FSR 4 unless REFramework's dinput8.dll is loaded (Proton also
-needs a native-first dinput8 override). This module adds only that DLL, never
-replaces an existing file, and removes only the exact bytes it recorded.
+at startup with HLX FSR 4 unless REFramework's dinput8.dll is loaded. On the tester's
+Steam Deck, Proton loaded the DLL from the game folder without a launch option
+(PRAGMATA, 2026-11-13); the native-first dinput8 override stays available as a
+fallback. This module adds only that DLL, never replaces an existing file, and
+removes only the exact bytes it recorded.
 """
 import hashlib
 import json
@@ -34,12 +36,18 @@ HEX = re.compile(r'[0-9a-f]{64}\Z')
 OVERRIDE = 'WINEDLLOVERRIDES="dinput8=n,b" %command%'
 ASSET_HOSTS = ('release-assets.githubusercontent.com', 'objects.githubusercontent.com')
 
-# Steam app IDs named by the tester. Only Requiem has been checked on a Steam Deck.
+# Steam app IDs named by the tester. Requiem and PRAGMATA have been checked on a Steam Deck.
 GAMES = {
-    '3764200': dict(name='Resident Evil Requiem', tested=True),
-    '2246340': dict(name='Monster Hunter Wilds', tested=False),
-    '3357650': dict(name='PRAGMATA', tested=False),
-    '2638890': dict(name='Onimusha: Way of the Sword', tested=False),
+    '3764200': dict(name='Resident Evil Requiem', tested=True,
+                    evidence='A Steam Deck tester confirmed that Resident Evil Requiem needs REFramework\'s loader '
+                             'for HLX FSR 4. Without it the game shows an unhandled exception at startup. '
+                             'HelixSR 2.0 Model E worked without it.'),
+    '2246340': dict(name='Monster Hunter Wilds', tested=False, evidence=None),
+    '3357650': dict(name='PRAGMATA', tested=True,
+                    evidence='A Steam Deck tester confirmed that PRAGMATA works with HLX FSR 4 and REFramework\'s '
+                             'loader on the first try, with no launch option. In Graphics, Upscaling shows AMD FSR3 '
+                             'and its description reads "Uses AMD FSR HLX FSR 4 (4.1.2)".'),
+    '2638890': dict(name='Onimusha: Way of the Sword', tested=False, evidence=None),
 }
 
 
@@ -164,8 +172,8 @@ def status(game, data, companion):
     entry = game_entry(game)
     if not entry:
         return None
-    result = dict(game=entry['name'], tested=entry['tested'], override=OVERRIDE, source=PAGE,
-                  state='unavailable', reason='', file=None, tag=None, revision=None)
+    result = dict(game=entry['name'], tested=entry['tested'], evidence=entry['evidence'], override=OVERRIDE,
+                  source=PAGE, state='unavailable', reason='', file=None, tag=None, revision=None)
     try:
         target, relative = target_path(game['folder'], data.get('main_exe'))
         result['file'] = relative

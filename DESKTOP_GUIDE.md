@@ -94,4 +94,4 @@ Use Python 3.11 or newer and a user-owned virtual environment. Install `PySide6-
 
 Dragon's Dogma 2 gets an extra setup note only for its OptiScaler route. Follow the linked [DD2 guide](https://github.com/optiscaler/OptiScaler/wiki/Dragons-Dogma-2), including the REFramework requirement and Linux loader notes. The desktop app does not install or verify REFramework. Its presence alone does not establish working Steam Deck gameplay. A native FSR replacement remains a separate route.
 
-Resident Evil Requiem and some other RE Engine games need REFramework's loader with HLX FSR 4. Decky 0.1.44 can add it; the desktop app does not yet. See [RE Engine games](INSTALL_GUIDE.md#re-engine-games-with-hlx-fsr-4) for the manual steps.
+Resident Evil Requiem and some other RE Engine games need REFramework's loader with HLX FSR 4. Decky 0.1.44 and later can add it; the desktop app does not yet. The DLL alone is usually enough. See [RE Engine games](INSTALL_GUIDE.md#re-engine-games-with-hlx-fsr-4) for the manual steps.

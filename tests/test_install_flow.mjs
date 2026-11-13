@@ -922,6 +922,7 @@ test("upscaler overlay toggle saves the Scaler overlay with the current revision
 function reframeworkGame(h, state = "absent", extra = {}) {
   Object.assign(h.game, { source: "Steam", appid: "3764200", name: "Resident Evil Requiem", managed: true, enabled: true,
     route: "direct", installed_variant: "hlx-fsr4-1-2", reframework: { game: "Resident Evil Requiem", tested: true, state, reason: state === "foreign" ? "An existing dinput8.dll is present" : "",
+      evidence: "A Steam Deck tester confirmed that Resident Evil Requiem needs REFramework's loader for HLX FSR 4.",
       override: 'WINEDLLOVERRIDES="dinput8=n,b" %command%', source: "https://github.com/praydog/REFramework-nightly/releases",
       file: "dinput8.dll", tag: state === "installed" ? "nightly-01438-f00d6bee503125180621a6666779499f9a30881d" : null,
       revision: state === "installed" ? "f00d6be" : null }, ...extra });
@@ -939,7 +940,7 @@ test("REFramework loader is reviewed with the exact build, then installed with t
   const sections = h.walk(h.render(), n => n.type === "PanelSection").map(n => n.props.title);
   assert.ok(sections.indexOf("Upscaling and frame generation") < sections.indexOf("REFramework loader"));
   assert.match(h.text(h.render()), /tester confirmed that Resident Evil Requiem needs REFramework's loader/);
-  assert.equal(button(h, "Review dinput8 launch option"), undefined, "the override is offered once the loader exists");
+  assert.equal(button(h, "Add dinput8 launch option (only if needed)"), undefined, "the override is offered once the loader exists");
   button(h, "Add REFramework loader").props.onClick(); await flush();
   assert.deepEqual(JSON.parse(JSON.stringify(h.calls.at(-1))), { route: "reframework_preview", args: ["pragmata"] });
   const modal = h.currentModal();
@@ -951,7 +952,7 @@ test("REFramework loader is reviewed with the exact build, then installed with t
   assert.deepEqual(JSON.parse(JSON.stringify(h.calls.at(-1))), { route: "install_reframework", args: ["pragmata", "a".repeat(64)] });
   assert.ok(h.toasts.some(t => t.title === "REFramework loader added"));
   assert.match(h.text(h.render()), /Added by HelixSR: REFramework nightly 1438 \(f00d6be\)/);
-  assert.ok(button(h, "Review dinput8 launch option"));
+  assert.ok(button(h, "Add dinput8 launch option (only if needed)"));
   assert.ok(button(h, "Remove REFramework loader"));
 });
 
@@ -970,7 +971,7 @@ test("REFramework removal is confirmed and an existing loader is never offered f
   assert.match(foreign.text(foreign.render()), /Existing dinput8.dll kept/);
   assert.equal(button(foreign, "Add REFramework loader"), undefined);
   assert.equal(button(foreign, "Remove REFramework loader"), undefined);
-  assert.ok(button(foreign, "Review dinput8 launch option"));
+  assert.ok(button(foreign, "Add dinput8 launch option (only if needed)"));
 });
 
 test("games without a REFramework entry, and native Model E installs, show no loader section", async () => {
@@ -1065,4 +1066,25 @@ test("HLX on a game with only AMD's combined FSR DLL explains Scaler and switche
   assert.equal(h.count("set_installation_route"), 1);
   assert.equal(scalerButton(), undefined, "the card goes away once the game uses Scaler");
   assert.equal(h.installButton().props.disabled, false);
+});
+
+test("the REFramework loader needs no launch option; the override stays an optional fallback", async () => {
+  const h = harness({ reframework_preview: () => reframeworkReview });
+  reframeworkGame(h); await h.ready();
+  assert.match(h.text(h.render()), /No launch option is needed: on the tester's Steam Deck, the DLL alone was enough/);
+  button(h, "Add REFramework loader").props.onClick(); await flush();
+  const description = h.text(h.currentModal().element.props.strDescription);
+  assert.match(description, /No launch option is needed/);
+  assert.doesNotMatch(description, /Proton also needs/);
+  h.currentModal().options.fnOnClose(); await flush();
+
+  const installed = harness(); reframeworkGame(installed, "installed"); await installed.ready();
+  assert.match(installed.text(installed.render()), /Only if the game still crashes at startup/);
+  assert.ok(button(installed, "Add dinput8 launch option (only if needed)"), "the fallback stays available");
+
+  const untested = harness();
+  reframeworkGame(untested, "absent", { appid: "2638890", name: "Onimusha: Way of the Sword" });
+  untested.game.reframework = { ...untested.game.reframework, game: "Onimusha: Way of the Sword", tested: false, evidence: null };
+  await untested.ready();
+  assert.match(untested.text(untested.render()), /This game has not been checked with it yet/);
 });
