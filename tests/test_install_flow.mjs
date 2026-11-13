@@ -1016,3 +1016,53 @@ test("HLX FSR 4 Full is offered only by a release that has it and saves its own 
   enableSettings(selected, { family: "hlx-fsr", upscaler: "hlx-fsr-full", provider: "off", full_available: true }); await selected.ready();
   assert.match(selected.text(renderedHelixSettings(selected)), /full FSR 4\.1\.2 network/);
 });
+
+test("a failed update stays on the game's panel with its reason until dismissed", async () => {
+  const failed = { id: "job-failed", kind: "install_latest", gid: "pragmata", game: "PRAGMATA", state: "failed",
+    started_at: 10, ended_at: 20, log: "",
+    message: "Release SHA256 or size mismatch: upstream re-published HelixSR 3.3.0 after this plugin version reviewed it." };
+  const h = harness({ library: () => ({ ...h.library(), jobs: [failed] }), job_status: () => [failed] });
+  Object.assign(h.game, { managed: true, enabled: true, route: "optiscaler", installed_version: "2.0.0", installed_model: "HelixSR Model E" });
+  await h.ready();
+  const card = () => h.walk(h.render(), n => n.props?.role === "alert" && /did not finish/.test(h.text(n)))[0];
+  assert.ok(card(), "the failure is visible without relying on a toast");
+  assert.match(h.text(card()), /The last install or update did not finish/);
+  assert.match(h.text(card()), /re-published HelixSR 3\.3\.0/);
+  assert.match(h.text(card()), /rolled back/);
+  const dismiss = h.walk(h.render(), n => n.type === "ButtonItem" && h.text(n) === "Dismiss this message")[0];
+  assert.ok(dismiss);
+  dismiss.props.onClick();
+  assert.equal(card(), undefined, "dismissed");
+  h.unmount(); h.mount(); await flush();
+  assert.equal(card(), undefined, "a remounted panel keeps it dismissed");
+});
+
+test("HLX on a game with only AMD's combined FSR DLL explains Scaler and switches with one press", async () => {
+  const models = [
+    { id: "helixsr-model-e", label: "Model E", source: "NVIDIA", release_choices: ["reviewed-2.0.0"], routes: ["direct", "optiscaler"] },
+    { id: "hlx-fsr4-1-2", label: "HLX FSR 4", source: "AMD", release_choices: ["reviewed-3.3.0"], routes: ["direct", "optiscaler"] }
+  ];
+  const reason = "HLX FSR 4 cannot replace this game's FSR file directly. The game ships amd_fidelityfx_dx12.dll, AMD's combined FSR 3.1 DLL. Switch this game to the Scaler route with a Use Scaler button, then install again.";
+  const h = harness({
+    library: () => ({ ...h.library(), model_catalog: { default: models[0].id, variants: models },
+      release_choices: [{id: "reviewed-2.0.0", version: "2.0.0"}, {id: "reviewed-3.3.0", version: "3.3.0"}] }),
+    set_installation_route: (id, route) => {
+      assert.deepEqual([id, route], ["pragmata", "optiscaler"]);
+      return { ...h.game, route: "optiscaler", hlx_direct_supported: null, hlx_scaler_reason: null };
+    }
+  });
+  Object.assign(h.game, { route: "direct", inputs: ["DLSS"], hlx_direct_supported: false, hlx_scaler_reason: reason });
+  await h.ready();
+  const control = label => h.walk(h.render(), n => n.type === "DropdownItem" && n.props.label === label)[0];
+  const scalerButton = () => h.walk(h.render(), n => n.type === "ButtonItem" && h.text(n) === "Use Scaler for this game")[0];
+  assert.equal(scalerButton(), undefined, "Model E can still use the combined DLL directly");
+  assert.equal(h.installButton().props.disabled, false);
+  control("HelixSR model").props.onChange({data: models[1].id});
+  assert.equal(h.installButton().props.disabled, true, "HLX cannot install on the direct route here");
+  const card = h.walk(h.render(), n => n.props?.role === "status" && /through Scaler/.test(h.text(n)))[0];
+  assert.match(h.text(card), /combined FSR 3\.1 DLL/);
+  scalerButton().props.onClick(); await flush();
+  assert.equal(h.count("set_installation_route"), 1);
+  assert.equal(scalerButton(), undefined, "the card goes away once the game uses Scaler");
+  assert.equal(h.installButton().props.disabled, false);
+});

@@ -1,5 +1,5 @@
 export type InstallJob = { id: string; kind: string; game: string; state: string;
-  message: string; log: string; gid?: string };
+  message: string; log: string; gid?: string; started_at?: number; ended_at?: number };
 export type InstallSubmission = { pending: boolean; gid: string; name: string;
   message: string; error: string };
 
@@ -63,4 +63,18 @@ export class JobTracker {
     this.generation++;
     return true;
   }
+}
+
+/**
+ * The selected game's latest job, when it failed and has not been dismissed. A failed
+ * install or update otherwise only shows a short toast, and the panel falls back to the
+ * old status ("Not installed" or the previous model) with no reason on screen.
+ */
+export function lastFailedJob(jobs: InstallJob[], game: { id: string; name: string } | undefined,
+                              dismissed: ReadonlySet<string>): InstallJob | undefined {
+  if (!game) return undefined;
+  const mine = jobs.filter(job => job.gid ? job.gid === game.id : job.game === game.name);
+  if (!mine.length) return undefined;
+  const latest = mine.reduce((a, b) => (b.started_at ?? 0) >= (a.started_at ?? 0) ? b : a);
+  return latest.state === "failed" && !dismissed.has(latest.id) ? latest : undefined;
 }

@@ -152,14 +152,28 @@ def license_key(release, variant_id=None):
 
 def require_model_release(selected, release):
     if (selected['id'] == hlx_fsr_release.VARIANT_ID) != hlx_fsr_release.modern(release):
-        raise ValueError('HLX FSR 4 needs a reviewed HelixSR 3.3.0 or 3.2.0 package. Model E needs HelixSR 2.0.0 or an older '
+        raise ValueError('HLX FSR 4 needs the reviewed HelixSR 3.3.0 package. Model E needs HelixSR 2.0.0 or an older '
                          'reviewed release: the HLX DLSS (Model E) build in HelixSR 3.x is not reviewed by this plugin yet.')
+
+
+HLX_SPLIT_DLL = 'amd_fidelityfx_upscaler_dx12.dll'
+
+
+def hlx_scaler_reason(names, managed=False):
+    """Why HLX FSR 4 cannot replace these native DLLs directly, and what to press instead."""
+    found = ', '.join(sorted(set(names))) or 'its FSR DLL'
+    steps = ('Remove HelixSR to restore the original files, switch this game to the Scaler route with a '
+             'Use Scaler button, then install HLX FSR 4 again.' if managed else
+             'Switch this game to the Scaler route with a Use Scaler button, then install again.')
+    return (f'HLX FSR 4 cannot replace this game\'s FSR file directly. The game ships {found}, AMD\'s combined '
+            f'FSR 3.1 DLL, but HLX FSR 4 replaces only the separate FSR 3.1 upscaler DLL ({HLX_SPLIT_DLL}). '
+            f'Install it through Scaler instead: Scaler takes the game\'s DLSS, XeSS or FSR input. {steps}')
 
 
 def direct_backup(target, record):
     if hlx_fsr_release.modern(record):
-        if target.name.lower() != 'amd_fidelityfx_upscaler_dx12.dll':
-            raise ValueError('HLX FSR 4 direct mode needs the split FSR 3.1 DX12 upscaler DLL; use Scaler for other inputs.')
+        if target.name.lower() != HLX_SPLIT_DLL:
+            raise ValueError(hlx_scaler_reason([target.name]))
         return target.with_name('amd_fidelityfx_upscaler_dx12.amd.dll')
     return target.with_name(target.stem + '.original.dll')
 
@@ -1181,6 +1195,8 @@ class Manager:
                 and not repair_conflict and not non_file_blocked and not repair_files):
             blocked.append(repair_reason or
                            'Exact installed package is unavailable or changed; repair needs the recorded checksum-verified package')
+        # HLX FSR 4 replaces only the split FSR 3.1 upscaler DLL. Older combined DLLs need Scaler.
+        hlx_direct = (all(p.name.lower() == HLX_SPLIT_DLL for p in targets) if route == 'direct' and targets else None)
         data = dict(game, compatibility='blocked' if blocked else 'unsupported' if dx11_title else 'candidate' if route else 'unsupported',
                     reasons=blocked + reasons, route=route, inputs=inputs, target=str(target) if target else None,
                     targets=[str(p) for p in targets], main_exe=str(main) if main else None,
@@ -1200,6 +1216,9 @@ class Manager:
                     dx12_confirmation_needed=(not dx11_title and route == 'optiscaler'
                                               and not (main and pe_info(main)['dx12'])
                                               and not confirmed_dx12),
+                    hlx_direct_supported=hlx_direct,
+                    hlx_scaler_reason=(hlx_scaler_reason([p.name for p in targets], bool(rec))
+                                       if hlx_direct is False else None),
                     **aware)
         if not detailed:
             data.pop('logs', None)
@@ -1570,6 +1589,8 @@ class Manager:
                 raise ValueError('HLX Scaler requires a detected DLSS, XeSS or FSR input. A DX12 executable alone does not establish an upscaling route.')
             if data['route'] not in selected['routes']:
                 raise ValueError('The selected model does not support this installation route.')
+            if hlx_fsr_release.modern(release) and data.get('hlx_direct_supported') is False:
+                raise ValueError(data['hlx_scaler_reason'])
             if data['legacy'] and hlx_fsr_release.modern(release):
                 raise ValueError('Import or remove the existing native installation with its owning manager before switching providers.')
             if data['dx12_confirmation_needed'] and not dx12_confirmed:
@@ -1597,7 +1618,7 @@ class Manager:
                         warning=self.native_install_warning(data) + ('You explicitly selected the reviewed HelixSR 1.8.1 compatibility release. '
                                  'This does not install the latest upstream 1.9 Scaler engine. '
                                  if choice == COMPATIBLE_CHOICE else '') +
-                                ('Fetch the pinned pre-release and verify the SDK-built HLX provider. The native fallback may run on unsupported hardware. No HelixSR FG is included. Close the game.'
+                                ('Fetch the pinned HelixSR release and verify the SDK-built HLX provider. The native fallback may run on unsupported hardware. No HelixSR FG is included. Close the game.'
                                  if hlx_fsr_release.modern(release) else 'Download required files, prepare the local network and install or update HelixSR for this game. Existing native HelixSR is imported first. Close the game. Frame generation is preserved.'))
 
     def execute_latest(self, token):
@@ -1883,6 +1904,11 @@ class Manager:
                     raise ValueError('Release exceeds advertised size')
                 out.write(chunk)
         if size != release['size'] or sha(archive) != release['sha256']:
+            if release.get('metadata_source') == 'reviewed-release':
+                # Upstream sometimes rebuilds a release in place; only a plugin update can review the new files.
+                raise ValueError(f"Release SHA256 or size mismatch: upstream re-published HelixSR {release['version']} "
+                                 'after this plugin version reviewed it. No game files were changed. Update HelixSR Decky '
+                                 'under Plugin updates, then install again.')
             raise ValueError('Release SHA256 or size mismatch; upstream may have replaced the archive. Check for updates and retry')
         if hlx_fsr_release.modern(release):
             # Only consume individually pinned members. Do not run setup, fetch a driver,

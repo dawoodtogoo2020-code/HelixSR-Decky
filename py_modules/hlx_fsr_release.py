@@ -1,8 +1,10 @@
-"""Pinned, prebuilt HLX FSR 4 from official HelixSR releases (3.2.0 and 3.3.0).
+"""Pinned, prebuilt HLX FSR 4 from official HelixSR releases (3.3.0, and 3.2.0 for existing installs).
 
 AMD's SDK 2.4.0 supplies the FSR 4.1.2 network. Each release contains the HLX
 implementation and AMD's own provider; 3.3.0 adds HLX FSR 4 Full as a Scaler
 custom upscaler. Neither is Model E, and no upstream setup code is executed.
+New installs use 3.3.0 only. 3.2.0 stays recognized so its installs keep working
+and can update to 3.3.0.
 """
 from collections.abc import Mapping
 import hashlib
@@ -20,7 +22,8 @@ SCALER_INI = SCALER_DIR + 'OptiScaler.ini'
 FULL_NAME = 'HLX FSR 4 Full'
 FULL_DIR = SCALER_DIR + 'OptiScaler/custom/' + FULL_NAME + '/ffx/'
 _OUTPUT_320 = 'b9f906ca669e444a9fc4d3727192a0d881c8e4c62557bf3a8063d2d694e806ae'
-_OUTPUT_330 = '143164cf365335d6abaa8a72707c06b6586ce487b22e61284aaba44b169e4108'
+_OUTPUT_330 = '4b90351a93cdfb055fb1f2b7224e0cb26fa6aecf3e5ef491acaf6f89dbb7da3b'
+_OUTPUT_330_20261111 = '143164cf365335d6abaa8a72707c06b6586ce487b22e61284aaba44b169e4108'
 
 # SHA-256 of each exact file consumed or kept as evidence. The plugin verifies the complete ZIP, then
 # caches only this reviewed subset locally. No setup code is executed.
@@ -50,10 +53,11 @@ _PINS_320 = {
     SCALER_DIR + 'OptiScaler/plugins/OptiPatcher.asi': (123392, 'b36590bbb57a587a55f535aa0d4e618c5f43f5d2e6bc332837acd5604600ce6d'),
 }
 
-# HelixSR 3.3.0 as republished on 2026-11-11 (upstream updated the asset in place).
+# HelixSR 3.3.0 as republished on 2026-11-12 (upstream updated the asset in place again;
+# its notes: per-pass timing for HelixSR Desktop's speed test, pictures unchanged).
 # The Vulkan-only HLX FSR 4 file and the unbuilt HLX DLSS / Preset K files are not used.
 _PINS_330 = {
-    OUTPUT_DLL: (56843076, _OUTPUT_330),
+    OUTPUT_DLL: (56846148, _OUTPUT_330),
     MANIFEST_PATH: (178, '9bd255377e96dd39d34b4244184e50f9c6aa23694a42bbaab071a3ec3f430367'),
     'LICENSE': (2531, '8898ab9d1ae5e59f5e222aca87e6a30bb073e0b927fe0971dd20c49b79fb81e6'),
     'THIRD_PARTY_NOTICES.md': (9727, '87a6813d2b037ada224fe3178090c2eedd66b75b064a7f3d5c40f239dad4003b'),
@@ -68,7 +72,7 @@ _PINS_330 = {
     SCALER_DIR + 'OptiScaler/amd_fidelityfx_framegeneration_dx12.dll': (40085776, '02297beedd285e822d3a64f314cf00faf378dcec0edc47ff0c4dd71b3a8c2f18'),
     SCALER_DIR + 'OptiScaler/amd_fidelityfx_loader_dx12.dll': (26376, 'e2d85aa05a9bd9ed8b38935fdf5199372cca6f74c12015143bb6f945ee1608aa'),
     SCALER_DIR + 'OptiScaler/amd_fidelityfx_upscaler_dx12.amd.dll': (57664272, 'aad4fccccb29084a655f9a4f9f613bd22c8c03fb4a0f8840148cc6543b4ccace'),
-    SCALER_DIR + 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll': (56843076, _OUTPUT_330),
+    SCALER_DIR + 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll': (56846148, _OUTPUT_330),
     SCALER_DIR + 'OptiScaler/amd_fidelityfx_vk.dll': (9332432, 'a1624cc4238fef046f30c4d80ce3f47be63fc5f5373f49e3ee9edb9960f54c78'),
     SCALER_DIR + 'OptiScaler/libxell.dll': (415368, 'd2030dcd694fda8f2ec7e044b13e6db8f0b56d4ba9113a5efad334e3f3ded8c7'),
     SCALER_DIR + 'OptiScaler/libxess.dll': (77795704, '251659dd84a3e84de67c886a4186e01f3eca49b00641906fe38bb6b807e5d5b7'),
@@ -76,9 +80,24 @@ _PINS_330 = {
     SCALER_DIR + 'OptiScaler/libxess_fg.dll': (22957432, 'ec5e0c65e075570c6ede72618bb666d0be0c2e10b2ea9762c0fe8cb8e375ab27'),
     SCALER_DIR + 'OptiScaler/D3D12_OptiScaler/D3D12Core.dll': (3351064, '07d286c306f8117321422affd9e6388c12d0fb4be1c7fc689d9e899324feeb24'),
     SCALER_DIR + 'OptiScaler/plugins/OptiPatcher.asi': (123392, 'b36590bbb57a587a55f535aa0d4e618c5f43f5d2e6bc332837acd5604600ce6d'),
-    FULL_DIR + 'amd_fidelityfx_upscaler_dx12.dll': (12942024, '9a72fe1b5c4fcfa5dd23e0d25c0488df7c5c93c78a16cfeb80a178b4992c7757'),
+    FULL_DIR + 'amd_fidelityfx_upscaler_dx12.dll': (12945096, '1808af1ae4a495c9eb6e7b0c745532c45d5d1c85a0e6c917f949efe726c9c61b'),
     FULL_DIR + 'hlx_fsr4.ini': (1077, '60bbe761da9d0063a46fbb6c624e8e6b633166f685da28fd0503dd6ffe6949a8'),
 }
+
+# The 2026-11-11 build of 3.3.0 that plugin 0.1.44 installed. Upstream replaced it in place on
+# 2026-11-12, so it is never downloaded again. Its recipe and output stay recognized only so
+# existing installs keep their model identity, are never mistaken for a game's original DLL,
+# and can update to the current build.
+_PINS_330_20261111 = {**_PINS_330,
+    OUTPUT_DLL: (56843076, _OUTPUT_330_20261111),
+    SCALER_DIR + 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll': (56843076, _OUTPUT_330_20261111),
+    FULL_DIR + 'amd_fidelityfx_upscaler_dx12.dll': (12942024, '9a72fe1b5c4fcfa5dd23e0d25c0488df7c5c93c78a16cfeb80a178b4992c7757'),
+}
+
+
+def _recipe(pins):
+    return hashlib.sha256(b''.join((name + '\0' + digest + '\0').encode()
+                                   for name, (_, digest) in sorted(pins.items()))).hexdigest()
 
 
 def _custom_library(parsed):
@@ -91,7 +110,7 @@ class Release:
     VARIANT_ID, ADAPTER, OUTPUT_DLL, MANIFEST_PATH = VARIANT_ID, ADAPTER, OUTPUT_DLL, MANIFEST_PATH
     SCALER_DIR, SCALER_INI = SCALER_DIR, SCALER_INI
 
-    def __init__(self, version, sha256, size, pins, full):
+    def __init__(self, version, sha256, size, pins, full, replaced=()):
         self.MODERN_VERSION = version
         self.RELEASE_SHA256, self.RELEASE_SIZE = sha256, size
         self.RELEASE_URL = f'https://github.com/lonewolf0622/HelixSR/releases/download/v{version}/HelixSR-{version}.zip'
@@ -100,9 +119,11 @@ class Release:
         self.PINS = dict(pins)
         self.OUTPUT_SHA256 = self.PINS[OUTPUT_DLL][1]
         self.FULL = full
-        self.RECIPE_SHA256 = hashlib.sha256(b''.join(
-            (name + '\0' + digest + '\0').encode()
-            for name, (_, digest) in sorted(self.PINS.items()))).hexdigest()
+        self.RECIPE_SHA256 = _recipe(self.PINS)
+        # Earlier builds of this same version that upstream replaced in place. Recognized for
+        # installed games only: downloads, caches and repairs always use the current PINS.
+        self.REPLACED_RECIPES = frozenset(_recipe(old) for old in replaced)
+        self.REPLACED_OUTPUTS = frozenset(old[OUTPUT_DLL][1] for old in replaced)
 
     def __repr__(self):
         return f'<HLX FSR release {self.MODERN_VERSION}>'
@@ -215,15 +236,20 @@ class Release:
 
 V320 = Release('3.2.0', 'a4e83da8b4335a886197aef10e8f8a8947a2e32e5e1eebfdf060ff00724c17c7', 217396302,
                _PINS_320, full=False)
-V330 = Release('3.3.0', '4d87481061db0f499112041b38da5aebfc86e7f9ca3c7b1894258f20452d9045', 279494747,
-               _PINS_330, full=True)
+V330 = Release('3.3.0', '7d6c0a4adeb5237004fc6fbe211d39705d62d49f23c51cc8f4ea987281d0a56b', 279492763,
+               _PINS_330, full=True, replaced=(_PINS_330_20261111,))
 RELEASES = {r.MODERN_VERSION: r for r in (V330, V320)}
 LATEST = V330
 
 
 def output_sha256s():
-    """Digests of every reviewed HLX output DLL; never a game's original provider."""
-    return {r.OUTPUT_SHA256 for r in RELEASES.values()}
+    """Digests of every reviewed HLX output DLL, including replaced builds; never a game's original provider."""
+    return {r.OUTPUT_SHA256 for r in RELEASES.values()} | {d for r in RELEASES.values() for d in r.REPLACED_OUTPUTS}
+
+
+def installed_recipes():
+    """Recipe digests an installed game may carry: current builds and builds upstream replaced in place."""
+    return {r.RECIPE_SHA256 for r in RELEASES.values()} | {d for r in RELEASES.values() for d in r.REPLACED_RECIPES}
 SOURCE_LICENSE_URL = LATEST.SOURCE_LICENSE_URL
 
 
@@ -246,4 +272,4 @@ def for_package(package):
             return release, release.verify_recipe(package)
         except (OSError, ValueError) as exc:
             errors.append(str(exc))
-    raise ValueError('HLX FSR 4 needs a reviewed HelixSR 3.2.0 or 3.3.0 release: ' + '; '.join(errors))
+    raise ValueError('HLX FSR 4 needs the reviewed HelixSR 3.3.0 release: ' + '; '.join(errors))

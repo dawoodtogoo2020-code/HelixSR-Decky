@@ -7,7 +7,11 @@ LATEST_CHOICE = "latest"
 COMPATIBLE_CHOICE = "compatible-1.8.1"
 COMPATIBLE_VERSION = "1.8.1"
 COMPATIBLE_METADATA_SOURCE = "reviewed-compatibility-release"
-REVIEWED_CHOICES = ('reviewed-2.0.0', 'reviewed-1.9.3', COMPATIBLE_CHOICE, 'reviewed-3.3.0', 'reviewed-3.2.0')
+# Shown in the Release menus. HelixSR 3.3.0 replaced the 3.2.0 prerelease for HLX FSR 4.
+OFFERED_CHOICES = ('reviewed-2.0.0', 'reviewed-1.9.3', COMPATIBLE_CHOICE, 'reviewed-3.3.0')
+# No longer offered. Still accepted so existing 3.2.0 installs keep a known identity.
+RETIRED_CHOICES = ('reviewed-3.2.0',)
+REVIEWED_CHOICES = OFFERED_CHOICES + RETIRED_CHOICES
 HLX_CHOICES = {'reviewed-3.3.0': '3.3.0', 'reviewed-3.2.0': '3.2.0'}
 RECOMMENDED_CHOICE = 'reviewed-2.0.0'
 
@@ -70,14 +74,12 @@ def reviewed_release(choice):
 def release_choices():
     """Display choices without downloading or changing an installation."""
     choices = []
-    for choice in REVIEWED_CHOICES:
+    for choice in OFFERED_CHOICES:
         release = reviewed_release(choice)
         recommended = choice == RECOMMENDED_CHOICE
         suffix = 'recommended' if recommended else 'older release'
         if choice == 'reviewed-3.3.0':
             suffix = 'HLX FSR 4 and HLX FSR 4 Full'
-        elif choice == 'reviewed-3.2.0':
-            suffix = 'pre-release, HLX FSR 4 only'
         choices.append(dict(id=choice, label=f"HelixSR {release['version']} ({suffix})",
                             version=release['version'], page=release['page'],
                             recommended=recommended))

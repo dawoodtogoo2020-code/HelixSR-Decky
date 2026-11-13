@@ -27,7 +27,7 @@ class HlxReleaseTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 hlx.V320.validate_release(dict(release, **change))
         variant = model_variants.select_variant(hlx.VARIANT_ID)
-        self.assertEqual(variant['release_choices'], ['reviewed-3.3.0', 'reviewed-3.2.0'])
+        self.assertEqual(variant['release_choices'], ['reviewed-3.3.0'], '3.3.0 replaced the 3.2.0 prerelease')
         self.assertEqual(model_variants.select_variant()['id'], 'helixsr-model-e')
         receipt = dict(id=hlx.VARIANT_ID, adapter=hlx.ADAPTER, recipe_sha256=hlx.V320.RECIPE_SHA256)
         self.assertTrue(model_variants.valid_variant(receipt))
@@ -40,7 +40,7 @@ class HlxReleaseTests(unittest.TestCase):
             (p / 'HLX-FSR4').mkdir()
             with self.assertRaisesRegex(ValueError, 'Model E release'):
                 model_variants.verify_recipe(p)
-            with self.assertRaisesRegex(ValueError, '3.2.0'):
+            with self.assertRaisesRegex(ValueError, '3.3.0'):
                 model_variants.verify_recipe(p, hlx.VARIANT_ID)
             files = {hlx.MANIFEST_PATH: b'sdk receipt', hlx.OUTPUT_DLL: b'prebuilt', 'LICENSE': b'notice'}
             pins = {n: (len(b), hashlib.sha256(b).hexdigest()) for n, b in files.items()}
@@ -120,7 +120,7 @@ class Hlx330Tests(unittest.TestCase):
             receipt = dict(id=hlx.VARIANT_ID, adapter=hlx.ADAPTER, recipe_sha256=release.RECIPE_SHA256)
             self.assertTrue(model_variants.valid_variant(receipt))
             self.assertIs(hlx.for_record({'version': release.MODERN_VERSION}), release)
-        self.assertEqual(hlx.output_sha256s(), {hlx.V320.OUTPUT_SHA256, hlx.V330.OUTPUT_SHA256})
+        self.assertEqual(hlx.output_sha256s(), {hlx.V320.OUTPUT_SHA256, hlx.V330.OUTPUT_SHA256} | hlx.V330.REPLACED_OUTPUTS)
         choice = releases.reviewed_release('reviewed-3.3.0')
         self.assertEqual((choice['version'], choice['sha256'], choice['size']),
                          ('3.3.0', hlx.V330.RELEASE_SHA256, hlx.V330.RELEASE_SIZE))
@@ -129,7 +129,8 @@ class Hlx330Tests(unittest.TestCase):
             releases.require_supported_latest(dict(choice, sha256='0' * 64))
         labels = {c['id']: c['label'] for c in releases.release_choices()}
         self.assertEqual(labels['reviewed-3.3.0'], 'HelixSR 3.3.0 (HLX FSR 4 and HLX FSR 4 Full)')
-        self.assertIn('reviewed-3.2.0', labels)
+        self.assertNotIn('reviewed-3.2.0', labels, 'the 3.2.0 prerelease is no longer offered')
+        self.assertEqual(releases.selection('reviewed-3.2.0'), 'reviewed-3.2.0', 'existing 3.2.0 installs keep an identity')
         with self.assertRaises(ValueError):
             hlx.for_record({'version': '2.0.0'})
 
@@ -168,3 +169,28 @@ class Hlx330Tests(unittest.TestCase):
         self.assertEqual(hlx.V320.read_settings(downgraded)['overlay'], 'upscaler')
         from_20 = hlx.V330.configuration(native.replace('UpscalerIndex=1', 'UpscalerIndex=auto'), TEMPLATE, previous_version='2.0.0')
         self.assertEqual(hlx.V330.read_settings(from_20)['upscaler'], 'hlx-fsr', 'other releases are re-pinned to HLX')
+
+
+class Hlx330RepublishedTests(unittest.TestCase):
+    """Upstream rebuilt HelixSR-3.3.0.zip in place on 2026-11-12 (three HLX DLLs changed)."""
+
+    def test_current_pins_are_the_20261112_asset(self):
+        self.assertEqual((hlx.V330.RELEASE_SHA256, hlx.V330.RELEASE_SIZE),
+                         ('7d6c0a4adeb5237004fc6fbe211d39705d62d49f23c51cc8f4ea987281d0a56b', 279492763))
+        self.assertEqual(hlx.V330.OUTPUT_SHA256, '4b90351a93cdfb055fb1f2b7224e0cb26fa6aecf3e5ef491acaf6f89dbb7da3b')
+        self.assertEqual(hlx.V330.PINS[hlx.SCALER_DIR + 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll'],
+                         hlx.V330.PINS[hlx.OUTPUT_DLL])
+        self.assertEqual(hlx.V330.PINS[hlx.FULL_DIR + 'amd_fidelityfx_upscaler_dx12.dll'][1],
+                         '1808af1ae4a495c9eb6e7b0c745532c45d5d1c85a0e6c917f949efe726c9c61b')
+
+    def test_replaced_20261111_build_is_recognized_but_never_installed(self):
+        self.assertEqual(len(hlx.V330.REPLACED_RECIPES), 1)
+        old = next(iter(hlx.V330.REPLACED_RECIPES))
+        self.assertNotEqual(old, hlx.V330.RECIPE_SHA256)
+        self.assertTrue(model_variants.valid_variant(dict(id=hlx.VARIANT_ID, adapter=hlx.ADAPTER, recipe_sha256=old)))
+        self.assertIn('143164cf365335d6abaa8a72707c06b6586ce487b22e61284aaba44b169e4108', hlx.output_sha256s())
+        self.assertEqual(hlx.V330.release()['sha256'], hlx.V330.RELEASE_SHA256)
+        with self.assertRaisesRegex(ValueError, 'replaced the archive'):
+            hlx.V330.validate_release(dict(hlx.V330.release(),
+                                           sha256='4d87481061db0f499112041b38da5aebfc86e7f9ca3c7b1894258f20452d9045',
+                                           size=279494747))

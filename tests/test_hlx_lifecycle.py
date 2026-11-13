@@ -13,9 +13,11 @@ from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'py_modules'))
-from test_backend import Fixtures, pe
+from test_backend import Fixtures, pe, write
 import manager
 import hlx_fsr_release as hlx
+import model_variants
+import test_helix20_install
 
 ZIP_ENV = {'3.2.0': 'HELIXSR_VERIFIED_ZIP', '3.3.0': 'HELIXSR_VERIFIED_ZIP_330'}
 TEMPLATE = b'[Upscalers]\nDx12Upscaler=auto\n[FSR]\nUpscalerIndex=auto\n[Libraries]\nFfxDx12Path=auto\nFfxDx12SRPath=auto\n[FrameGen]\nEnabled=false\nFGInput=auto\nFGOutput=auto\nFGNvngxReplacement=auto\n'
@@ -124,7 +126,7 @@ class LifecycleTests(Fixtures):
 
     def test_reject_conflicts_incompatible_models_and_changed_archive_before_game_writes(self):
         review = lambda: self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice=self.CHOICE)
-        with self.assertRaisesRegex(ValueError, 'needs a reviewed HelixSR 3.3.0 or 3.2.0'):
+        with self.assertRaisesRegex(ValueError, 'needs the reviewed HelixSR 3.3.0'):
             self.m.preview_latest(self.game['id'], release_choice=self.CHOICE)
         fallback = self.native.with_name('amd_fidelityfx_upscaler_dx12.amd.dll')
         fallback.write_bytes(b'unmanaged')
@@ -139,6 +141,7 @@ class LifecycleTests(Fixtures):
             self.m.worker.join(10)
         self.assertEqual(self.m.jobs[job['id']]['state'], 'failed')
         self.assertIn('size mismatch', self.m.jobs[job['id']]['message'])
+        self.assertIn('Update HelixSR Decky', self.m.jobs[job['id']]['message'])
         self.assertEqual(self.native.read_bytes(), self.original)
         self.assertFalse(self.m.record(self.game))
         self.assertFalse(self.m.cfg.get('variant_packages_v1'))
@@ -193,3 +196,87 @@ class Lifecycle330Tests(LifecycleTests):
         self.assertEqual([f for f in (self.root / 'OptiScaler').rglob('*') if not f.is_dir()], [],
                          'Remove deletes every added file (existing behavior keeps empty folders)')
         self.assertEqual(self.native.read_bytes(), self.original)
+
+    def run_hlx_job(self):
+        """Press Install or Update with HLX FSR 4 and HelixSR 3.3.0 selected; return the finished job."""
+        with self.archive_transport():
+            review = self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice=self.CHOICE)
+            self.m.accept_license(True, review['token'])
+            job = self.m.execute_latest(review['token'])
+            self.m.worker.join(180)
+        return self.m.jobs[job['id']]
+
+    def test_model_e_scaler_game_switches_to_hlx_then_removes_and_reinstalls(self):
+        """DeckWiz's FINAL FANTASY VII REBIRTH report: Model E on Scaler, Update with HLX FSR 4, Remove, Install."""
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        test_helix20_install.Helix20InstallTests.modern20_package(self)
+        self.enterContext(patch.object(test_helix20_install.helix20_release, 'verify_outputs', return_value=None))
+        self.act('install')
+        self.assertEqual(self.m.assess(self.game)['installed_variant'], 'helixsr-model-e')
+        model_e_only = test_helix20_install.helix20_release.OUTPUT_DLL
+        self.assertTrue((self.root / model_e_only).is_file())
+        state = self.m.game_settings(self.game)
+        # HelixSR 3.3.0 has no HelixSR FG: the review names the setting to change instead of failing later.
+        with self.assertRaisesRegex(ValueError, 'Select Off, FSR or XeSS FG'):
+            self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice=self.CHOICE)
+        self.m.set_game_settings(self.game['id'], {'provider': 'off'}, state['revision'])
+
+        job = self.run_hlx_job()
+        self.assertEqual(job['state'], 'completed', job['message'])
+        data = self.m.assess(self.game)
+        self.assertEqual((data['installed_variant'], data['installed_version']), (hlx.VARIANT_ID, '3.3.0'))
+        self.assertEqual(data['installed_model'], 'HLX FSR 4 (FSR 4.1.2 Lite)')
+        self.assertFalse((self.root / model_e_only).exists(), 'Model E files are retired by the update')
+        expected = {dest for _, dest in self.R.scaler_pairs()} | {'OptiScaler.ini', 'HelixSR/helixsr-install.json',
+                                                                  'nvngx_dlss.dll', 'Example.exe'}
+        self.assertEqual({p.relative_to(self.root).as_posix() for p in self.root.rglob('*') if p.is_file()}, expected)
+        self.assertEqual(self.m.game_settings(self.game)['upscaler'], 'hlx-fsr')
+
+        self.act('remove')
+        self.assertEqual({p.name for p in self.root.rglob('*') if p.is_file()}, {'nvngx_dlss.dll', 'Example.exe'})
+        self.assertFalse(self.m.record(self.game))
+        job = self.run_hlx_job()
+        self.assertEqual(job['state'], 'completed', job['message'])
+        data = self.m.assess(self.game)
+        self.assertEqual((data['installed_variant'], data['installed_version']), (hlx.VARIANT_ID, '3.3.0'))
+        self.assertEqual(manager.sha(self.root / 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll'), self.R.OUTPUT_SHA256)
+
+    def test_install_from_replaced_20261111_build_stays_recognized_and_updates(self):
+        """0.1.44 installed 3.3.0's 2026-11-11 build; upstream replaced it in place on 2026-11-12."""
+        rec = self.install()
+        old_recipe = next(iter(hlx.V330.REPLACED_RECIPES))
+        rec['variant'] = dict(rec['variant'], recipe_sha256=old_recipe)
+        rec['release_sha256'] = '4d87481061db0f499112041b38da5aebfc86e7f9ca3c7b1894258f20452d9045'
+        manager.atomic_json(self.m.record_path(self.game), rec)
+        self.m.cfg['variant_packages_v1'].clear()
+        self.assertTrue(model_variants.valid_variant(rec['variant']))
+        data = self.m.assess(self.game)
+        self.assertEqual((data['installed_variant'], data['installed_model']), (hlx.VARIANT_ID, 'HLX FSR 4 (FSR 4.1.2 Lite)'))
+        job = self.run_hlx_job()
+        self.assertEqual(job['state'], 'completed', job['message'])
+        updated = self.m.record(self.game)
+        self.assertEqual((updated['variant']['recipe_sha256'], updated['release_sha256']),
+                         (self.R.RECIPE_SHA256, self.R.RELEASE_SHA256))
+
+    def test_combined_fsr_dll_game_is_sent_to_scaler_with_a_plain_reason(self):
+        """DeckWiz's God of War Ragnarök report: only AMD's combined FSR 3.1 DLL, plus DLSS."""
+        self.native.unlink()
+        combined = write(self.root / manager.DLL, pe(ffx=True))
+        write(self.root / 'nvngx_dlss.dll', pe())
+        data = self.m.assess(self.game)
+        self.assertEqual((data['route'], data['hlx_direct_supported']), ('direct', False))
+        self.assertIn('Switch this game to the Scaler route', data['hlx_scaler_reason'])
+        self.assertIn(manager.DLL, data['hlx_scaler_reason'])
+        with self.assertRaisesRegex(ValueError, 'cannot replace this game.s FSR file directly'):
+            self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice=self.CHOICE)
+        self.m.set_installation_route(self.game['id'], 'optiscaler')
+        data = self.m.assess(self.game)
+        self.assertEqual((data['route'], data['hlx_direct_supported'], data['hlx_scaler_reason']), ('optiscaler', None, None))
+        job = self.run_hlx_job()
+        self.assertEqual(job['state'], 'completed', job['message'])
+        self.assertEqual(combined.read_bytes(), pe(ffx=True), 'Scaler leaves the game\'s FSR DLL untouched')
+
+    def test_split_dll_game_keeps_the_direct_route(self):
+        data = self.m.assess(self.game)
+        self.assertEqual((data['route'], data['hlx_direct_supported'], data['hlx_scaler_reason']), ('direct', True, None))

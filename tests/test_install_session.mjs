@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { InstallSession, JobTracker } from "../src/installSession.ts";
+import { InstallSession, JobTracker, lastFailedJob } from "../src/installSession.ts";
 
 function deferred() {
   let resolve;
@@ -194,4 +194,20 @@ test("job lists are defensively copied and stale polling responses are ignored",
   copy[0].id = "tampered";
   copy.push(job("extra"));
   assert.deepEqual(tracker.jobs.map((item) => item.id), ["new"]);
+});
+
+test("a failed install stays visible for its game until a newer job or a dismissal", () => {
+  const ff7 = { id: "ff7", name: "FINAL FANTASY VII REBIRTH" };
+  const failed = { ...job("a", "failed"), gid: "ff7", game: ff7.name, started_at: 10,
+    message: "Release SHA256 or size mismatch: upstream re-published HelixSR 3.3.0" };
+  const other = { ...job("b", "failed"), gid: "gow", game: "God of War Ragnarök", started_at: 20 };
+  assert.equal(lastFailedJob([failed, other], ff7, new Set())?.id, "a");
+  assert.equal(lastFailedJob([failed, other], ff7, new Set(["a"])), undefined, "dismissed");
+  assert.equal(lastFailedJob([failed, other], undefined, new Set()), undefined);
+  const retried = { ...job("c", "completed"), gid: "ff7", game: ff7.name, started_at: 30 };
+  assert.equal(lastFailedJob([failed, retried], ff7, new Set()), undefined, "a newer success replaces it");
+  const running = { ...job("d", "running"), gid: "ff7", game: ff7.name, started_at: 30 };
+  assert.equal(lastFailedJob([failed, running], ff7, new Set()), undefined, "a retry in progress replaces it");
+  const legacy = { ...job("e", "failed"), game: ff7.name, started_at: 5 };
+  assert.equal(lastFailedJob([legacy], ff7, new Set())?.id, "e", "jobs without gid match by name");
 });

@@ -11,7 +11,7 @@ import { executableSession } from "./executableSession";
 import { librarySelectable, libraryStatus } from "./libraryStatus";
 import { LibraryRead } from "./libraryRead";
 import { GameDetailsRead } from "./gameDetailsRead";
-import { InstallSession, JobTracker } from "./installSession";
+import { InstallSession, JobTracker, lastFailedJob } from "./installSession";
 import { readLaunchOptions } from "./launchDetails";
 import { HelixSettings, HelixSettingsState } from "./HelixSettings";
 import { overlayShortcut } from "./overlayShortcut";
@@ -58,6 +58,7 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
   reasons: string[]; route: string | null; inputs: string[]; managed: boolean; enabled: boolean;
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
   main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
+  hlx_direct_supported?: boolean | null; hlx_scaler_reason?: string | null;
   executable_choices?: { path: string; dx12: boolean }[]; selected_executable?: string; executable_selection_needed?: boolean;
   menu_labels?: { available: boolean; supported: boolean; enabled: boolean; reason: string; label: string; experimental: boolean };
   reframework?: ReframeworkState | null;
@@ -75,7 +76,8 @@ type ReleaseChoice = { id: string; label: string; version: string | null; page: 
 type Model = { id: string; label: string; source: string; release_choices?: string[]; routes?: string[];
   source_terms?: string; source_license_url?: string };
 type ModelCatalog = { variants: Model[]; default: string; note: string };
-type Job = { id: string; kind: string; game: string; gid?: string; state: string; message: string; log: string };
+type Job = { id: string; kind: string; game: string; gid?: string; state: string; message: string; log: string;
+  started_at?: number; ended_at?: number };
 type LauncherImport = { launcher: string; found: number; added: number; candidates: number;
   unavailable: number; game_ids: string[]; warnings: string[] };
 type Library = { games: Game[]; warnings: string[]; release: Release; license_accepted: boolean; jobs: Job[];
@@ -211,7 +213,10 @@ function openDialog(modal: ReactNode) {
   try { showModal(modal, undefined, { bNeverPopOut: true, fnOnClose: finishInteraction }); }
   catch (e) { finishInteraction(); throw e; }
 }
+const HLX_VARIANT = "hlx-fsr4-1-2";
 const notifiedJobs = new Set<string>();
+// Failed jobs the user dismissed from the game panel. Kept outside React so a remount keeps them hidden.
+const dismissedFailures = new Set<string>();
 const jobListeners = new Set<(next: Job[], finished: boolean) => void>();
 const folderListeners = new Set<(next: string[]) => void>();
 let pendingFolders: string[] = [];
@@ -306,6 +311,7 @@ function Content() {
   const [modalOpen, setModalOpen] = useState(interactionBusy || reviewApplying || pluginInstaller.locked);
   const [pluginUpdate, setPluginUpdate] = useState(latestPluginStatus);
   const [pluginInstallMessage, setPluginInstallMessage] = useState(pluginInstaller.message);
+  const [, setDismissedTick] = useState(0);
   const selectedRef = useRef(selected);
   const executableRef = useRef<string | undefined>(executableSession.get(selected));
   const mountedRef = useRef(true);
@@ -694,6 +700,8 @@ function Content() {
   const selectedStatus = game ? gameStatus(game) : undefined;
   const selectedJob = jobs.find(job => job.state === "running"
     && (job.gid ? job.gid === game?.id : job.game === game?.name));
+  const failedJob = selectedJob || (submission.pending && submission.gid === game?.id) ? undefined
+    : lastFailedJob(jobs, game, dismissedFailures);
   const selectedSummary = submission.pending && submission.gid === game?.id
     ? "HelixSR installation is starting…"
     : selectedJob ? "HelixSR installation is in progress. Wait for completion before launching."
@@ -706,6 +714,8 @@ function Content() {
   const latestUnsupported = releaseChoice === "latest" && data?.release?.supported === false;
   const selectedModel = data?.model_catalog?.variants.find(v => v.id === variant);
   const routeUnsupported = !!(game?.route && selectedModel?.routes && !selectedModel.routes.includes(game.route));
+  // HLX FSR 4 replaces only the split FSR 3.1 upscaler DLL; games with the combined DLL go through Scaler.
+  const hlxNeedsScaler = selectedModel?.id === HLX_VARIANT && game?.hlx_direct_supported === false;
   const releaseOptions = data?.release_choices?.length
     ? data.release_choices.map(choice => ({ label: releaseChoiceLabel(choice), data: choice.id }))
     : [
@@ -744,7 +754,7 @@ function Content() {
         {selectedStatus?.label}{selectedSummary && selectedSummary !== selectedStatus?.label && !summaryRepeatedInIssue ? ` · ${selectedSummary}` : ""}
       </div></PanelSectionRow>}
       {game && <>
-        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || (!resetReady && !repairReady && (!installState?.allowed || latestUnsupported || routeUnsupported))}
+        <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled || (!resetReady && !repairReady && (!installState?.allowed || latestUnsupported || routeUnsupported || hlxNeedsScaler))}
           onClick={() => void interact(resetReady ? () => action("reset") : repairReady ? () => action("repair") : installOrUpdate)}>{submission.pending ? "Starting installation…" : resetReady ? "Reset HelixSR setup" : repairReady ? "Repair HelixSR files" : game.managed || game.legacy ? "Update this game's HelixSR" : "Install HelixSR for this game"}</ButtonItem></PanelSectionRow></div>
         {game.managed && <>
           {game.enabled ? <PanelSectionRow><ButtonItem layout="below" disabled={disabled || !canRestore(game)}
@@ -757,6 +767,13 @@ function Content() {
         </>}
       </>}
       {installError && <PanelSectionRow><div role="alert" style={{ ...infoStyle, color: "#ffb4a7" }}>{installError}</div></PanelSectionRow>}
+      {failedJob && <PanelSectionRow><div className="helix-card" role="alert" style={{ ...infoStyle, borderLeftColor: "#ff8a75" }}>
+        <strong>{failedJob.kind === "install_latest" ? "The last install or update did not finish" : "The last preparation did not finish"}</strong>{"\n"}
+        {failedJob.message}{"\n"}
+        <span className="helix-muted">The game keeps the setup shown above: a failed install or update is rolled back. Fix the cause, then press the button above again.</span>
+      </div></PanelSectionRow>}
+      {failedJob && <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen}
+        onClick={() => { dismissedFailures.add(failedJob.id); setDismissedTick(tick => tick + 1); }}>Dismiss this message</ButtonItem></PanelSectionRow>}
       {latestUnsupported && <PanelSectionRow><div role="alert" className="helix-card" style={{ ...infoStyle, borderLeftColor: "#f1ca7e" }}>
         {data?.release?.support_reason || `HelixSR ${data?.release?.version || "latest"} is not supported yet.`} Choose a reviewed release below.
       </div></PanelSectionRow>}
@@ -770,6 +787,15 @@ function Content() {
         selectedOption={variant || data.model_catalog.default} disabled={disabled}
         onChange={option => { const model = data.model_catalog?.variants.find(v => v.id === option.data); if (model) chooseModel(model); }} /></PanelSectionRow>}
       {routeUnsupported && <PanelSectionRow><div className="helix-muted">{selectedModel?.label} supports the following routes: {selectedModel?.routes?.join(", ")}. Current route: {game?.route}.</div></PanelSectionRow>}
+      {hlxNeedsScaler && game && <PanelSectionRow><div className="helix-card" role="status" style={{ ...infoStyle, borderLeftColor: "#f1ca7e" }}>
+        <strong>Install HLX FSR 4 through Scaler for this game</strong>{"\n"}{game.hlx_scaler_reason}
+      </div></PanelSectionRow>}
+      {hlxNeedsScaler && game && !game.managed && !game.legacy && <div className="helix-primary"><PanelSectionRow><ButtonItem layout="below" disabled={disabled}
+        onClick={() => void interact(async () => {
+          const id = game.id;
+          const updated = await run(() => setInstallationRoute(id, "optiscaler"));
+          if (updated && selectedRef.current === id) setGame(updated);
+        })}>Use Scaler for this game</ButtonItem></PanelSectionRow></div>}
       <PanelSectionRow><div className="helix-muted">{libraryView.summary}</div></PanelSectionRow>
       {submission.pending && <PanelSectionRow><div className="helix-card" style={infoStyle} role="status">
         <strong>{submission.name}: Starting installation…</strong>{"\n"}{submission.message}
