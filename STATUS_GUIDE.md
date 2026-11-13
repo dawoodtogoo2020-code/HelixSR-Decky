@@ -24,6 +24,16 @@ Several reasons can apply at once. Resolving one does not bypass the others. Una
 2. Choose **Reset HelixSR setup** when offered. Review the files to remove and the files to keep. This removes only unchanged files that HelixSR added, preserves preexisting game files byte-for-byte, and archives the old receipt and saved originals in the game's companion folder under `HelixSR-Decky/records/reset-*`.
 3. Verify game files in Steam again if needed, restore any other mods through their own manager, refresh, and explicitly install the chosen HelixSR model. The install confirmation explains that it replaces the current native DLL and saves its current bytes for later removal. Compatibility checks cannot prove that this DLL is stock.
 
+### Resetting a Scaler installation after a game update
+
+From 0.1.47, a Scaler-route install that shows **Steam build changed** offers **Reset HelixSR setup** too.
+
+1. Close the game, let Steam finish its update, then use **Refresh library and status**. No file verification is needed: Scaler only added files.
+2. Choose **Reset HelixSR setup** and review the file list. It removes only HelixSR's files (the Scaler proxy, its folders and its settings) and leaves the game's own files unchanged. A Scaler settings file you changed after installation, such as `OptiScaler.ini` saved from Scaler's overlay, is copied into the reset archive under `configs/` first. The old receipt is archived in the game's companion folder.
+3. Refresh, confirm DX12 again if the panel asks (a game update changes the executable), and install HelixSR again.
+
+A Scaler file changed by another tool stops the reset and nothing is deleted. Without a game update, a Scaler install keeps using **Repair HelixSR files** or **Remove and restore originals**.
+
 Reset is separate from **Repair HelixSR files**, which reproduces missing files for the same recorded build. Reset does not run a download, install HelixSR, change launch options, or prove the game is ready to play. Missing or identified HelixSR native DLLs, unknown changes to added files, active games, Steam updates, incomplete records and interrupted transactions still require the displayed next step. Enabled menu-label patches must be restored before reset. Scaler installations keep their existing recovery rules.
 
 Decky 0.1.40 shows a short next step on each warning card. Open **Setup details** for the exact diagnostic, Steam build IDs, file states and additional instructions.

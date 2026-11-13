@@ -221,3 +221,115 @@ class SetupResetTests(Fixtures):
         self.assertFalse(self.m.assess(self.game)['reset_eligible'])
         with self.assertRaisesRegex(ValueError, 'menu-label'):
             self.action('reset')
+
+
+try:
+    from . import test_helix20_install
+except ImportError:
+    import test_helix20_install
+
+
+class ScalerSetupResetTests(Fixtures):
+    """Deck Wizard's Witcher 3 report: a Scaler install stuck after a Steam game update."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(patch.object(test_helix20_install.helix20_release, 'verify_outputs', return_value=None))
+
+    def stale_scaler_install(self, edit_config=True):
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        # An executable without DX12 imports needs the install-time confirmation, as in the report.
+        write(self.root / 'Example.exe', pe())
+        self.game['build'] = '100'
+        test_helix20_install.Helix20InstallTests.modern20_package(self)
+        self.m.execute(self.m.preview(self.game['id'], 'install', dx12_confirmed=True)['token'])
+        self.receipt = self.m.record(self.game)
+        self.assertEqual(self.receipt['route'], 'optiscaler')
+        if edit_config:
+            self.edited = (self.root / 'OptiScaler.ini').read_text() + '\n[Menu]\nShortcutKey=0x24\n'
+            write(self.root / 'OptiScaler.ini', self.edited)
+        # The game update: a new Steam build and a new executable, so the DX12 confirmation lapses.
+        self.game['build'] = '101'
+        write(self.root / 'Example.exe', pe() + b'game update')
+        return self.m.assess(self.game)
+
+    def test_scaler_reset_after_game_update_removes_only_helix_files_and_archives_settings(self):
+        data = self.stale_scaler_install()
+        self.assertIn('Steam build changed; installation needs review', data['reasons'])
+        self.assertTrue(data['dx12_confirmation_needed'], 'the updated executable lost its DX12 confirmation')
+        self.assertFalse(data['installation_status']['can_restore'], 'Remove would restore the old build')
+        self.assertTrue(data['reset_eligible'], data['reset_reason'])
+        self.assertTrue(data['installation_status']['can_reset'])
+        self.assertEqual(data['setup_guidance']['action'], 'reset')
+        self.assertIn('Scaler only added files', data['setup_guidance']['steps'][1])
+        build = next(i for i in data['installation_status']['issues'] if i['code'] == 'steam_build_changed')
+        self.assertIn('remove the old Scaler files', build['steps'][0])
+
+        review = self.m.preview(self.game['id'], 'reset')
+        self.assertIn('dxgi.dll', review['files'])
+        self.assertIn('OptiScaler.ini', review['files'])
+        self.assertEqual(review['preserved_files'], [])
+        self.assertIn("game's own files are not changed", review['warning'])
+        result = self.m.execute(review['token'])
+        self.assertIn('install HelixSR again', result['message'])
+        self.assertNotIn('Verify game files', result['message'])
+
+        self.assertEqual({p.relative_to(self.root).as_posix() for p in self.root.rglob('*') if p.is_file()},
+                         {'nvngx_dlss.dll', 'Example.exe'})
+        self.assertEqual(self.m.record(self.game), {})
+        archive = next((self.m.companion(self.game) / 'records').glob('reset-*'))
+        self.assertEqual((archive / 'configs' / 'OptiScaler.ini').read_text(), self.edited)
+        self.assertEqual(json.loads((archive / 'install.json').read_text()), self.receipt)
+        self.assertEqual(json.loads((archive / 'result.json').read_text())['next_step'], 'Refresh, then install HelixSR again.')
+
+        after = self.m.assess(self.game)
+        self.assertEqual((after['compatibility'], after['managed']), ('candidate', False))
+        self.m.execute(self.m.preview(self.game['id'], 'install', dx12_confirmed=True)['token'])
+        self.assertEqual(self.m.record(self.game)['game_build'], '101')
+        self.action('remove')
+        self.assertEqual({p.name for p in self.root.rglob('*') if p.is_file()}, {'nvngx_dlss.dll', 'Example.exe'})
+
+    def test_unedited_scaler_settings_are_removed_without_an_archived_copy(self):
+        self.stale_scaler_install(edit_config=False)
+        self.action('reset')
+        archive = next((self.m.companion(self.game) / 'records').glob('reset-*'))
+        self.assertFalse((archive / 'configs').exists())
+        self.assertFalse((self.root / 'OptiScaler.ini').exists())
+
+    def test_scaler_payload_changed_by_another_tool_is_never_deleted(self):
+        self.stale_scaler_install()
+        changed = write(self.root / 'dxgi.dll', b'another tool replaced the proxy')
+        data = self.m.assess(self.game)
+        self.assertFalse(data['reset_eligible'])
+        self.assertIn('Another tool changed', data['reset_reason'])
+        with self.assertRaisesRegex(ValueError, 'Another tool changed'):
+            self.action('reset')
+        self.assertEqual(changed.read_bytes(), b'another tool replaced the proxy')
+        self.assertEqual(self.m.record(self.game), self.receipt)
+
+    def test_scaler_without_a_game_update_keeps_repair_instead_of_reset(self):
+        self.native.unlink()
+        write(self.root / 'nvngx_dlss.dll', pe())
+        test_helix20_install.Helix20InstallTests.modern20_package(self)
+        self.action('install')
+        (self.root / 'dxgi.dll').unlink()
+        data = self.m.assess(self.game)
+        self.assertFalse(data['reset_eligible'])
+        self.assertTrue(data['repair_eligible'])
+        with self.assertRaises(ValueError):
+            self.action('reset')
+
+    def test_failure_during_scaler_cleanup_restores_every_file_and_the_receipt(self):
+        self.stale_scaler_install()
+        before = {rel: (self.root / rel).read_bytes() for rel in self.receipt['current'] if (self.root / rel).is_file()}
+        unlink = self.m.unlink_managed
+        def fail_after_unlink(path):
+            unlink(path)
+            raise OSError('synthetic reset failure')
+        with patch.object(self.m, 'unlink_managed', side_effect=fail_after_unlink):
+            with self.assertRaisesRegex(OSError, 'synthetic reset failure'):
+                self.action('reset')
+        self.assertEqual(self.m.record(self.game), self.receipt)
+        self.assertEqual({rel: (self.root / rel).read_bytes() for rel in before}, before)
+        self.assertFalse(self.m.recovery_available(self.game))

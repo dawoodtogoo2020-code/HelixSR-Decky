@@ -11,8 +11,11 @@ ADVISORY_CODES = frozenset({'dx12_unconfirmed', 'legacy_installation'})
 
 
 def _steam_build_steps(game):
+    scaler_reset = game.get('reset_eligible') and game.get('route') == 'optiscaler'
     steps = [
-        ('Use Reset HelixSR setup to clear the old setup, then verify files in Steam and reinstall.'
+        ('Use Reset HelixSR setup to remove the old Scaler files, then install HelixSR again. '
+         'Scaler only added files, so no game files need restoring.' if scaler_reset else
+         'Use Reset HelixSR setup to clear the old setup, then verify files in Steam and reinstall.'
          if game.get('reset_eligible') else game.get('reset_reason') or
          'Finish Steam updates and close the game, then refresh to check recovery options.'),
         'HelixSR file changes stay blocked after this game build change. Install, Update, Disable, and Remove cannot safely change old files; Remove would restore saved originals from the recorded build, which may replace files from the current build.',

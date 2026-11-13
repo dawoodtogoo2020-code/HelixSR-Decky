@@ -1223,8 +1223,12 @@ class Manager:
         if not detailed:
             data.pop('logs', None)
         data.update(reset_eligible=False, reset_files=[], reset_preserved_files=[], reset_reason=None)
-        if detailed and rec.get('route') == 'direct' and any(
-                reason.startswith(('Steam build changed', 'Managed files changed')) for reason in blocked):
+        # Native setups reset after a game update or changed files. Scaler setups
+        # reset only after a game update; otherwise Repair and Remove still work.
+        if detailed and (rec.get('route') == 'direct' and any(
+                reason.startswith(('Steam build changed', 'Managed files changed')) for reason in blocked)
+                or rec.get('route') == 'optiscaler' and any(
+                reason.startswith('Steam build changed') for reason in blocked)):
             try:
                 reset = self.reset_plan(game, data, rec)
                 data.update(reset_eligible=True, reset_files=reset['remove'],
@@ -2116,10 +2120,16 @@ class Manager:
                         preserved_files=data.get('reset_preserved_files', []) if action == 'reset' else [],
                         select_upscaler=(menu_labels.LABEL if action == 'labels_enable' else 'AMD FSR') if data['route'] == 'direct' else 'DLSS (or XeSS/FSR input)',
                         warning=(self.native_install_warning(data) if action == 'install' else '') +
-                                ('Reset the old HelixSR setup without restoring old game files. '
-                                 'Only unchanged files added by HelixSR are removed. Existing game files are kept as-is; '
-                                 'this does not verify that they are original. The old record and saved originals are archived. '
-                                 'Then verify game files in Steam, refresh, and install HelixSR again before playing.'
+                                (('Reset the old HelixSR setup after the game update without restoring old game files. '
+                                  'Only files added by HelixSR are removed: the Scaler files and their settings. '
+                                  'A Scaler settings file you changed after installation is saved in the reset archive first. '
+                                  'The game\'s own files are not changed. The old record is archived. '
+                                  'Then refresh and install HelixSR again before playing.'
+                                  if data['route'] == 'optiscaler' else
+                                  'Reset the old HelixSR setup without restoring old game files. '
+                                  'Only unchanged files added by HelixSR are removed. Existing game files are kept as-is; '
+                                  'this does not verify that they are original. The old record and saved originals are archived. '
+                                  'Then verify game files in Steam, refresh, and install HelixSR again before playing.')
                                  if action == 'reset' else
                                  'Cosmetic menu label only; it does not prove HelixSR is running. '
                                  'Close the game. Original menu bytes are restored when this option or HelixSR is disabled. '
@@ -2353,7 +2363,8 @@ class Manager:
                 for rel in reset_plan['remove']:
                     path = checked_path(root, rel)
                     self.reset_file_hash(path)
-                    if sha(path) != previous['current'][rel]:
+                    # The plan proved these bytes: the recorded install, or an edited Scaler config now archived.
+                    if sha(path) != reset_plan['live'][rel]:
                         raise ValueError('Reset file changed before cleanup: ' + rel)
                     self.unlink_managed(path)
                 for rel, expected in before.items():
@@ -2363,13 +2374,16 @@ class Manager:
                 self.record_path(game).unlink()
                 sync_directory(self.record_path(game).parent)
                 current = {rel: self.reset_file_hash(checked_path(root, rel)) for rel in paths}
-                atomic_json(archive / 'result.json', dict(action='reset', verified=current,
-                            next_step='Verify game files in Steam, refresh, then reinstall HelixSR.'))
+                next_step = ('Refresh, then install HelixSR again.' if reset_plan['route'] == 'optiscaler'
+                             else 'Verify game files in Steam, refresh, then reinstall HelixSR.')
+                atomic_json(archive / 'result.json', dict(action='reset', verified=current, next_step=next_step))
                 journal.update(state='committed', committed_current=current, committed_record=None)
                 atomic_json(tx / 'journal.json', journal)
                 self.transaction = None
                 shutil.rmtree(tx)
-                return dict(message='HelixSR setup reset. Verify game files in Steam, refresh, then install HelixSR again.',
+                return dict(message=('HelixSR setup reset. The old Scaler files are removed; refresh, then install HelixSR again.'
+                                     if reset_plan['route'] == 'optiscaler' else
+                                     'HelixSR setup reset. Verify game files in Steam, refresh, then install HelixSR again.'),
                             enabled=False, version=None)
             if not previous:
                 baseline = {}
@@ -2708,9 +2722,14 @@ class Manager:
         return sha(path)
 
     def reset_plan(self, game, data, rec, in_transaction=False):
-        """Retire a stale native receipt without adopting or overwriting game bytes."""
-        if rec.get('route') != 'direct' or not rec:
-            raise ValueError('Reset is available only for an existing native HelixSR setup.')
+        """Retire a stale receipt without adopting or overwriting game bytes.
+
+        Native setups replaced the game's FSR DLL, so Steam must restore it first.
+        Scaler setups only added files, so after a game update their unchanged
+        files can be removed without touching the game's own files."""
+        if not rec or rec.get('route') not in ('direct', 'optiscaler'):
+            raise ValueError('Reset is available only for an existing HelixSR setup.')
+        scaler = rec.get('route') == 'optiscaler'
         if self.closing.is_set():
             raise ValueError('The plugin is closing; reopen it before resetting.')
         if self.recovery_available(game) and not (in_transaction and self.transaction
@@ -2723,7 +2742,13 @@ class Manager:
         stale = ('Steam build changed', 'Managed files changed')
         if not any(reason.startswith(stale) for reason in reasons):
             raise ValueError('This setup does not need a reset.')
-        other = [reason for reason in reasons if not reason.startswith(stale)]
+        if scaler and not any(reason.startswith('Steam build changed') for reason in reasons):
+            # Without a game update, Repair or Remove still handle a Scaler setup.
+            raise ValueError('This Scaler setup does not need a reset; use Repair HelixSR files or Remove instead.')
+        # A game update changes the executable, so its install-time DX12
+        # confirmation no longer matches. That only matters for installing.
+        other = [reason for reason in reasons
+                 if not reason.startswith(stale) and not reason.startswith('DX12 is not confirmed')]
         if other:
             raise ValueError(other[0])
         if (rec.get('menu_labels') or {}).get('enabled'):
@@ -2734,7 +2759,10 @@ class Manager:
             raise ValueError('The installation record is incomplete; keep it for review.')
         root, companion = Path(game['folder']), self.companion(game)
         self.reset_file_hash(checked_path(companion, 'records/install.json'))
-        remove, preserve, originals, live = [], [], {}, {}
+        # Scaler's own settings files may have been edited in game. They are still
+        # HelixSR's files: archive the edited copy, then remove it with the rest.
+        mutable = set(self.mutable_config_paths(game, rec)) if scaler else set()
+        remove, preserve, originals, live, configs = [], [], {}, {}, {}
         for rel, original in baseline.items():
             expected = current[rel]
             for digest in (original, expected):
@@ -2752,23 +2780,26 @@ class Manager:
                 originals[rel] = original
             elif actual is not None:
                 if actual != expected:
-                    raise ValueError('Another tool changed this added file; restore it with that tool, then refresh: ' + rel)
+                    if rel not in mutable:
+                        raise ValueError('Another tool changed this added file; restore it with that tool, then refresh: ' + rel)
+                    configs[rel] = actual
                 remove.append(rel)
-        if not rec.get('targets'):
-            raise ValueError('The recorded native DLL target is missing.')
-        for target in rec['targets']:
-            rel = str(Path(target).relative_to(root))
-            path = checked_path(root, rel)
-            if rel not in preserve or live[rel] is None:
-                raise ValueError('Verify game files in Steam, then refresh to enable Reset HelixSR setup: ' + rel)
-            api = pe_info(path)
-            if (api['arch'] != 'x64' or not api['ffx'] or api['helix'] or api.get('hlx_fsr')
-                    or live[rel] in hlx_fsr_release.output_sha256s()
-                    or live[rel] == current[rel] and current[rel] != baseline[rel]):
-                raise ValueError('The native DLL still contains HelixSR or is unrecognized. Verify game files in Steam, then refresh: ' + rel)
+        if not scaler:
+            if not rec.get('targets'):
+                raise ValueError('The recorded native DLL target is missing.')
+            for target in rec['targets']:
+                rel = str(Path(target).relative_to(root))
+                path = checked_path(root, rel)
+                if rel not in preserve or live[rel] is None:
+                    raise ValueError('Verify game files in Steam, then refresh to enable Reset HelixSR setup: ' + rel)
+                api = pe_info(path)
+                if (api['arch'] != 'x64' or not api['ffx'] or api['helix'] or api.get('hlx_fsr')
+                        or live[rel] in hlx_fsr_release.output_sha256s()
+                        or live[rel] == current[rel] and current[rel] != baseline[rel]):
+                    raise ValueError('The native DLL still contains HelixSR or is unrecognized. Verify game files in Steam, then refresh: ' + rel)
         # An enabled managed resource beyond the native DLL must not be silently
         # orphaned when its ownership record is retired.
-        targets = {str(Path(target).relative_to(root)) for target in rec['targets']}
+        targets = {str(Path(target).relative_to(root)) for target in rec.get('targets') or []}
         for rel in preserve:
             if rel not in targets and live[rel] == current[rel] and current[rel] != baseline[rel]:
                 raise ValueError('Restore this managed game file before resetting: ' + rel)
@@ -2782,12 +2813,14 @@ class Manager:
             staging = Path(game['library']) / 'steamapps/downloading' / str(game['appid'])
             if staging.is_dir() and any(staging.iterdir()):
                 raise ValueError('Wait for Steam download staging to finish, then refresh.')
-        return dict(remove=remove, preserve=preserve, originals=originals, live=live, manifest=manifest)
+        return dict(remove=remove, preserve=preserve, originals=originals, live=live, manifest=manifest,
+                    configs=configs, route=rec['route'])
 
     def archive_reset(self, game, rec, plan):
-        companion = self.companion(game)
+        companion, root = self.companion(game), Path(game['folder'])
         size = sum(checked_path(companion, str(Path('originals') / rel)).stat().st_size
                    for rel in plan['originals'])
+        size += sum(checked_path(root, rel).stat().st_size for rel in plan.get('configs', {}))
         if shutil.disk_usage(companion).free < size + (128 << 20):
             raise ValueError('Insufficient space to preserve the old installation record.')
         archive = checked_path(companion, 'records/reset-' + uuid.uuid4().hex)
@@ -2799,6 +2832,9 @@ class Manager:
             if self.reset_file_hash(source) != expected:
                 raise ValueError('Saved original changed while archiving: ' + rel)
             durable_copy(source, checked_path(archive, str(Path('originals') / rel)), expected)
+        for rel, expected in plan.get('configs', {}).items():
+            # Settings edited after installation (for example in Scaler's overlay) are kept here.
+            durable_copy(checked_path(root, rel), checked_path(archive, str(Path('configs') / rel)), expected)
         atomic_json(archive / 'install.json', rec)
         atomic_json(archive / 'plan.json', plan)
         return archive

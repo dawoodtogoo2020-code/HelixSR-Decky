@@ -23,14 +23,18 @@ def setup_guidance(game):
     pragmata = (game.get('source') == 'Steam' and str(game.get('appid')) == '3357650') or (
         exe == 'pragmata.exe' and str(game.get('name', '')).casefold() == 'pragmata')
     if pragmata and route == 'optiscaler':
-        notes.append('PRAGMATA requires a compatible REFramework build for Scaler. Without it the game can exit during startup. Add REFramework loader can add the latest nightly; an existing dinput8.dll is kept and not verified. Enable its dinput8 loader alongside dxgi on Proton (Review dinput8 launch option). Keep existing mods and launch options. Game updates can require a newer REFramework build.')
+        notes.append('PRAGMATA requires a compatible REFramework build for Scaler. Without it the game can exit during startup. Add REFramework loader can add the latest nightly; an existing dinput8.dll is kept and not verified. On a tested Steam Deck the DLL alone was enough; only if the game still exits at startup, add the dinput8 override alongside dxgi with Add dinput8 launch option (only if needed). Keep existing mods and launch options. Game updates can require a newer REFramework build.')
         links.append(dict(label='PRAGMATA setup guide', url=PRAGMATA_GUIDE))
     if game.get('awareness_deferred'):
         action, headline, steps = 'inspect', 'Checking this game before installation', ['Wait for the selected game details to finish loading.']
     elif report.get('can_reset'):
         action, headline = 'reset', 'Reset the old HelixSR setup'
-        steps = ['Choose Reset HelixSR setup and review the file list. Then verify game files in Steam, refresh, and reinstall HelixSR.',
-                 'Current game files are kept unchanged. Only unchanged files added by HelixSR are removed; old records and saved originals are archived.']
+        steps = (['Choose Reset HelixSR setup and review the file list. Then refresh and install HelixSR again.',
+                  'Scaler only added files, so the game\'s own files stay unchanged. The old Scaler files and settings are removed; '
+                  'a settings file you changed is saved in the reset archive with the old record.']
+                 if route == 'optiscaler' else
+                 ['Choose Reset HelixSR setup and review the file list. Then verify game files in Steam, refresh, and reinstall HelixSR.',
+                  'Current game files are kept unchanged. Only unchanged files added by HelixSR are removed; old records and saved originals are archived.'])
     elif game.get('reset_reason'):
         action, headline, steps = 'review', 'Finish recovery before resetting', [game['reset_reason']]
     elif report.get('can_repair'):
