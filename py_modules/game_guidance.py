@@ -25,6 +25,20 @@ def setup_guidance(game):
     if pragmata and route == 'optiscaler':
         notes.append('PRAGMATA requires a compatible REFramework build for Scaler. Without it the game can exit during startup. Add REFramework loader can add the latest nightly; an existing dinput8.dll is kept and not verified. On a tested Steam Deck the DLL alone was enough; only if the game still exits at startup, add the dinput8 override alongside dxgi with Add dinput8 launch option (only if needed). Keep existing mods and launch options. Game updates can require a newer REFramework build.')
         links.append(dict(label='PRAGMATA setup guide', url=PRAGMATA_GUIDE))
+    proxy = game.get('scaler_proxy') if isinstance(game.get('scaler_proxy'), dict) else {}
+    if proxy.get('game') and route == 'optiscaler':
+        if proxy.get('mismatch'):
+            notes.append(f"{proxy['game']}: this install loads Scaler as {proxy['file']}. The tested Steam Deck setup uses "
+                         f"{proxy['needed']}, which this plugin now installs for new installs. To switch, close the game, "
+                         "choose Remove and restore originals, delete any winmm.dll you copied in yourself, then install HelixSR again "
+                         "and review the launch option.")
+        else:
+            notes.append(f"{proxy['game']}: HelixSR installs Scaler as {proxy['file']} instead of dxgi.dll, the setup a Steam Deck "
+                         f"tester used. Select DirectX 12 in the game, then review the launch option, which adds "
+                         f"WINEDLLOVERRIDES=\"{proxy['dll']}=n,b\" and " + ' '.join(proxy.get('env') or []) + ". "
+                         "Only apply this override if you know what you are doing. If you copied a winmm.dll in yourself, delete it "
+                         "before installing; HelixSR never overwrites another tool's file. "
+                         + ('' if proxy.get('tested') else "This plugin's own winmm.dll install has not been checked on a Steam Deck yet."))
     if game.get('awareness_deferred'):
         action, headline, steps = 'inspect', 'Checking this game before installation', ['Wait for the selected game details to finish loading.']
     elif report.get('can_reset'):
@@ -58,7 +72,9 @@ def setup_guidance(game):
         override = ((game.get('optiscaler') or {}).get('setup') or {}).get('override', 'unknown')
         if override != 'correct':
             action, headline = 'launch', 'Files installed. Finish Proton launch setup'
-            steps = ['Review the Proton proxy launch option below. Keep other launch options and any extra game-specific loader requirements.',
+            steps = ['Review the Proton proxy launch option below. Keep other launch options and any extra game-specific loader requirements.'
+                     + (f" For {proxy['game']} it adds WINEDLLOVERRIDES=\"{proxy['dll']}=n,b\" and " + ' '.join(proxy['env'])
+                        + '; select DirectX 12 in the game first.' if proxy.get('game') and proxy.get('env') else ''),
                      "For this plugin's current Scaler route, launch in DirectX 12 and select a supported DLSS, FSR or XeSS input. The input name is not the output backend."]
         else:
             action, headline = 'play', 'Files installed. Check the in-game settings next'

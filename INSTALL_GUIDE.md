@@ -14,7 +14,7 @@ HelixSR 2.0 restores DLSS frame generation through Scaler. Select Light or Full,
 
 ## Installation error mentioning LICENSE-APACHE-2.0
 
-**Latest:** Decky **0.1.47** includes **HLX FSR 4 (AMD FSR 4.1.2 Lite)** through the reviewed **HelixSR 3.3.0** release, with **HLX FSR 4 Full** as a Scaler upscaler choice. The 3.2.0 prerelease is no longer offered. Install [HelixSR-Decky-0.1.47.zip](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.47/HelixSR-Decky-0.1.47.zip) from the [v0.1.47 release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.47). Select the HLX model explicitly; Model E / HelixSR 2.0.0 remains the default. SteamOS gameplay, image quality, performance and frame generation with HLX remain unverified. See [installation, testing and rollback](docs/hlx-fsr.md). Desktop 0.1.21 changes are included in source; no 0.1.21 AppImage is published.
+**Latest:** Decky **0.1.48** includes **HLX FSR 4 (AMD FSR 4.1.2 Lite)** through the reviewed **HelixSR 3.3.0** release, with **HLX FSR 4 Full** as a Scaler upscaler choice. The 3.2.0 prerelease is no longer offered. Install [HelixSR-Decky-0.1.48.zip](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.48/HelixSR-Decky-0.1.48.zip) from the [v0.1.48 release](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/tag/v0.1.48). Select the HLX model explicitly; Model E / HelixSR 2.0.0 remains the default. SteamOS gameplay, image quality, performance and frame generation with HLX remain unverified. See [installation, testing and rollback](docs/hlx-fsr.md). Desktop 0.1.21 changes are included in source; no 0.1.21 AppImage is published.
 
 Decky **0.1.36** reuses the library list when opening dropdowns, selects **HelixSR 2.0.0** by default and offers a verified repair for missing managed files. **Refresh library and status** still rescans the library. Older releases are labeled explicitly, and package review is explained separately from game installation warnings. Frame-generation controls do not establish gameplay compatibility; see [settings and validation limits](UPGRADE_2.0.md).
 
@@ -26,7 +26,7 @@ HelixSR Decky manages HelixSR files for supported Windows DirectX 12 games on St
 
 1. Finish any Steam game download or update. Close the game you want to modify.
 2. Open the Steam power menu and choose **Switch to Desktop**.
-3. Download the [Decky 0.1.47 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.47/HelixSR-Decky-0.1.47.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
+3. Download the [Decky 0.1.48 install ZIP](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases/download/v0.1.48/HelixSR-Decky-0.1.48.zip). When browsing [release Assets](https://github.com/dawoodtogoo2020-code/HelixSR-Decky/releases), choose **HelixSR-Decky-VERSION.zip**, where VERSION matches the release. Do not select an older **-source.zip**, **-source.tar.gz**, GitHub's **Source code (zip)** or **Code → Download ZIP**. Those are developer files without the compiled plugin frontend. The plugin is distributed through GitHub and is currently not listed in the Decky Store.
 4. Keep the plugin ZIP in **Downloads** and leave it zipped. The next steps select that ZIP directly inside Decky.
 
 ## 2. Install Decky Loader if needed
@@ -105,7 +105,7 @@ The **HelixSR model** dropdown offers Model E and HLX FSR 4 (FSR 4.1.2 Lite). It
 1. Launch the game's **DirectX 12** version. Native Linux, Vulkan-only, DirectX 11 and 32-bit games are unsupported by this workflow. **God of War (2018) is DirectX 11 only**, so HelixSR cannot run in it. Having DLSS files does not change its renderer, and neither OptiScaler nor a DX12 launch option adds DirectX 12 support. Use the game's built-in upscaling instead. If an earlier plugin installed HelixSR, Disable or Remove can restore recorded originals after the normal file, Steam build and running-game checks pass. [Official game requirements](https://store.steampowered.com/app/1593500/).
 2. For **Native FSR 3.1 replacement**, choose **AMD FSR** in the game. That selection reaches the replaced native upscaler.
 3. For **OptiScaler proxy**, select the supported input shown for that game, commonly **DLSS**, or a supported XeSS/FSR input. OptiScaler forwards that input into HelixSR. The DLSS option is the game input; HelixSR executes DLSS Model E through its own shaders rather than NVIDIA's native runtime.
-4. For a Steam OptiScaler game, use **Review Proton proxy launch option** if required. Review the proposed `WINEDLLOVERRIDES="dxgi=n,b"` change and confirm it once. The plugin preserves your other launch options and verifies the saved change. For Heroic or Lutris, apply the shown override in that launcher's settings instead.
+4. For a Steam OptiScaler game, use **Review Proton proxy launch option** if required. Review the proposed `WINEDLLOVERRIDES="dxgi=n,b"` change and confirm it once. For Red Dead Redemption 2 it is `WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0` instead; see [Red Dead Redemption 2](#red-dead-redemption-2). The plugin preserves your other launch options and verifies the saved change. For Heroic or Lutris, apply the shown override in that launcher's settings instead.
 5. Check the image, useful game audio, controller operation and stability during play. **Show diagnostics and logs** distinguishes configuration from recent runtime evidence. HelixSR 2.0 offers experimental frame generation through Scaler. A selected provider or higher FPS counter does not prove usable generated frames. Avoid combining multiple FG providers.
 
 ## 6. Control Ultimate Edition
@@ -177,6 +177,18 @@ For these Steam games the plugin shows a **REFramework loader** section:
 3. Only if the game still crashes at startup, choose **Add dinput8 launch option (only if needed)**. It adds `dinput8=n,b` to `WINEDLLOVERRIDES` (for example `WINEDLLOVERRIDES="dinput8=n,b" %command%`) and keeps your other options. The review shows the launch options before and after; existing environment variables and wrappers, such as Lossless Scaling's `~/.lsfg`, stay in place, and an existing conflicting `dinput8` rule stops the change for manual review. **Restore plugin launch-option change** undoes the plugin's change.
 
 **Remove REFramework loader** deletes only the exact file the plugin added. If you replace it with a newer REFramework yourself, the plugin leaves it alone. A game update can need a newer REFramework build: if the game stops at the Capcom logo after an update, remove the loader and add it again. REFramework is a separate open-source project by praydog. The desktop app does not add it yet; there, copy `dinput8.dll` from `REFramework.zip` next to the game executable. Add the launch option only if the game still crashes at startup.
+
+## Red Dead Redemption 2
+
+A Steam Deck tester ran Red Dead Redemption 2 with OptiScaler loaded as `winmm.dll` instead of `dxgi.dll`, with `WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%` and DirectX 12 selected in the game. From 0.1.48 the plugin sets this up for the Steam version:
+
+1. Select **DirectX 12** in the game's graphics settings, then close the game.
+2. If you copied a `winmm.dll` into the game folder yourself, delete it first. The plugin never overwrites another tool's file, so installation stops while that file is there.
+3. Install HelixSR through the Scaler route as usual. The plugin adds HelixSR's own reviewed OptiScaler as `winmm.dll`, together with the other Scaler files, so nothing needs copying in afterwards.
+4. Choose **Review Proton proxy launch option**. It adds `WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0` before `%command%` and keeps your other launch options. Only apply this override if you know what you are doing. **Restore plugin launch-option change** undoes it. If your launch options already have `SteamDeck=0` inside the override's quotes, as in `WINEDLLOVERRIDES="winmm=n,b SteamDeck=0"`, the review stops and shows the corrected form.
+5. Launch the game, select DLSS in its upscaling settings, and check HelixSR Scaler's overlay as for any Scaler game.
+
+An install made with 0.1.47 or earlier keeps `dxgi.dll`. To switch, close the game, choose **Remove and restore originals**, delete any `winmm.dll` you copied in, then install again. The plugin's own `winmm.dll` install has not been checked on a Steam Deck yet.
 
 ## Dragon's Dogma 2
 

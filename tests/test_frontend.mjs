@@ -9,6 +9,7 @@ import { LibraryRead } from "../src/libraryRead.ts";
 import { overlayShortcut } from "../src/overlayShortcut.ts";
 import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceForGame, releaseChoiceLabel } from "../src/releaseChoices.ts";
 import { errorMessage } from "../src/errorMessage.ts";
+import { proxyDll, proxyEnv, proxyNote, proxyTitle } from "../src/scalerProxy.ts";
 
 test("backend errors keep their text when Decky leaves the message empty", () => {
   const py = traceback => Object.assign(new Error(""), { name: "Python Exception", pythonTraceback: traceback });
@@ -360,6 +361,44 @@ test("the REFramework dinput8 override is added beside existing overrides withou
     assert.throws(() => overrideOptions(options, "dinput8"), /existing dinput8 override needs review/i);
   assert.throws(() => proxyOptions('WINEDLLOVERRIDES="dxgi.dll=n,b" %command%'), /existing dxgi override needs review/i,
     "dxgi acceptance is unchanged");
+});
+
+test("Red Dead Redemption 2's launch option adds winmm=n,b and SteamDeck=0 before the command", () => {
+  const env = ["SteamDeck=0"];
+  assert.equal(overrideOptions("", "winmm", env), 'WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%');
+  assert.equal(overrideOptions("-dx12", "winmm", env), 'WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command% -dx12');
+  assert.equal(overrideOptions('MANGOHUD=1 %command% -vulkan', "winmm", env), 'WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 MANGOHUD=1 %command% -vulkan');
+  assert.equal(overrideOptions('WINEDLLOVERRIDES="dxgi=n,b" %command%', "winmm", env), 'WINEDLLOVERRIDES="dxgi=n,b;winmm=n,b" SteamDeck=0 %command%');
+  assert.equal(overrideOptions('WINEDLLOVERRIDES="winmm=n,b" %command%', "winmm", env), 'WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%');
+  assert.equal(overrideOptions("SteamDeck=0", "winmm", env), 'WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%');
+  const done = 'WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%';
+  assert.equal(overrideOptions(done, "winmm", env), done, "an already configured option is left alone");
+  assert.equal(hasOverride(done, "winmm"), true);
+  for (const options of ['SteamDeck=1 %command%', '%command% SteamDeck=0', 'SteamDeck="0" %command%'])
+    assert.throws(() => overrideOptions(options, "winmm", env), /existing SteamDeck setting needs review/i, options);
+  assert.throws(() => overrideOptions('WINEDLLOVERRIDES="winmm=b" %command%', "winmm", env), /existing winmm override needs review/i);
+  // The tester's first attempt put SteamDeck=0 inside the override quotes.
+  assert.throws(() => overrideOptions('WINEDLLOVERRIDES="winmm=n,b SteamDeck=0" %command%', "winmm", env),
+    /inside the WINEDLLOVERRIDES quotes.*WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%/);
+  assert.throws(() => overrideOptions("", "winmm", ["SteamDeck=$(id)"]), /unsupported/i);
+  assert.equal(overrideOptions("", "dxgi"), 'WINEDLLOVERRIDES="dxgi=n,b" %command%', "other games get no extra assignment");
+});
+
+test("the Scaler proxy helpers follow the installed file, not just the game", () => {
+  const rdr2 = { file: "winmm.dll", dll: "winmm", needed: "winmm.dll", mismatch: false, game: "Red Dead Redemption 2",
+    env: ["SteamDeck=0"], warnings: ["Select DirectX 12 in the game before applying this launch option.", "Only apply this override if you know what you are doing."] };
+  assert.equal(proxyDll(rdr2), "winmm");
+  assert.deepEqual(proxyEnv(rdr2), ["SteamDeck=0"]);
+  assert.equal(proxyTitle(rdr2), "Enable Proton OptiScaler proxy (winmm.dll)");
+  assert.match(proxyNote(rdr2), /Red Dead Redemption 2 loads Scaler as winmm.dll\. The launch option sets WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0\./);
+  assert.match(proxyNote(rdr2), /Only apply this override if you know what you are doing/);
+  const old = { ...rdr2, file: "dxgi.dll", dll: "dxgi", mismatch: true, env: [], warnings: [] };
+  assert.equal(proxyDll(old), "dxgi");
+  assert.deepEqual(proxyEnv(old), []);
+  assert.equal(proxyNote(old), null);
+  assert.equal(proxyDll(undefined), "dxgi");
+  assert.equal(proxyTitle(null), "Enable Proton OptiScaler proxy");
+  assert.deepEqual(proxyEnv({ ...rdr2, env: ["SteamDeck=0", "BAD=$(x)"] }), ["SteamDeck=0"]);
 });
 
 test("override detection reads only literal WINEDLLOVERRIDES rules", () => {

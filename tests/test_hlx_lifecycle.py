@@ -175,6 +175,34 @@ class Lifecycle330Tests(LifecycleTests):
         self.assertFalse((self.root / 'dxgi.dll').exists())
         self.assertEqual(self.native.read_bytes(), self.original)
 
+    def test_rdr2_scaler_installs_the_reviewed_optiscaler_as_winmm(self):
+        """Deck Wizard's Red Dead Redemption 2 setup: OptiScaler as winmm.dll, no file copied in by hand."""
+        self.game.update(source='Steam', appid='1174180', name='Red Dead Redemption 2')
+        self.m.set_installation_route(self.game['id'], 'optiscaler')
+        self.install()
+        winmm = self.root / 'winmm.dll'
+        self.assertEqual(manager.sha(winmm), self.R.PINS[hlx.SCALER_DIR + 'OptiScaler.dll'][1])
+        self.assertFalse((self.root / 'dxgi.dll').exists())
+        self.assertEqual(self.m.record(self.game)['proxy'], 'winmm.dll')
+        data = self.m.assess(self.game)
+        setup = data['optiscaler']['setup']
+        self.assertEqual(setup['missing'], [])
+        self.assertTrue(any(check.startswith('winmm launch override: missing') for check in setup['checks']), setup['checks'])
+        self.game['launch_options'] = 'WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%'
+        self.assertEqual(self.m.assess(self.game)['optiscaler']['setup']['override'], 'correct')
+        winmm.unlink()
+        self.assertEqual(self.m.assess(self.game)['repair_files'], ['winmm.dll'])
+        self.act('repair')
+        self.assertEqual(manager.sha(winmm), self.R.PINS[hlx.SCALER_DIR + 'OptiScaler.dll'][1])
+        self.act('disable')
+        self.assertFalse(winmm.exists())
+        self.act('enable')
+        self.assertTrue(winmm.exists())
+        self.act('remove')
+        self.assertFalse(winmm.exists())
+        self.assertFalse((self.root / 'dxgi.dll').exists())
+        self.assertEqual(self.native.read_bytes(), self.original)
+
     def test_direct_install_uses_the_330_runtime_without_full(self):
         self.install()
         self.assertEqual(manager.sha(self.native), self.R.OUTPUT_SHA256)

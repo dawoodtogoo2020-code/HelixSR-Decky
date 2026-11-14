@@ -103,7 +103,8 @@ def configuration(path):
         return {}, 'Configuration needs review: ' + str(exc)[:200]
 
 
-def override_status(options):
+def override_status(options, dll='dxgi', env=()):
+    """Report the native-first override for one proxy DLL and any required assignments."""
     if re.search(r'[$`\n\r]|&&|\|\||[<>]', options):
         return 'unknown'
     try:
@@ -125,12 +126,37 @@ def override_status(options):
         names = [n.strip().lower().removesuffix('.dll') for n in names.split(',')]
         if '*' in names:
             return 'unknown'
-        if 'dxgi' in names:
+        if dll in names:
             rules.append(modes.replace(' ', '').lower())
-    return 'correct' if rules == ['n,b'] else 'conflict' if rules else 'missing'
+    state = 'correct' if rules == ['n,b'] else 'conflict' if rules else 'missing'
+    # Assignments only reach the game before %command%; after it they are game arguments.
+    leading = tokens[:tokens.index('%command%')] if '%command%' in tokens else tokens
+    if state == 'correct' and any(assignment not in leading for assignment in env):
+        return 'incomplete'
+    return state
 
 
-def setup_report(target, route, options, proxy_files=()):
+def proxy_names(proxy):
+    """The proxy file, its override name and its required assignments, from scaler_proxy.status()."""
+    proxy = proxy if isinstance(proxy, dict) else {}
+    name = proxy.get('file') if proxy.get('file') in ('dxgi.dll', 'winmm.dll') else 'dxgi.dll'
+    env = tuple(a for a in proxy.get('env') or () if isinstance(a, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_.-]*', a))
+    return name, name[:-len('.dll')], env
+
+
+def launch_check(launch, dll, env):
+    label = 'DXGI' if dll == 'dxgi' else dll
+    if launch == 'incomplete':
+        return f'{label} launch override is set, but the launch options also need ' + ' '.join(env) + ' before %command%.'
+    return f'{label} launch override: ' + launch + '. Review the proxy launch option in Steam or your launcher.'
+
+
+def remap_required(required, name):
+    return tuple(name if item == 'dxgi.dll' else item for item in required)
+
+
+def setup_report(target, route, options, proxy_files=(), proxy=None):
+    proxy_file, proxy_dll, proxy_env = proxy_names(proxy)
     directory = Path(target) if target else None
     if directory and (directory.is_file() or directory.suffix.lower() == '.dll'):
         directory = directory.parent
@@ -150,7 +176,7 @@ def setup_report(target, route, options, proxy_files=()):
                 record = json.loads(marker.read_text())
                 installed = record.get('helixsr')
                 if installed in ('3.2.0', '3.3.0') and (record.get('variant') or {}).get('id') == 'hlx-fsr4-1-2':
-                    return _hlx_report(directory, route, options, values, error, installed)
+                    return _hlx_report(directory, route, options, values, error, installed, proxy)
                 modern = installed in ('1.9.3', '2.0.0')
                 modern20 = installed == '2.0.0'
         except (OSError, ValueError, AttributeError):
@@ -170,8 +196,9 @@ def setup_report(target, route, options, proxy_files=()):
     fg_configured = None if modern20 and error else (modern20 and values.get('FGInput', '').lower() == 'nvngxfg'
                      and values.get('FGNvngxReplacement', '').lower() == 'helixsr'
                      and values.get('FrameGenEnabled', 'auto').lower() not in ('false', 'off', '0'))
+    required = remap_required(required, proxy_file)
     missing = [name for name in required if not directory or not (directory / name).is_file()]
-    launch = override_status(options)
+    launch = override_status(options, proxy_dll, proxy_env)
     key = values.get('ShortcutKey', 'auto')
     shortcut = 'Insert (default)' if key.lower() == 'auto' else 'overlay shortcut disabled' if key == '-1' else 'configured ShortcutKey=' + key
     checks = []
@@ -187,9 +214,10 @@ def setup_report(target, route, options, proxy_files=()):
         elif not configured:
             checks.append('HelixSR backend or provider paths differ. Review Update HelixSR to restore the managed route while retaining other settings.')
         if launch != 'correct':
-            checks.append('DXGI launch override: ' + launch + '. Review the proxy launch option in Steam or your launcher.')
-        if not any(Path(p).parent == directory and Path(p).name.lower() == 'dxgi.dll' for p in proxy_files):
-            checks.append('OptiScaler DXGI proxy identity has not been detected in the target folder.')
+            checks.append(launch_check(launch, proxy_dll, proxy_env))
+        if not any(Path(p).parent == directory and Path(p).name.lower() == proxy_file for p in proxy_files):
+            checks.append('OptiScaler DXGI proxy identity has not been detected in the target folder.' if proxy_dll == 'dxgi' else
+                          f'OptiScaler {proxy_file} proxy identity has not been detected in the target folder.')
         if values.get('EnableDlssInputs', '').lower() in ('false', 'off', '0'):
             checks.append('DLSS input is disabled in OptiScaler.ini. Review EnableDlssInputs before expecting the game to offer DLSS.')
         if values.get('UseFakenvapi', '').lower() in ('false', 'off', '0') or values.get('OverrideNvapiDll', '').lower() in ('false', 'off', '0'):
@@ -223,7 +251,7 @@ def setup_report(target, route, options, proxy_files=()):
                                    'not selected; runtime unknown' if modern20 else 'not provided by this release'))
 
 
-def _hlx_report(directory, route, options, values, error, version='3.2.0'):
+def _hlx_report(directory, route, options, values, error, version='3.2.0', proxy=None):
     """Report the configured SR and FG providers without promising runtime success."""
     from hlx_fsr_release import FULL_NAME, RELEASES
     release = RELEASES[version]
@@ -231,9 +259,10 @@ def _hlx_report(directory, route, options, values, error, version='3.2.0'):
     direct = route == 'direct'
     upscaler = 'amd_fidelityfx_upscaler_dx12.dll'
     amd = 'amd_fidelityfx_upscaler_dx12.amd.dll'
-    required = (upscaler, amd) if direct else tuple(dest for _, dest in scaler_pairs()) + ('OptiScaler.ini',)
+    proxy_file, proxy_dll, proxy_env = proxy_names(proxy)
+    required = (upscaler, amd) if direct else remap_required(tuple(dest for _, dest in scaler_pairs()) + ('OptiScaler.ini',), proxy_file)
     missing = [name for name in required if not (directory / name).is_file()]
-    launch = override_status(options)
+    launch = override_status(options, proxy_dll, proxy_env)
     shortcut_key = values.get('ShortcutKey', 'auto')
     shortcut = ('Insert (default)' if shortcut_key.lower() == 'auto' else
                 'overlay shortcut disabled' if shortcut_key == '-1' else 'configured ShortcutKey=' + shortcut_key)
@@ -256,7 +285,7 @@ def _hlx_report(directory, route, options, values, error, version='3.2.0'):
                       'HLX writes OptiScaler/HLX_FSR.log, or OptiScaler.log when OptiScaler file logging is on (LogToFile=true; also set LogLevel=2, '
                       'because the default Trace level grows too fast for the status monitor). Turn file logging off for benchmarks.')
         if launch != 'correct':
-            checks.append('DXGI launch override: ' + launch + '. Review the proxy launch option in Steam or your launcher.')
+            checks.append(launch_check(launch, proxy_dll, proxy_env))
         if error:
             checks.append(error)
         fg = None if error else (values.get('FGInput', '').lower() == 'upscaler'

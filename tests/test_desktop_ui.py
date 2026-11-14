@@ -442,6 +442,17 @@ class DesktopWidgetTests(unittest.TestCase):
                 self.assertIn('No supported installation route', copied)
                 self.assertNotIn('dxgi=n,b', copied)
 
+    def test_rdr2_launch_guidance_names_winmm_steamdeck_and_the_warnings(self):
+        self.window.game.update(route='optiscaler', launch_options='', scaler_proxy=dict(
+            file='winmm.dll', dll='winmm', needed='winmm.dll', mismatch=False, game='Red Dead Redemption 2',
+            env=['SteamDeck=0', 'BAD=$(id)'], warnings=['Only apply this override if you know what you are doing.']))
+        self.window.copy_launch()
+        copied = self.app.clipboard().text()
+        self.assertIn('WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%', copied)
+        self.assertIn('Only apply this override if you know what you are doing.', copied)
+        self.assertNotIn('dxgi=n,b', copied)
+        self.assertNotIn('$(id)', copied)
+
     def test_desktop_help_uses_desktop_guide(self):
         from desktop.app import GUIDE
         self.assertTrue(GUIDE.endswith('/DESKTOP_GUIDE.md'))

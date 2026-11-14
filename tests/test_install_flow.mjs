@@ -1088,3 +1088,29 @@ test("the REFramework loader needs no launch option; the override stays an optio
   await untested.ready();
   assert.match(untested.text(untested.render()), /This game has not been checked with it yet/);
 });
+
+test("Red Dead Redemption 2 reviews the winmm launch option with SteamDeck=0 and the tester's warnings", async () => {
+  let saved = "";
+  const h = harness({ owned_launch_options: () => null,
+    prepare_launch_options: (_id, before, after) => ({ nonce: "n", before, after, restore: false }),
+    finalize_launch_options: () => true });
+  h.context.SteamClient = { Apps: {
+    RegisterForAppDetails: (_appid, listener) => { Promise.resolve().then(() => listener({ strLaunchOptions: saved })); return { unregister() {} }; },
+    SetAppLaunchOptions: (_appid, value) => { saved = value; } } };
+  const warnings = ["Select DirectX 12 in the game before applying this launch option.", "Only apply this override if you know what you are doing."];
+  Object.assign(h.game, { id: "rdr2", name: "Red Dead Redemption 2", source: "Steam", appid: "1174180", route: "optiscaler",
+    scaler_proxy: { file: "winmm.dll", dll: "winmm", needed: "winmm.dll", mismatch: false, game: "Red Dead Redemption 2",
+      env: ["SteamDeck=0"], warnings, tested: false } });
+  await h.ready(); h.openAdvanced();
+  assert.match(h.text(h.render()), /Red Dead Redemption 2 loads Scaler as winmm\.dll\. The launch option sets WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0\./);
+  const review = h.walk(h.render(), n => n.type === "ButtonItem" && h.text(n) === "Review Proton proxy launch option")[0];
+  review.props.onClick(); await flush();
+  const dialog = h.currentModal().element;
+  assert.equal(dialog.props.strTitle, "Enable Proton OptiScaler proxy (winmm.dll)");
+  const description = h.text(dialog.props.strDescription);
+  assert.match(description, /After:\s+WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%/);
+  for (const warning of warnings) assert.ok(description.includes(warning), warning);
+  dialog.props.onOK(); await flush(); await flush();
+  assert.equal(saved, 'WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%');
+  assert.equal(h.count("finalize_launch_options"), 1);
+});

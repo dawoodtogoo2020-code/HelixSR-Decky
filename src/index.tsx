@@ -17,6 +17,7 @@ import { HelixSettings, HelixSettingsState } from "./HelixSettings";
 import { overlayShortcut } from "./overlayShortcut";
 import { DEFAULT_RELEASE_CHOICE, releaseChoiceExplanation, releaseChoiceForGame, releaseChoiceLabel } from "./releaseChoices";
 import { errorMessage } from "./errorMessage";
+import { proxyDll, proxyEnv, proxyNote, proxyTitle, ScalerProxy } from "./scalerProxy";
 
 declare const DeckyBackend: { callable: <A extends unknown[], R>(route: string) => (...args: A) => Promise<R>;
   addEventListener?: (event: string, listener: (...args: any[]) => void) => unknown;
@@ -58,7 +59,7 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
   reasons: string[]; route: string | null; inputs: string[]; managed: boolean; enabled: boolean;
   legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
   main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
-  hlx_direct_supported?: boolean | null; hlx_scaler_reason?: string | null;
+  hlx_direct_supported?: boolean | null; hlx_scaler_reason?: string | null; scaler_proxy?: ScalerProxy | null;
   executable_choices?: { path: string; dx12: boolean }[]; selected_executable?: string; executable_selection_needed?: boolean;
   menu_labels?: { available: boolean; supported: boolean; enabled: boolean; reason: string; label: string; experimental: boolean };
   reframework?: ReframeworkState | null;
@@ -633,10 +634,14 @@ function Content() {
         if (mountedRef.current && selectedRef.current === id) setGame(updated);
       }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
   }
-  async function launchChange(restore = false, dll: OverrideDll = "dxgi") {
+  async function launchChange(restore = false, loader?: OverrideDll) {
     if (!game?.appid) return;
+    // Scaler's proxy is dxgi.dll for most games; a few install it under another name (scalerProxy.ts).
+    const dll: OverrideDll = loader ?? proxyDll(game.scaler_proxy);
+    const env = loader ? [] : proxyEnv(game.scaler_proxy);
+    const proxy = dll !== "dinput8";
     if (!restore && (game.compatibility !== "candidate" || game.installation_status?.can_modify === false)) {
-      setError(`Resolve this game's review reasons before enabling the ${dll === "dxgi" ? "Proton proxy" : "REFramework loader override"}.`);
+      setError(`Resolve this game's review reasons before enabling the ${proxy ? "Proton proxy" : "REFramework loader override"}.`);
       return;
     }
     const appid = Number(game.appid);
@@ -653,12 +658,14 @@ function Content() {
         if (!receipt || receipt.after !== before) throw new Error("Launch options changed outside the plugin. Review them in Steam.");
         after = receipt.before;
       } else {
-        after = overrideOptions(before, dll);
-        if (after === before) { toaster.toast({ title: "HelixSR Decky", body: dll === "dxgi" ? "OptiScaler proxy launch option is already configured" : "REFramework loader launch option is already configured" }); return; }
+        after = overrideOptions(before, dll, env);
+        if (after === before) { toaster.toast({ title: "HelixSR Decky", body: proxy ? "OptiScaler proxy launch option is already configured" : "REFramework loader launch option is already configured" }); return; }
       }
     } catch (e) { setError(errorMessage(e)); return; }
-    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={restore ? "Restore previous launch options" : dll === "dxgi" ? "Enable Proton OptiScaler proxy" : "Enable REFramework loader (dinput8)"}
-      strDescription={<div style={{ overflowWrap: "anywhere" }}><p>Before: {before || "empty"}</p><p>After: {after || "empty"}</p></div>}
+    const warnings = !restore && proxy && !loader ? game.scaler_proxy?.warnings || [] : [];
+    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={restore ? "Restore previous launch options" : proxy ? proxyTitle(game.scaler_proxy) : "Enable REFramework loader (dinput8)"}
+      strDescription={<div style={{ overflowWrap: "anywhere" }}><p>Before: {before || "empty"}</p><p>After: {after || "empty"}</p>
+        {warnings.map((warning, index) => <p key={index}><strong>{warning}</strong></p>)}</div>}
       onOK={() => { if (!beginReview()) return; void run(async () => {
         const current = await liveLaunchOptions(appid);
         if (current !== before) throw new Error("Live launch options changed since preview");
@@ -878,6 +885,7 @@ function Content() {
         {(game.optiscaler.setup?.checks || []).join("\n\n")}
       </div></PanelSectionRow>}
       {game.route === "optiscaler" && game.appid && <>
+        {proxyNote(game.scaler_proxy) && <PanelSectionRow><div className="helix-muted" style={infoStyle}>{proxyNote(game.scaler_proxy)}</div></PanelSectionRow>}
         {!(game.managed && game.enabled) && <PanelSectionRow><ButtonItem layout="below" disabled={disabled || game.compatibility !== "candidate" || game.installation_status?.can_modify === false} onClick={() => void interact(() => launchChange())}>Review Proton proxy launch option</ButtonItem></PanelSectionRow>}
         <PanelSectionRow><ButtonItem layout="below" disabled={disabled} onClick={() => void interact(() => launchChange(true))}>Restore plugin launch-option change</ButtonItem></PanelSectionRow>
       </>}

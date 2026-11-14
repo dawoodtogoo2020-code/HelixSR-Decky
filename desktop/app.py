@@ -5,6 +5,7 @@ import argparse
 import html
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -971,9 +972,15 @@ class MainWindow(QMainWindow):
             guidance = ("Select AMD FSR in the game's upscaling settings. This native replacement does not require an additional proxy launch override. "
                         "Preserve your existing Steam or launcher launch options.\nExisting options:\n" + before)
         elif game.get("route") == "optiscaler":
-            guidance = ("Preserve your existing Steam or launcher launch options. For the OptiScaler proxy, merge dxgi=n,b into WINEDLLOVERRIDES manually. "
-                        "For empty Steam options use: WINEDLLOVERRIDES=\"dxgi=n,b\" %command%\n"
-                        "Do not overwrite an existing dxgi rule without reviewing it.\nExisting options:\n" + before)
+            # Most games load OptiScaler as dxgi.dll; some, such as Red Dead Redemption 2, as winmm.dll (scaler_proxy.py).
+            proxy = game.get('scaler_proxy') or {}
+            dll = 'winmm' if proxy.get('dll') == 'winmm' else 'dxgi'
+            env = ''.join(' ' + a for a in proxy.get('env') or [] if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_.-]*', str(a)))
+            guidance = (f"Preserve your existing Steam or launcher launch options. For the OptiScaler proxy, merge {dll}=n,b into WINEDLLOVERRIDES manually. "
+                        f"For empty Steam options use: WINEDLLOVERRIDES=\"{dll}=n,b\"{env} %command%\n"
+                        f"Do not overwrite an existing {dll} rule without reviewing it.\n"
+                        + ''.join(w + '\n' for w in proxy.get('warnings') or [] if isinstance(w, str))
+                        + "Existing options:\n" + before)
             setup = game.get('optiscaler', {}).get('setup') or {}
             guidance += '\n\nSetup checks:\n' + '\n\n'.join(setup.get('checks', []))
             guidance += '\n\nFull OptiScaler guide: ' + setup.get('guide', PROJECT + '/blob/main/OPTISCALER_GUIDE.md')

@@ -16,6 +16,8 @@ For a managed game, **Recorded route** identifies its existing installation. New
    WINEDLLOVERRIDES="dxgi=n,b" %command%
    ```
 
+   Red Dead Redemption 2 is the exception: the plugin installs OptiScaler there as `winmm.dll`, and the launch option is `WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%`. Select DirectX 12 in the game first. See [Red Dead Redemption 2](INSTALL_GUIDE.md#red-dead-redemption-2).
+
    Preserve existing launch options. Do not paste this over an existing wrapper or a conflicting DXGI rule. Ambiguous shell syntax requires manual review. Decky saves a recovery intent before changing Steam, verifies the saved value, and lets you resume an interrupted change or restore its exact owned change. It refuses to overwrite options changed elsewhere.
 5. Launch the game in DX12. Open OptiScaler with **Insert**, unless you changed `ShortcutKey`. Map Insert to a Steam Input back button if needed. Select **Upscaling → Upscalers → FFX → FSR HelixSR (3.1.5)**. The upstream menu name includes the FSR integration version; it is not the DLSS source model's version.
 6. Enable an input that this game supports. If DLSS is unavailable, use supported FSR or XeSS input if offered. Seeing “DLSS” in the game's menu alone does not confirm HelixSR output. Check the selected FFX backend and a fresh `helixsr.log`, then inspect gameplay for artifacts and stability.

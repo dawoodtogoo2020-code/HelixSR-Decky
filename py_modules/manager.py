@@ -33,6 +33,7 @@ import menu_labels
 import modern_release
 import helix20_release
 import hlx_fsr_release
+import scaler_proxy
 
 def release_adapter(record):
     if hlx_fsr_release.modern(record):
@@ -881,7 +882,8 @@ class Manager:
             elif installed['route'] == 'optiscaler' and is_modern(package_record):
                 game_target = Path(installed['target'])
                 pairs = [(str((game_target / dest).relative_to(root)), source)
-                         for source, dest in release_adapter(package_record).scaler_pairs()
+                         for source, dest in scaler_proxy.remap(release_adapter(package_record).scaler_pairs(),
+                                                                scaler_proxy.recorded(installed))
                          if not dest.endswith('.ini')]
             elif installed['route'] == 'optiscaler':
                 game_target = Path(installed['target'])
@@ -889,7 +891,7 @@ class Manager:
                 pairs = [(str((target / name).relative_to(root)), DLL)
                          for name in ('helixsr.dll', 'helixsr_upscaler.dll')]
                 pairs += [(str((target / name).relative_to(root)), name) for name in NETWORK]
-                pairs += [(str((game_target / 'dxgi.dll').relative_to(root)), 'optiscaler/OptiScaler.dll'),
+                pairs += [(str((game_target / scaler_proxy.recorded(installed)).relative_to(root)), 'optiscaler/OptiScaler.dll'),
                           (str((game_target / 'fakenvapi.dll').relative_to(root)), 'optiscaler/fakenvapi.dll'),
                           (str((target / 'amd_fidelityfx_upscaler_dx12.amd.dll').relative_to(root)),
                            'amd-fsr/amd_fidelityfx_upscaler_dx12.dll')]
@@ -1161,8 +1163,15 @@ class Manager:
         # Symlink candidates may hide API files and must never be mutated.
         for p in targets + ([main] if main else []):
             checked_path(root, str(p.relative_to(root)))
+        proxy_status = None
+        if route == 'optiscaler':
+            try:
+                proxy_status = scaler_proxy.status(game, rec)
+            except ValueError as exc:
+                blocked.append(str(exc))
         if detailed:
-            aware = awareness(dict(game, managed=bool(rec), enabled=rec.get('enabled', False)), tree, self.home, route, target)
+            aware = awareness(dict(game, managed=bool(rec), enabled=rec.get('enabled', False), scaler_proxy=proxy_status),
+                              tree, self.home, route, target)
         else:
             # Library rows only need the compatibility assessment. Read logs,
             # shared launcher/FG settings and runtime evidence when a game is
@@ -1216,7 +1225,7 @@ class Manager:
                     dx12_confirmation_needed=(not dx11_title and route == 'optiscaler'
                                               and not (main and pe_info(main)['dx12'])
                                               and not confirmed_dx12),
-                    hlx_direct_supported=hlx_direct,
+                    hlx_direct_supported=hlx_direct, scaler_proxy=proxy_status,
                     hlx_scaler_reason=(hlx_scaler_reason([p.name for p in targets], bool(rec))
                                        if hlx_direct is False else None),
                     **aware)
@@ -2232,7 +2241,9 @@ class Manager:
                     if current:
                         # Validate migration before snapshotting or touching the game.
                         release_adapter(payload).validate_scaler_source(current)
-            names = [dest for _, dest in release_adapter(payload).scaler_pairs()] + ['OptiScaler.ini', 'HelixSR/helixsr-install.json']
+            proxy = scaler_proxy.chosen(game, rec)
+            names = [dest for _, dest in scaler_proxy.remap(release_adapter(payload).scaler_pairs(), proxy)]
+            names += ['OptiScaler.ini', 'HelixSR/helixsr-install.json']
             paths = list(rec.get('baseline', {}))
             for name in names:
                 rel = str((target / name).relative_to(root))
@@ -2266,7 +2277,7 @@ class Manager:
             return sorted({str(p.relative_to(root)) for p in paths})
         if data['route'] == 'optiscaler':
             target = Path(data['target'])
-            names = ['dxgi.dll', 'OptiScaler.ini', 'fakenvapi.dll', 'fakenvapi.ini',
+            names = [scaler_proxy.chosen(game, rec), 'OptiScaler.ini', 'fakenvapi.dll', 'fakenvapi.ini',
                      'HelixSR/helixsr.dll', 'HelixSR/helixsr_upscaler.dll',
                      'HelixSR/amd_fidelityfx_upscaler_dx12.amd.dll', 'HelixSR/helixsr-install.json']
             names += ['HelixSR/' + n for n in NETWORK]
@@ -2397,6 +2408,9 @@ class Manager:
                                 baseline=baseline, enabled=False, version=None)
                 if data['route'] == 'optiscaler':
                     previous['selected_executable'] = data['selected_executable']
+                    # Most games load OptiScaler as dxgi.dll; a few need another name (scaler_proxy.py).
+                    if scaler_proxy.for_game(game) != scaler_proxy.DEFAULT:
+                        previous['proxy'] = scaler_proxy.for_game(game)
             if label_plan:
                 rel = label_plan['path']
                 expected = (menu_labels.digest(label_plan['original']) if action == 'labels_enable'
@@ -2859,7 +2873,7 @@ class Manager:
                 }, indent=2) + '\n').encode())
         elif is_modern(package_record):
             target = Path(rec['target'])
-            for source, dest in release_adapter(package_record).scaler_pairs():
+            for source, dest in scaler_proxy.remap(release_adapter(package_record).scaler_pairs(), scaler_proxy.recorded(rec)):
                 if not dest.endswith('.ini'):
                     sources[str((target / dest).relative_to(root))] = ('file', package_path / source)
             install_rel = str((target / 'HelixSR/helixsr-install.json').relative_to(root))
@@ -2869,7 +2883,7 @@ class Manager:
             }, indent=2) + '\n').encode())
         else:
             target = Path(rec['target'])
-            pairs = [('optiscaler/OptiScaler.dll', 'dxgi.dll'),
+            pairs = [('optiscaler/OptiScaler.dll', scaler_proxy.recorded(rec)),
                      ('optiscaler/fakenvapi.dll', 'fakenvapi.dll'),
                      (DLL, 'HelixSR/helixsr.dll'), (DLL, 'HelixSR/helixsr_upscaler.dll'),
                      ('amd-fsr/amd_fidelityfx_upscaler_dx12.dll',
@@ -2968,7 +2982,7 @@ class Manager:
             configured = (adapter.configuration(template if source is None else source, template, previous_version=previous_version)
                           if helix20_release.modern(package_record) or hlx_fsr_release.modern(package_record) else
                           adapter.configuration(template if source is None else source, template))
-            pairs = release_adapter(package_record).scaler_pairs()
+            pairs = scaler_proxy.remap(release_adapter(package_record).scaler_pairs(), scaler_proxy.recorded(rec))
             modern_paths = {str((target / dest).relative_to(root)) for _, dest in pairs}
             modern_paths |= {str((target / name).relative_to(root)) for name in ('OptiScaler.ini', 'HelixSR/helixsr-install.json')}
             # Retire only old owned payloads through the same journal and saved originals.
@@ -3003,7 +3017,7 @@ class Manager:
                 settings.append(('FfxDx12FGPath', 'Z:' + str(target / 'HelixSR' / AMD_FG).replace('/', '\\')))
             from optiscaler_setup import pin_config
             configured_source = pin_config(source, template, settings)
-            for source, dest in [('optiscaler/OptiScaler.dll', 'dxgi.dll'),
+            for source, dest in [('optiscaler/OptiScaler.dll', scaler_proxy.recorded(rec)),
                                  ('optiscaler/fakenvapi.dll', 'fakenvapi.dll'),
                                  (DLL, 'HelixSR/helixsr.dll'), (DLL, 'HelixSR/helixsr_upscaler.dll'),
                                  ('amd-fsr/amd_fidelityfx_upscaler_dx12.dll', 'HelixSR/amd_fidelityfx_upscaler_dx12.amd.dll')]:
