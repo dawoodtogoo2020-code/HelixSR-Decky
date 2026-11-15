@@ -591,6 +591,29 @@ function Content() {
         await refresh(true);
       }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
   }
+  // A native install moves to Scaler in one reviewed step: Remove restores the saved originals,
+  // then the route changes. Installing afterwards keeps the same model and release.
+  async function switchToScaler() {
+    if (!game) return;
+    const id = game.id, model = variant, choice = releaseChoice;
+    const p = await run(() => previewAction(id, "remove", false));
+    if (!p) return;
+    openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle={`Switch to Scaler: ${p.name}`}
+      strDescription={<div style={{ overflowWrap: "anywhere" }}>
+        <p>HelixSR restores the files saved before the native install, then sets this game to Scaler. Then choose Install HelixSR for this game to add Scaler with the same model.</p>
+        <p>{p.warning}</p>
+        <p>Files: {p.files.join(", ") || "None"}</p>
+      </div>} strOKButtonText="Restore originals and switch" strCancelButtonText="Cancel"
+      onOK={() => { if (!beginReview()) return; void run(async () => {
+        rememberModel(model, choice);
+        try {
+          await applyAction(p.token);
+          const updated = await setInstallationRoute(id, "optiscaler");
+          if (mountedRef.current && selectedRef.current === id) setGame(updated);
+          toaster.toast({ title: "Switched to Scaler", body: "Choose Install HelixSR for this game to finish. Confirm DX12 first if the panel asks." });
+        } finally { await refresh(true); }
+      }).finally(() => { reviewApplying = false; finishInteraction(); }); }} />);
+  }
   async function saveHelixSettings(changes: Record<string, string | number>) {
     if (!game?.helix_settings?.revision) return;
     const id = game.id;
@@ -858,8 +881,13 @@ function Content() {
           const updated = await run(() => setInstallationRoute(id, game.route === 'direct' ? 'optiscaler' : 'auto'));
           if (updated && selectedRef.current === id) setGame(updated);
         })}>{game.route === 'direct' ? 'Use Scaler for frame generation, settings and overlay' : 'Use automatic installation route'}</ButtonItem></PanelSectionRow>}
-      {game.managed && game.route === 'direct' && <PanelSectionRow><div className="helix-muted">
-        Select AMD FSR in the game for the native input route. To use Scaler settings, remove HelixSR to restore the original files, choose the Scaler route, then install again.</div></PanelSectionRow>}
+      {game.managed && game.route === 'direct' && <>
+        <PanelSectionRow><div className="helix-muted">
+          Select AMD FSR in the game for the native input route. For Scaler's settings, frame generation and overlay, switch this game to Scaler: HelixSR restores the original files, then you install again with the same model.</div></PanelSectionRow>
+        <PanelSectionRow><ButtonItem layout="below"
+          disabled={disabled || !canRestore(game) || !!game.installation_status?.running || !!(selectedModel?.routes && !selectedModel.routes.includes("optiscaler"))}
+          onClick={() => void interact(() => switchToScaler())}>Switch this game to Scaler</ButtonItem></PanelSectionRow>
+      </>}
       {game.managed && game.route === 'direct' && <PanelSectionRow><ToggleField label="Show upscaler overlay in game" disabled checked={false}
         description={OVERLAY_NATIVE_NOTE} onChange={() => {}} /></PanelSectionRow>}
       {game.helix_settings && <HelixSettings settings={game.helix_settings}

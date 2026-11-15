@@ -23,7 +23,7 @@ For Scaler installations, open **Game settings**, then **Upscaling and frame gen
 
 HelixSR's DLSS FG route requires a DirectX 12 game with DLSS frame generation enabled in-game. Light and Full refer to frame generation, not alternative upscaling networks. Model E remains the reviewed SR model. Provider availability and performance depend on the game, GPU and Proton. Configured settings are distinct from verified runtime activity.
 
-Native FSR replacement installs the embedded upscaler only. To change to Scaler, remove the managed installation to restore originals, choose **Use Scaler for frame generation and settings**, then install. Do not mix native replacement and proxy installation files manually. Existing launch options are preserved through the plugin's reviewed launch-option flow.
+Native FSR replacement installs the embedded upscaler only. To change to Scaler, choose **Switch this game to Scaler** (from 0.1.49), which restores the originals and selects the Scaler route in one reviewed step, then install. Do not mix native replacement and proxy installation files manually. Existing launch options are preserved through the plugin's reviewed launch-option flow.
 
 Settings use the existing journal, ownership checks, atomic writes and restoration records. Stale edits, active games, Steam downloads, changed game builds, missing payloads and unmanaged collisions stop changes. Updates preserve supported settings. Bootstrap and dependency files remain included in frozen Decky and Desktop packages.
 

@@ -17,8 +17,12 @@ def setup_guidance(game):
     exe = PurePosixPath(str(game.get('selected_executable') or game.get('main_exe') or '').replace('\\', '/')).name.lower()
     dd2 = (game.get('source') == 'Steam' and str(game.get('appid')) == '2054970') or (
         exe == 'dd2.exe' and str(game.get('name', '')).casefold().replace("'", '').replace('’', '') == 'dragons dogma 2')
+    if dd2 and route == 'optiscaler' and game.get('source') == 'Steam':
+        # The REFramework loader section (reframework.py) covers the Steam version.
+        notes.append("Dragon's Dogma 2 needs REFramework's loader (dinput8.dll); OptiScaler's guide requires it for Scaler. Add REFramework loader can add the latest REFramework nightly; an existing dinput8.dll is kept and not verified. If the game still exits at startup, follow the linked game guide, including its Linux loader instructions. Do not replace an existing mod blindly. This is not a verified Steam Deck gameplay result.")
+    elif dd2 and route == 'optiscaler':
+        notes.append("Dragon's Dogma 2 needs extra setup: OptiScaler's guide requires REFramework (dinput8.dll). This app does not install or verify REFramework for a game outside Steam. Follow the linked game guide, including its Linux loader instructions, before launching. Do not replace an existing mod blindly. This is not a verified Steam Deck gameplay result.")
     if dd2 and route == 'optiscaler':
-        notes.append("Dragon's Dogma 2 needs extra setup: OptiScaler's guide requires the DD2 build of REFramework (dinput8.dll). This app does not install or verify REFramework. Follow the linked game guide, including its Linux loader instructions, before launching. Do not replace an existing mod blindly. This is not a verified Steam Deck gameplay result.")
         links.append(dict(label="Dragon's Dogma 2 setup guide", url=DD2_GUIDE))
     pragmata = (game.get('source') == 'Steam' and str(game.get('appid')) == '3357650') or (
         exe == 'pragmata.exe' and str(game.get('name', '')).casefold() == 'pragmata')

@@ -22,7 +22,7 @@ class GameGuidanceTests(unittest.TestCase):
         game = self.game()
         value = setup_guidance(game)
         self.assertIn('REFramework', value['notes'][0])
-        self.assertIn('does not install or verify', value['notes'][0])
+        self.assertIn('Add REFramework loader', value['notes'][0], "the Steam version has the loader section")
         self.assertIn('not a verified Steam Deck', value['notes'][0])
         self.assertEqual(value['links'][0]['url'], DD2_GUIDE)
         self.assertEqual(game['compatibility'], 'candidate')
@@ -35,6 +35,7 @@ class GameGuidanceTests(unittest.TestCase):
     def test_exact_imported_title_and_executable_can_show_advisory(self):
         game = self.game(source='Imported', appid=None, main_exe='/games/DD2/DD2.exe')
         self.assertTrue(setup_guidance(game)['notes'])
+        self.assertIn('does not install or verify REFramework', setup_guidance(game)['notes'][0])
         self.assertFalse(setup_guidance(dict(game, main_exe='/games/DD2/other.exe'))['notes'])
 
     def test_missing_and_ambiguous_override_need_launch_setup_not_enabled_claim(self):

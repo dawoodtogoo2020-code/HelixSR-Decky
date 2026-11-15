@@ -1114,3 +1114,53 @@ test("Red Dead Redemption 2 reviews the winmm launch option with SteamDeck=0 and
   assert.equal(saved, 'WINEDLLOVERRIDES="winmm=n,b" SteamDeck=0 %command%');
   assert.equal(h.count("finalize_launch_options"), 1);
 });
+
+test("a native HLX install switches to Scaler in one reviewed step and keeps its model", async () => {
+  const models = [
+    { id: "helixsr-model-e", label: "Model E", source: "NVIDIA", release_choices: ["reviewed-2.0.0"], routes: ["direct", "optiscaler"] },
+    { id: "hlx-fsr4-1-2", label: "HLX FSR 4", source: "AMD", release_choices: ["reviewed-3.3.0"], routes: ["direct", "optiscaler"] }
+  ];
+  const h = harness({
+    library: () => ({ ...h.library(), model_catalog: { default: models[0].id, variants: models },
+      release_choices: [{id: "reviewed-2.0.0", version: "2.0.0"}, {id: "reviewed-3.3.0", version: "3.3.0"}] }),
+    preview_action: (_id, action) => ({ token: "remove-token", action, name: h.game.name, route: "direct",
+      files: ["amd_fidelityfx_upscaler_dx12.dll"], warning: "Close the game.", select_upscaler: "AMD FSR" }),
+    apply_action: token => {
+      assert.equal(token, "remove-token");
+      Object.assign(h.game, { managed: false, enabled: false, installed_variant: undefined, installed_model: undefined });
+      return { message: "Remove completed and file hashes verified" };
+    },
+    set_installation_route: (id, route) => {
+      assert.deepEqual([id, route], ["pragmata", "optiscaler"]);
+      Object.assign(h.game, { route: "optiscaler" });
+      return h.game;
+    }
+  });
+  Object.assign(h.game, { managed: true, enabled: true, route: "direct", installed_variant: "hlx-fsr4-1-2", installed_model: "HLX FSR 4",
+    installation_status: { state: "ready", label: "Enabled", summary: "", running: false, selectable: true, can_modify: true, can_restore: true, issues: [] } });
+  await h.ready();
+  const model = () => h.walk(h.render(), n => n.type === "DropdownItem" && n.props.label === "HelixSR model")[0];
+  assert.equal(model().props.selectedOption, "hlx-fsr4-1-2");
+  const switchButton = () => h.walk(h.render(), n => n.type === "ButtonItem" && h.text(n) === "Switch this game to Scaler")[0];
+  assert.equal(switchButton().props.disabled, false);
+  switchButton().props.onClick(); await flush();
+  assert.equal(h.calls.find(c => c.route === "preview_action").args[1], "remove", "the switch is a reviewed Remove");
+  const dialog = h.currentModal().element;
+  assert.equal(dialog.props.strTitle, "Switch to Scaler: PRAGMATA");
+  assert.match(h.text(dialog.props.strDescription), /restores the files saved before the native install/);
+  assert.match(h.text(dialog.props.strDescription), /amd_fidelityfx_upscaler_dx12\.dll/);
+  dialog.props.onOK(); await flush(); await flush(); h.render(); await flush();
+  assert.equal(h.count("apply_action"), 1);
+  assert.equal(h.count("set_installation_route"), 1);
+  assert.ok(h.toasts.some(t => t.title === "Switched to Scaler"));
+  assert.equal(switchButton(), undefined, "the game is no longer a native install");
+  assert.equal(model().props.selectedOption, "hlx-fsr4-1-2", "the HLX choice survives the removal");
+  assert.equal(h.installButton().props.disabled, false);
+
+  const running = harness();
+  Object.assign(running.game, { managed: true, enabled: true, route: "direct",
+    installation_status: { state: "running", label: "Game running", summary: "", running: true, selectable: true, can_modify: false, can_restore: false, issues: [] } });
+  await running.ready();
+  const blocked = running.walk(running.render(), n => n.type === "ButtonItem" && running.text(n) === "Switch this game to Scaler")[0];
+  assert.equal(blocked.props.disabled, true, "a running game cannot switch");
+});

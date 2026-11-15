@@ -173,6 +173,10 @@ class ManagerTests(Fixtures):
         self.game['appid'] = '2246340'
         self.assertFalse(self.state()['tested'])
         self.assertIsNone(self.state()['evidence'])
+        self.game['appid'] = '2054970'
+        dd2 = self.state()
+        self.assertEqual((dd2['game'], dd2['state'], dd2['tested']), ("Dragon's Dogma 2", 'absent', False),
+                         'Deck Wizard named DD2 for the loader on 2026-11-14')
         self.game['appid'] = '1091500'
         self.assertIsNone(self.state())
         self.game.update(appid='3764200', source='Imported')

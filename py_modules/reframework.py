@@ -37,6 +37,7 @@ OVERRIDE = 'WINEDLLOVERRIDES="dinput8=n,b" %command%'
 ASSET_HOSTS = ('release-assets.githubusercontent.com', 'objects.githubusercontent.com')
 
 # Steam app IDs named by the tester. Requiem and PRAGMATA have been checked on a Steam Deck.
+# Dragon's Dogma 2 was named later (2026-11-14); OptiScaler's DD2 guide also requires REFramework.
 GAMES = {
     '3764200': dict(name='Resident Evil Requiem', tested=True,
                     evidence='A Steam Deck tester confirmed that Resident Evil Requiem needs REFramework\'s loader '
@@ -48,6 +49,7 @@ GAMES = {
                              'loader on the first try, with no launch option. In Graphics, Upscaling shows AMD FSR3 '
                              'and its description reads "Uses AMD FSR HLX FSR 4 (4.1.2)".'),
     '2638890': dict(name='Onimusha: Way of the Sword', tested=False, evidence=None),
+    '2054970': dict(name="Dragon's Dogma 2", tested=False, evidence=None),
 }
 
 
