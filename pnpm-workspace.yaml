@@ -29,3 +29,9 @@ peerDependencyRules:
   ignoreMissing:
     - react
     - react-dom
+auditConfig:
+  # GHSA-fc5q-39xc-vjpf: picomatch <=4.0.7 ReDoS from attacker-supplied globs; no fixed release yet.
+  # Build time only: @rollup/pluginutils matches this repo's own fixed patterns. Not in the plugin bundle.
+  # Remove this entry once a fixed picomatch is published and pulled in.
+  ignoreGhsas:
+    - GHSA-fc5q-39xc-vjpf
