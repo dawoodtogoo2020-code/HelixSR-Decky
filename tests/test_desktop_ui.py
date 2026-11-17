@@ -219,6 +219,31 @@ class DesktopWidgetTests(unittest.TestCase):
                 self.window.edit_helix_settings()
             self.assertEqual(seen['upscaler'], expected)
 
+    def test_hlx_341_settings_offer_helixsr_fg_with_game_setting_to_6x(self):
+        from PySide6.QtWidgets import QComboBox
+        seen = {}
+        def choose_helixsr(dialog):
+            combos = dialog.findChildren(QComboBox)
+            provider, multiplier = combos[1], combos[2]
+            seen['providers'] = [provider.itemData(i) for i in range(provider.count())]
+            provider.setCurrentIndex(provider.findData('helixsr'))
+            seen['multipliers'] = [multiplier.itemData(i) for i in range(multiplier.count())]
+            seen['enabled'] = multiplier.isEnabled()
+            multiplier.setCurrentIndex(multiplier.findData(5))
+            return QDialog.Accepted
+        self.window.game = dict(self.backend.game, helix_settings=dict(
+            available=True, revision='rev', family='hlx-fsr', upscaler='hlx-fsr', provider='off',
+            multiplier=2, overlay='off', full_available=True, fg_available=True))
+        with mock.patch.object(QDialog, 'exec', choose_helixsr), mock.patch.object(self.window, '_run') as run:
+            self.window.edit_helix_settings()
+        self.assertEqual(seen['providers'], ['off', 'helixsr', 'fsr', 'xess'])
+        self.assertEqual(seen['multipliers'], [0, 2, 3, 4, 5, 6])
+        self.assertTrue(seen['enabled'])
+        send = run.call_args[0][0]
+        with mock.patch.object(self.backend, 'set_game_settings', create=True) as save:
+            send()
+        save.assert_called_once_with(self.window.game['id'], {'provider': 'helixsr', 'multiplier': 5}, 'rev')
+
     def test_missing_managed_files_can_be_reviewed_for_repair_without_updates_or_consent(self):
         self.backend.game.update(managed=True, enabled=True, repair_eligible=True, installed_variant='hlx-fsr4-1-2',
                                  installation_status=dict(can_modify=False, can_repair=True, label='Files missing',

@@ -728,8 +728,10 @@ class MainWindow(QMainWindow):
         note = QLabel("Close the game before saving and restart to apply. " +
                       ("HLX FSR 4 uses AMD's FSR 4.1.2 Lite model. " +
                        ("HLX FSR 4 Full runs the full FSR 4.1.2 network: sharper and slower. " if state.get('full_available') else "") +
-                       "AMD FSR (native) selects the AMD provider. "
-                       "Keep in-game frame generation off when enabling a Scaler FG provider." if hlx else
+                       "AMD FSR (native) selects the AMD provider. " +
+                       ("HelixSR FG needs DX12 and DLSS Frame Generation switched on in the game; Game setting keeps "
+                        "the game's multiplier. " if state.get('fg_available') else "") +
+                       "Keep in-game frame generation off when enabling FSR FG or XeSS FG." if hlx else
                        "HelixSR FG needs DX12 and DLSS FG enabled in-game. Light and Full are frame generation models.") +
                       " 3× uses XeSS FG.")
         note.setWordWrap(True)
@@ -751,8 +753,18 @@ class MainWindow(QMainWindow):
             choices['upscaler'] = ('Upscaler', [('HLX FSR 4 (FSR 4.1.2 Lite)', 'hlx-fsr')]
                                    + ([('HLX FSR 4 Full (sharper, slower)', 'hlx-fsr-full')] if state.get('full_available') else [])
                                    + [('AMD FSR (native)', 'fsr')])
-            choices['provider'] = ('Frame generation', [('Off', 'off'), ('AMD FSR FG', 'fsr'), ('Intel XeSS FG', 'xess')])
+            choices['provider'] = ('Frame generation', [('Off', 'off')]
+                                   + ([('HelixSR FG (DLSS FG games)', 'helixsr')] if state.get('fg_available') else [])
+                                   + [('AMD FSR FG', 'fsr'), ('Intel XeSS FG', 'xess')])
             choices = {k: choices[k] for k in ('upscaler', 'provider', 'multiplier', 'overlay')}
+        helixsr_multipliers = [('Game setting', 0), ('2×', 2), ('3×', 3), ('4×', 4), ('5×', 5), ('6×', 6)]
+        def multiplier_options(provider):
+            if hlx and provider == 'helixsr':
+                return helixsr_multipliers
+            return [('2×', 2), ('3×', 3)] if provider == 'xess' else [('2×', 2)]
+        if hlx and state.get('fg_available'):
+            choices['multiplier'] = ('Multiplier (HelixSR FG up to 6×, XeSS FG up to 3×)',
+                                     multiplier_options(state.get('provider')))
         for key, (label, options) in choices.items():
             layout.addWidget(QLabel(label))
             combo = QComboBox()
@@ -764,15 +776,23 @@ class MainWindow(QMainWindow):
             fields[key] = combo
             layout.addWidget(combo)
         def provider_changed():
-            if fields['provider'].currentData() != 'xess':
-                fields['multiplier'].setCurrentIndex(fields['multiplier'].findData(2))
-            fields['multiplier'].setEnabled(fields['provider'].currentData() == 'xess')
+            provider = fields['provider'].currentData()
+            combo = fields['multiplier']
+            combo.blockSignals(True)
+            combo.clear()
+            for title, value in multiplier_options(provider):
+                combo.addItem(title, value)
+            # HelixSR FG starts at the game's own multiplier; the others start at 2×.
+            keep = state.get('multiplier') if provider == state.get('provider') else (0 if hlx and provider == 'helixsr' else 2)
+            combo.setCurrentIndex(max(0, combo.findData(keep)))
+            combo.blockSignals(False)
+            combo.setEnabled(provider == 'xess' or (hlx and provider == 'helixsr'))
         def model_changed():
             if fields['model'].currentData() != 'full':
                 fields['quick_flow'].setCurrentIndex(fields['quick_flow'].findData('off'))
             fields['quick_flow'].setEnabled(fields['model'].currentData() == 'full')
         fields['provider'].currentIndexChanged.connect(provider_changed)
-        fields['multiplier'].setEnabled(state.get('provider') == 'xess')
+        fields['multiplier'].setEnabled(state.get('provider') == 'xess' or (hlx and state.get('provider') == 'helixsr'))
         if not hlx:
             fields['model'].currentIndexChanged.connect(model_changed)
             fields['quick_flow'].setEnabled(state.get('model') == 'full')

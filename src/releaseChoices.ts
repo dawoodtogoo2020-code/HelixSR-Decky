@@ -2,7 +2,7 @@ export type ReleaseChoiceView = { id: string; label: string; version: string | n
 
 export const DEFAULT_RELEASE_CHOICE = "reviewed-2.0.0";
 // HLX releases are explicit opt-ins next to the recommended Model E package.
-export const PRERELEASE_CHOICES = ["reviewed-3.3.0", "reviewed-3.2.0"];
+export const PRERELEASE_CHOICES = ["reviewed-3.4.1", "reviewed-3.3.0", "reviewed-3.2.0"];
 
 /** A prerelease opt-in belongs to the game it was chosen for, never the next game opened. */
 export function releaseChoiceForGame(remembered: string, rememberedFor: string | undefined, gameId: string): string {
@@ -20,6 +20,8 @@ export function releaseChoiceLabel(choice: ReleaseChoiceView): string {
 }
 
 export function releaseChoiceExplanation(id: string): string {
+  if (id === "reviewed-3.4.1")
+    return "Reviewed HelixSR 3.4.1 release with HLX FSR 4 (FSR 4.1.2 Lite). With Scaler you can also select HLX FSR 4 Full (sharper, slower) and HelixSR FG, HelixSR’s own frame generation for games with DLSS Frame Generation (2× to 6×). Model E stays on 2.0.0. The game’s input and the frame generation provider are separate choices.";
   if (id === "reviewed-3.3.0")
     return "Reviewed HelixSR 3.3.0 release with HLX FSR 4 (FSR 4.1.2 Lite). With Scaler you can also select HLX FSR 4 Full, the full FSR 4.1.2 network: sharper and slower. Model E stays on 2.0.0. The game’s input and the frame generation provider are separate choices.";
   if (id === "reviewed-3.2.0")

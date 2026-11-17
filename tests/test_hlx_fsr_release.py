@@ -27,7 +27,7 @@ class HlxReleaseTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 hlx.V320.validate_release(dict(release, **change))
         variant = model_variants.select_variant(hlx.VARIANT_ID)
-        self.assertEqual(variant['release_choices'], ['reviewed-3.3.0'], '3.3.0 replaced the 3.2.0 prerelease')
+        self.assertEqual(variant['release_choices'], ['reviewed-3.4.1'], '3.4.1 replaced 3.3.0, which replaced 3.2.0')
         self.assertEqual(model_variants.select_variant()['id'], 'helixsr-model-e')
         receipt = dict(id=hlx.VARIANT_ID, adapter=hlx.ADAPTER, recipe_sha256=hlx.V320.RECIPE_SHA256)
         self.assertTrue(model_variants.valid_variant(receipt))
@@ -40,7 +40,7 @@ class HlxReleaseTests(unittest.TestCase):
             (p / 'HLX-FSR4').mkdir()
             with self.assertRaisesRegex(ValueError, 'Model E release'):
                 model_variants.verify_recipe(p)
-            with self.assertRaisesRegex(ValueError, '3.3.0'):
+            with self.assertRaisesRegex(ValueError, '3.4.1'):
                 model_variants.verify_recipe(p, hlx.VARIANT_ID)
             files = {hlx.MANIFEST_PATH: b'sdk receipt', hlx.OUTPUT_DLL: b'prebuilt', 'LICENSE': b'notice'}
             pins = {n: (len(b), hashlib.sha256(b).hexdigest()) for n, b in files.items()}
@@ -114,13 +114,14 @@ class Hlx330Tests(unittest.TestCase):
 
     def test_both_releases_are_reviewed_with_their_own_pins(self):
         import compatibility_release as releases
-        self.assertEqual(set(hlx.RELEASES), {'3.2.0', '3.3.0'})
+        self.assertEqual(set(hlx.RELEASES), {'3.2.0', '3.3.0', '3.4.1'})
         self.assertNotEqual(hlx.V320.RECIPE_SHA256, hlx.V330.RECIPE_SHA256)
         for release in hlx.RELEASES.values():
             receipt = dict(id=hlx.VARIANT_ID, adapter=hlx.ADAPTER, recipe_sha256=release.RECIPE_SHA256)
             self.assertTrue(model_variants.valid_variant(receipt))
             self.assertIs(hlx.for_record({'version': release.MODERN_VERSION}), release)
-        self.assertEqual(hlx.output_sha256s(), {hlx.V320.OUTPUT_SHA256, hlx.V330.OUTPUT_SHA256} | hlx.V330.REPLACED_OUTPUTS)
+        self.assertEqual(hlx.output_sha256s(), {hlx.V320.OUTPUT_SHA256, hlx.V330.OUTPUT_SHA256, hlx.V341.OUTPUT_SHA256}
+                         | hlx.V330.REPLACED_OUTPUTS)
         choice = releases.reviewed_release('reviewed-3.3.0')
         self.assertEqual((choice['version'], choice['sha256'], choice['size']),
                          ('3.3.0', hlx.V330.RELEASE_SHA256, hlx.V330.RELEASE_SIZE))
@@ -128,9 +129,11 @@ class Hlx330Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'replaced the archive'):
             releases.require_supported_latest(dict(choice, sha256='0' * 64))
         labels = {c['id']: c['label'] for c in releases.release_choices()}
-        self.assertEqual(labels['reviewed-3.3.0'], 'HelixSR 3.3.0 (HLX FSR 4 and HLX FSR 4 Full)')
+        self.assertEqual(labels['reviewed-3.4.1'], 'HelixSR 3.4.1 (HLX FSR 4, HLX FSR 4 Full and HelixSR FG)')
         self.assertNotIn('reviewed-3.2.0', labels, 'the 3.2.0 prerelease is no longer offered')
-        self.assertEqual(releases.selection('reviewed-3.2.0'), 'reviewed-3.2.0', 'existing 3.2.0 installs keep an identity')
+        self.assertNotIn('reviewed-3.3.0', labels, '3.4.1 replaced 3.3.0 in the menus')
+        for retired in ('reviewed-3.2.0', 'reviewed-3.3.0'):
+            self.assertEqual(releases.selection(retired), retired, 'existing installs keep an identity')
         with self.assertRaises(ValueError):
             hlx.for_record({'version': '2.0.0'})
 
@@ -169,6 +172,92 @@ class Hlx330Tests(unittest.TestCase):
         self.assertEqual(hlx.V320.read_settings(downgraded)['overlay'], 'upscaler')
         from_20 = hlx.V330.configuration(native.replace('UpscalerIndex=1', 'UpscalerIndex=auto'), TEMPLATE, previous_version='2.0.0')
         self.assertEqual(hlx.V330.read_settings(from_20)['upscaler'], 'hlx-fsr', 'other releases are re-pinned to HLX')
+
+
+FG_TEMPLATE = TEMPLATE + '[DLSSG]\nOverrideInterpolationCount=auto\n'
+
+
+class Hlx341Tests(unittest.TestCase):
+    """HelixSR 3.4.1: new HLX FSR 4 builds, HelixSR's own frame generation and Streamline 2.14.16 in Scaler."""
+
+    def test_identity_pins_and_offered_choice(self):
+        import compatibility_release as releases
+        self.assertEqual((hlx.V341.RELEASE_SHA256, hlx.V341.RELEASE_SIZE),
+                         ('31ab3fcee0aa385712c123c6717dc579c60aeaeff40f705dbe91753f96ac46da', 294792182))
+        self.assertIs(hlx.LATEST, hlx.V341)
+        self.assertTrue(hlx.V341.FULL and hlx.V341.FG)
+        self.assertFalse(hlx.V330.FG or hlx.V320.FG)
+        self.assertEqual(hlx.V341.OUTPUT_SHA256, '8b3def5f363e3221c484ef6d196360c4695ac0ea66c02d8a88c26f51fc63fc94')
+        self.assertEqual(hlx.V341.PINS[hlx.SCALER_DIR + 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll'], hlx.V341.PINS[hlx.OUTPUT_DLL])
+        self.assertNotIn(hlx.V341.RECIPE_SHA256, {hlx.V330.RECIPE_SHA256, hlx.V320.RECIPE_SHA256})
+        self.assertIn(hlx.V341.RECIPE_SHA256, model_variants.REVIEWED_RECIPES)
+        choice = releases.reviewed_release('reviewed-3.4.1')
+        self.assertEqual(releases.require_supported_latest(choice), choice)
+        with self.assertRaisesRegex(ValueError, 'replaced the archive'):
+            releases.require_supported_latest(dict(choice, size=choice['size'] + 1))
+        with self.assertRaisesRegex(ValueError, 'not yet reviewed'):
+            releases.require_supported_latest(dict(choice, version='3.4.2'))
+
+    def test_scaler_installs_frame_generation_and_streamline_but_direct_stays_one_dll(self):
+        destinations = set(dict(hlx.V341.scaler_pairs()).values())
+        for name in ('OptiScaler/custom/HelixSR-FG/dlssg/nvngx_dlssg.dll', 'OptiScaler/custom/HelixSR-FG/dlssg/helixsr.ini',
+                     'OptiScaler/streamline/sl.interposer.dll', 'OptiScaler/streamline/sl.dlss_g.dll',
+                     'OptiScaler/custom/HLX FSR 4 Full/ffx/amd_fidelityfx_upscaler_dx12.dll', 'Licenses/Streamline_LICENSE.txt'):
+            self.assertIn(name, destinations)
+        self.assertNotIn('OptiScaler/custom/HelixSR-FG/dlssg/nvngx_dlssg.dll', set(dict(hlx.V330.scaler_pairs()).values()))
+        self.assertEqual(hlx.V341.direct_pairs(), ((hlx.OUTPUT_DLL, '{dll}'),))
+        self.assertFalse(any('ffx_vk' in name or name.startswith(('HelixSR/', 'setup/')) for name in hlx.V341.PINS))
+
+    def test_helixsr_fg_reads_writes_multipliers_and_leaves_cleanly(self):
+        state = hlx.V341.read_settings(FG_TEMPLATE)
+        self.assertEqual((state['provider'], state['fg_available'], state['full_available']), ('off', True, True))
+        self.assertIn('DLSS Frame Generation', state['notes'])
+        on = hlx.V341.update_settings(FG_TEMPLATE, {'provider': 'helixsr', 'multiplier': 0})
+        parsed = parse_config(on)
+        self.assertEqual((parsed['FrameGen']['Enabled'], parsed['FrameGen']['FGInput'], parsed['FrameGen']['FGOutput'],
+                          parsed['FrameGen']['FGNvngxReplacement'], parsed['DLSSG']['OverrideInterpolationCount']),
+                         ('true', 'nvngxfg', 'auto', 'HelixSR-FG', 'auto'))
+        state = hlx.V341.read_settings(on)
+        self.assertEqual((state['provider'], state['multiplier'], state['multiplier_choices']), ('helixsr', 0, [0, 2, 3, 4, 5, 6]))
+        six = hlx.V341.update_settings(on, {'multiplier': 6})
+        self.assertEqual(parse_config(six)['DLSSG']['OverrideInterpolationCount'], '5')
+        self.assertEqual(hlx.V341.read_settings(six)['multiplier'], 6)
+        overlay = hlx.V341.update_settings(six, {'overlay': 'upscaler'})
+        self.assertEqual({k: hlx.V341.read_settings(overlay)[k] for k in ('provider', 'multiplier', 'overlay')},
+                         dict(provider='helixsr', multiplier=6, overlay='upscaler'))
+        for bad in ({'multiplier': 7}, {'multiplier': 1}, {'multiplier': True}, {'provider': 'helixsr', 'multiplier': '4'}):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, '2× to 6×'):
+                hlx.V341.update_settings(on, bad)
+        fsr = hlx.V341.update_settings(six, {'provider': 'fsr', 'multiplier': 2})
+        self.assertEqual(hlx.V341.read_settings(fsr)['provider'], 'fsr')
+        self.assertEqual(parse_config(fsr)['DLSSG']['OverrideInterpolationCount'], 'auto',
+                         'the HelixSR FG multiplier does not linger after switching providers')
+        self.assertEqual(hlx.V341.read_settings(hlx.V341.update_settings(six, {'provider': 'off', 'multiplier': 2}))['provider'], 'off')
+        self.assertEqual(hlx.V341.update_settings(FG_TEMPLATE, {'provider': 'helixsr'}), on, 'HelixSR FG starts at the game setting')
+
+    def test_releases_without_fg_refuse_it_and_hlx_never_takes_20_fg(self):
+        on = hlx.V341.update_settings(FG_TEMPLATE, {'provider': 'helixsr', 'multiplier': 4})
+        self.assertEqual(hlx.V330.read_settings(on)['provider'], 'unsupported')
+        self.assertFalse(hlx.V330.read_settings(on)['fg_available'])
+        with self.assertRaisesRegex(ValueError, 'supports Off, FSR FG or XeSS FG'):
+            hlx.V330.update_settings(FG_TEMPLATE, {'provider': 'helixsr'})
+        with self.assertRaisesRegex(ValueError, 'has no HelixSR frame generation'):
+            hlx.V330.configuration(on, TEMPLATE, previous_version='3.4.1')
+        model_e_fg = TEMPLATE.replace('Enabled=auto', 'Enabled=true').replace('FGInput=auto', 'FGInput=nvngxfg').replace(
+            'FGNvngxReplacement=auto', 'FGNvngxReplacement=HelixSR')
+        self.assertEqual(hlx.V341.read_settings(model_e_fg)['provider'], 'unsupported')
+        with self.assertRaisesRegex(ValueError, 'HelixSR 2.0 frame generation does not carry over.*selected again'):
+            hlx.V341.configuration(model_e_fg, TEMPLATE, previous_version='2.0.0')
+
+    def test_update_from_330_keeps_every_scaler_setting(self):
+        old = hlx.V330.update_settings(TEMPLATE, {'upscaler': 'hlx-fsr-full', 'provider': 'xess', 'multiplier': 3, 'overlay': 'upscaler'})
+        upgraded = hlx.V341.configuration(old, FG_TEMPLATE, previous_version='3.3.0')
+        self.assertEqual(upgraded, old)
+        state = hlx.V341.read_settings(upgraded)
+        self.assertEqual((state['upscaler'], state['provider'], state['multiplier'], state['overlay'], state['fg_available']),
+                         ('hlx-fsr-full', 'xess', 3, 'upscaler', True))
+        fresh = hlx.V341.configuration(FG_TEMPLATE, FG_TEMPLATE)
+        self.assertEqual(hlx.V341.read_settings(fresh)['upscaler'], 'hlx-fsr')
 
 
 class Hlx330RepublishedTests(unittest.TestCase):

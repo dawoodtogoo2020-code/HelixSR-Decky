@@ -1,6 +1,7 @@
 """End-to-end file transactions for each reviewed HLX release.
 
-Set HELIXSR_VERIFIED_ZIP (3.2.0) or HELIXSR_VERIFIED_ZIP_330 (3.3.0) to run against the actual archive.
+Set HELIXSR_VERIFIED_ZIP (3.2.0), HELIXSR_VERIFIED_ZIP_330 (3.3.0) or HELIXSR_VERIFIED_ZIP_341 (3.4.1)
+to run against the actual archive.
 """
 import contextlib
 import hashlib
@@ -17,9 +18,10 @@ from test_backend import Fixtures, pe, write
 import manager
 import hlx_fsr_release as hlx
 import model_variants
+from optiscaler_setup import parse_config
 import test_helix20_install
 
-ZIP_ENV = {'3.2.0': 'HELIXSR_VERIFIED_ZIP', '3.3.0': 'HELIXSR_VERIFIED_ZIP_330'}
+ZIP_ENV = {'3.2.0': 'HELIXSR_VERIFIED_ZIP', '3.3.0': 'HELIXSR_VERIFIED_ZIP_330', '3.4.1': 'HELIXSR_VERIFIED_ZIP_341'}
 TEMPLATE = b'[Upscalers]\nDx12Upscaler=auto\n[FSR]\nUpscalerIndex=auto\n[Libraries]\nFfxDx12Path=auto\nFfxDx12SRPath=auto\n[FrameGen]\nEnabled=false\nFGInput=auto\nFGOutput=auto\nFGNvngxReplacement=auto\n'
 
 
@@ -126,7 +128,7 @@ class LifecycleTests(Fixtures):
 
     def test_reject_conflicts_incompatible_models_and_changed_archive_before_game_writes(self):
         review = lambda: self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice=self.CHOICE)
-        with self.assertRaisesRegex(ValueError, 'needs the reviewed HelixSR 3.3.0'):
+        with self.assertRaisesRegex(ValueError, 'needs the reviewed HelixSR ' + hlx.LATEST.MODERN_VERSION):
             self.m.preview_latest(self.game['id'], release_choice=self.CHOICE)
         fallback = self.native.with_name('amd_fidelityfx_upscaler_dx12.amd.dll')
         fallback.write_bytes(b'unmanaged')
@@ -160,7 +162,7 @@ class Lifecycle330Tests(LifecycleTests):
         self.assertEqual(manager.sha(full), self.R.PINS[hlx.FULL_DIR + 'amd_fidelityfx_upscaler_dx12.dll'][1])
         self.assertTrue((full.parent / 'hlx_fsr4.ini').is_file())
         state = self.m.game_settings(self.game)
-        self.assertEqual((state['upscaler'], state['full_available'], state['release']), ('hlx-fsr', True, '3.3.0'))
+        self.assertEqual((state['upscaler'], state['full_available'], state['release']), ('hlx-fsr', True, self.R.MODERN_VERSION))
         self.m.set_game_settings(self.game['id'], {'upscaler': 'hlx-fsr-full'}, state['revision'])
         self.assertIn('Dx12Upscaler=HLX FSR 4 Full', (self.root / 'OptiScaler.ini').read_text())
         self.assertEqual(self.m.game_settings(self.game)['upscaler'], 'hlx-fsr-full')
@@ -226,7 +228,7 @@ class Lifecycle330Tests(LifecycleTests):
         self.assertEqual(self.native.read_bytes(), self.original)
 
     def run_hlx_job(self):
-        """Press Install or Update with HLX FSR 4 and HelixSR 3.3.0 selected; return the finished job."""
+        """Press Install or Update with HLX FSR 4 and this class's HelixSR release selected; return the finished job."""
         with self.archive_transport():
             review = self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice=self.CHOICE)
             self.m.accept_license(True, review['token'])
@@ -245,7 +247,7 @@ class Lifecycle330Tests(LifecycleTests):
         model_e_only = test_helix20_install.helix20_release.OUTPUT_DLL
         self.assertTrue((self.root / model_e_only).is_file())
         state = self.m.game_settings(self.game)
-        # HelixSR 3.3.0 has no HelixSR FG: the review names the setting to change instead of failing later.
+        # HelixSR 2.0's FG does not carry over to HLX: the review names the setting to change instead of failing later.
         with self.assertRaisesRegex(ValueError, 'Select Off, FSR or XeSS FG'):
             self.m.preview_latest(self.game['id'], variant_id=hlx.VARIANT_ID, release_choice=self.CHOICE)
         self.m.set_game_settings(self.game['id'], {'provider': 'off'}, state['revision'])
@@ -253,7 +255,7 @@ class Lifecycle330Tests(LifecycleTests):
         job = self.run_hlx_job()
         self.assertEqual(job['state'], 'completed', job['message'])
         data = self.m.assess(self.game)
-        self.assertEqual((data['installed_variant'], data['installed_version']), (hlx.VARIANT_ID, '3.3.0'))
+        self.assertEqual((data['installed_variant'], data['installed_version']), (hlx.VARIANT_ID, self.R.MODERN_VERSION))
         self.assertEqual(data['installed_model'], 'HLX FSR 4 (FSR 4.1.2 Lite)')
         self.assertFalse((self.root / model_e_only).exists(), 'Model E files are retired by the update')
         expected = {dest for _, dest in self.R.scaler_pairs()} | {'OptiScaler.ini', 'HelixSR/helixsr-install.json',
@@ -267,11 +269,13 @@ class Lifecycle330Tests(LifecycleTests):
         job = self.run_hlx_job()
         self.assertEqual(job['state'], 'completed', job['message'])
         data = self.m.assess(self.game)
-        self.assertEqual((data['installed_variant'], data['installed_version']), (hlx.VARIANT_ID, '3.3.0'))
+        self.assertEqual((data['installed_variant'], data['installed_version']), (hlx.VARIANT_ID, self.R.MODERN_VERSION))
         self.assertEqual(manager.sha(self.root / 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll'), self.R.OUTPUT_SHA256)
 
     def test_install_from_replaced_20261111_build_stays_recognized_and_updates(self):
         """0.1.44 installed 3.3.0's 2026-11-11 build; upstream replaced it in place on 2026-11-12."""
+        if self.R is not hlx.V330:
+            self.skipTest('3.3.0 build history only')
         rec = self.install()
         old_recipe = next(iter(hlx.V330.REPLACED_RECIPES))
         rec['variant'] = dict(rec['variant'], recipe_sha256=old_recipe)
@@ -308,3 +312,60 @@ class Lifecycle330Tests(LifecycleTests):
     def test_split_dll_game_keeps_the_direct_route(self):
         data = self.m.assess(self.game)
         self.assertEqual((data['route'], data['hlx_direct_supported'], data['hlx_scaler_reason']), ('direct', True, None))
+
+
+
+class Lifecycle341Tests(Lifecycle330Tests):
+    """HelixSR 3.4.1: every 3.3.0 transaction, plus HelixSR FG and Streamline installed with Scaler."""
+    R = hlx.V341
+    CHOICE = 'reviewed-3.4.1'
+    FG = 'OptiScaler/custom/HelixSR-FG/dlssg/nvngx_dlssg.dll'
+    INTERPOSER = 'OptiScaler/streamline/sl.interposer.dll'
+
+    def test_scaler_helixsr_fg_is_installed_selectable_and_survives_disable(self):
+        self.m.set_installation_route(self.game['id'], 'optiscaler')
+        self.install()
+        for rel in (self.FG, self.INTERPOSER, 'OptiScaler/custom/HelixSR-FG/dlssg/helixsr.ini'):
+            self.assertEqual(manager.sha(self.root / rel), self.R.PINS[hlx.SCALER_DIR + rel][1], rel)
+        state = self.m.game_settings(self.game)
+        self.assertEqual((state['provider'], state['fg_available']), ('off', True))
+        self.m.set_game_settings(self.game['id'], {'provider': 'helixsr', 'multiplier': 4}, state['revision'])
+        ini = parse_config((self.root / 'OptiScaler.ini').read_text())
+        self.assertEqual((ini['FrameGen']['FGInput'], ini['FrameGen']['FGNvngxReplacement'],
+                          ini['DLSSG']['OverrideInterpolationCount']), ('nvngxfg', 'HelixSR-FG', '3'))
+        state = self.m.game_settings(self.game)
+        self.assertEqual((state['provider'], state['multiplier']), ('helixsr', 4))
+        data = self.m.assess(self.game)
+        setup = data['optiscaler']['setup']
+        self.assertTrue(setup['helixsr_fg'] and setup['framegen_configured'])
+        self.assertIn('HelixSR FG selected', data['framegen_summary'])
+        self.act('disable')
+        self.assertFalse((self.root / self.FG).exists())
+        self.act('enable')
+        self.assertTrue((self.root / self.FG).exists())
+        self.assertEqual(self.m.game_settings(self.game)['provider'], 'helixsr')
+        self.act('remove')
+        self.assertEqual([f for f in (self.root / 'OptiScaler').rglob('*') if not f.is_dir()], [])
+        self.assertFalse((self.root / 'OptiScaler.ini').exists())
+        self.assertEqual(self.native.read_bytes(), self.original)
+
+    def test_scaler_update_from_330_keeps_settings_and_adds_helixsr_fg(self):
+        self.m.set_installation_route(self.game['id'], 'optiscaler')
+        with self.archive_transport(hlx.V330, hlx.V341):
+            self.install(hlx.V330, 'reviewed-3.3.0', transport=False)
+            before = self.m.game_settings(self.game)
+            self.assertFalse(before['fg_available'])
+            self.m.set_game_settings(self.game['id'], {'upscaler': 'hlx-fsr-full', 'provider': 'xess', 'multiplier': 3},
+                                     before['revision'])
+            self.assertFalse((self.root / self.FG).exists())
+            self.install(hlx.V341, 'reviewed-3.4.1', transport=False)
+        after = self.m.game_settings(self.game)
+        self.assertEqual((after['upscaler'], after['provider'], after['multiplier'], after['fg_available'], after['release']),
+                         ('hlx-fsr-full', 'xess', 3, True, '3.4.1'))
+        self.assertEqual(manager.sha(self.root / self.FG), self.R.PINS[hlx.SCALER_DIR + self.FG][1])
+        self.assertEqual(manager.sha(self.root / 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll'), hlx.V341.OUTPUT_SHA256)
+        self.m.set_game_settings(self.game['id'], {'provider': 'helixsr', 'multiplier': 0}, after['revision'])
+        self.assertEqual(self.m.game_settings(self.game)['provider'], 'helixsr')
+        self.act('remove')
+        self.assertEqual([f for f in (self.root / 'OptiScaler').rglob('*') if not f.is_dir()], [])
+        self.assertEqual(self.native.read_bytes(), self.original)

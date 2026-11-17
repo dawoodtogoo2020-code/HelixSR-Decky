@@ -264,7 +264,7 @@ def awareness(game, tree, home, route, target=None):
     configured_helix = setup['configured']
     hlx = setup.get('family') == 'hlx-fsr'
     if (not hlx or route == 'optiscaler') and setup.get('framegen_evidence') != 'not provided by this release':
-        item = evidence('HelixSR Scaler 2.1' if hlx else 'HelixSR 2.0', 'Frame generation provider', setup['framegen_evidence'],
+        item = evidence('HelixSR Scaler' if hlx else 'HelixSR 2.0', 'Frame generation provider', setup['framegen_evidence'],
                         Path(target or game['folder']) / 'OptiScaler.ini',
                         'configuration only; runtime activation unverified')
         item['enabled'] = setup.get('framegen_configured')
@@ -274,7 +274,11 @@ def awareness(game, tree, home, route, target=None):
                                configs=[str(p) for p in configs], involved=route == 'optiscaler' or configured_helix,
                                helix_configured=configured_helix, runtime=opti_runtime, setup=setup),
                 framegen=fg,
-                framegen_summary=(('HelixSR 3.2.0 has no HelixSR frame generation; ' + setup['framegen_evidence'])
+                framegen_summary=('HelixSR FG selected; switch on DLSS Frame Generation in the game. Generated-frame output unverified'
+                                  if hlx and route == 'optiscaler' and setup.get('helixsr_fg') else
+                                  ('Scaler frame generation (HelixSR FG, FSR FG or XeSS FG): ' + setup['framegen_evidence'])
+                                  if hlx and route == 'optiscaler' and setup.get('helixsr_fg_available') else
+                                  ('This HelixSR release has no HelixSR frame generation; ' + setup['framegen_evidence'])
                                   if hlx and route == 'optiscaler' else
                                   'Direct HLX FSR installs super resolution only; in-game frame generation is separate'
                                   if hlx else

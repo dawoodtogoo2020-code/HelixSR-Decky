@@ -428,3 +428,10 @@ test("HelixSR 3.3.0 is an HLX opt-in that explains HLX FSR 4 Full", async () => 
     "HelixSR 3.3.0 (HLX FSR 4 and HLX FSR 4 Full)");
   assert.match(choices.releaseChoiceExplanation("reviewed-3.3.0"), /HLX FSR 4 Full.*Model E stays on 2\.0\.0/);
 });
+
+test("HelixSR 3.4.1 is the HLX opt-in that explains HelixSR FG", async () => {
+  const choices = await import("../src/releaseChoices.ts");
+  assert.equal(choices.releaseChoiceForGame("reviewed-3.4.1", "game-a", "game-b"), choices.DEFAULT_RELEASE_CHOICE);
+  assert.equal(choices.releaseChoiceForGame("reviewed-3.4.1", "game-a", "game-a"), "reviewed-3.4.1");
+  assert.match(choices.releaseChoiceExplanation("reviewed-3.4.1"), /HelixSR FG.*2× to 6×.*Model E stays on 2\.0\.0/);
+});

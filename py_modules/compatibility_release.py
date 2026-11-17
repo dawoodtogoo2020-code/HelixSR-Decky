@@ -7,12 +7,12 @@ LATEST_CHOICE = "latest"
 COMPATIBLE_CHOICE = "compatible-1.8.1"
 COMPATIBLE_VERSION = "1.8.1"
 COMPATIBLE_METADATA_SOURCE = "reviewed-compatibility-release"
-# Shown in the Release menus. HelixSR 3.3.0 replaced the 3.2.0 prerelease for HLX FSR 4.
-OFFERED_CHOICES = ('reviewed-2.0.0', 'reviewed-1.9.3', COMPATIBLE_CHOICE, 'reviewed-3.3.0')
-# No longer offered. Still accepted so existing 3.2.0 installs keep a known identity.
-RETIRED_CHOICES = ('reviewed-3.2.0',)
+# Shown in the Release menus. HelixSR 3.4.1 replaced 3.3.0 (and 3.3.0 the 3.2.0 prerelease) for HLX FSR 4.
+OFFERED_CHOICES = ('reviewed-2.0.0', 'reviewed-1.9.3', COMPATIBLE_CHOICE, 'reviewed-3.4.1')
+# No longer offered. Still accepted so existing 3.3.0 and 3.2.0 installs keep a known identity.
+RETIRED_CHOICES = ('reviewed-3.3.0', 'reviewed-3.2.0')
 REVIEWED_CHOICES = OFFERED_CHOICES + RETIRED_CHOICES
-HLX_CHOICES = {'reviewed-3.3.0': '3.3.0', 'reviewed-3.2.0': '3.2.0'}
+HLX_CHOICES = {'reviewed-3.4.1': '3.4.1', 'reviewed-3.3.0': '3.3.0', 'reviewed-3.2.0': '3.2.0'}
 RECOMMENDED_CHOICE = 'reviewed-2.0.0'
 
 _UNSUPPORTED_FROM = (1, 9, 0)
@@ -78,8 +78,8 @@ def release_choices():
         release = reviewed_release(choice)
         recommended = choice == RECOMMENDED_CHOICE
         suffix = 'recommended' if recommended else 'older release'
-        if choice == 'reviewed-3.3.0':
-            suffix = 'HLX FSR 4 and HLX FSR 4 Full'
+        if choice == 'reviewed-3.4.1':
+            suffix = 'HLX FSR 4, HLX FSR 4 Full and HelixSR FG'
         choices.append(dict(id=choice, label=f"HelixSR {release['version']} ({suffix})",
                             version=release['version'], page=release['page'],
                             recommended=recommended))
@@ -141,7 +141,7 @@ def require_supported_latest(release):
     if not isinstance(release, Mapping):
         raise ValueError("Latest HelixSR release metadata must be a mapping.")
     version = release.get("version")
-    if version in ("3.3.0", "3.2.0"):
+    if version in ("3.4.1", "3.3.0", "3.2.0"):
         from hlx_fsr_release import RELEASES
         RELEASES[version].validate_release(release)
         return release

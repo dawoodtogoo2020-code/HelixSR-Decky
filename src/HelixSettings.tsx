@@ -3,8 +3,28 @@ import { ButtonItem, DropdownItem, PanelSectionRow, ToggleField } from '@decky/u
 export type HelixSettingsState = {
   available: boolean; reason?: string; revision?: string; provider?: string; model?: string; family?: string;
   quick_flow?: string; multiplier?: number; upscaler?: string; int8?: string; wave_size?: string; overlay?: string;
-  release?: string; full_available?: boolean;
+  release?: string; full_available?: boolean; fg_available?: boolean;
 };
+
+/** HelixSR FG (3.4.1): 0 keeps the game's own DLSS FG multiplier. */
+export const HELIXSR_FG_MULTIPLIERS: [string, number][] =
+  [["Game setting", 0], ["2×", 2], ["3×", 3], ["4×", 4], ["5×", 5], ["6×", 6]];
+
+export function multiplierOptions(provider: string | undefined, hlx: boolean): [string, number][] {
+  if (provider === "helixsr") return hlx ? HELIXSR_FG_MULTIPLIERS : [["2×", 2]];
+  return provider === "xess" ? [["2×", 2], ["3×", 3]] : [["2×", 2]];
+}
+
+export function frameGenerationNote(provider: string | undefined, hlx: boolean): string {
+  if (provider === "off") return "Plugin frame generation is off. In-game and external frame generation are separate.";
+  if (provider === "helixsr" && hlx)
+    return "HelixSR FG replaces the game's DLSS Frame Generation: DX12 only. Switch DLSS Frame Generation on in the game; without that option this route cannot generate frames. Game setting keeps the game's multiplier. Not yet checked on a Steam Deck.";
+  if (provider === "helixsr")
+    return "Requires DX12 and DLSS frame generation enabled in the game. If that option is missing, this route cannot generate frames.";
+  if (provider === "fsr" || provider === "xess")
+    return "Uses the active upscaler for frame generation. Keep the game's own frame generation off. HUD artifacts and compatibility depend on the game.";
+  return "A custom frame-generation route is configured. Select a provider to replace it.";
+}
 
 export function overlayDescription(overlay: string | undefined, hlx: boolean): string {
   const name = hlx ? 'HLX answers through the FSR 4 path, so it may read FSR 4.' :
@@ -35,8 +55,10 @@ export function HelixSettings({ settings, disabled, save, advanced = false, togg
     </div></PanelSectionRow>}
     {select('Frame generation', 'provider', settings.provider,
       [...(settings.provider === 'unsupported' ? [['Existing custom provider', 'unsupported'] as [string, string]] : []),
-       ['Off', 'off'], ...(hlx ? [] : [['HelixSR DLSS FG', 'helixsr'] as [string, string]]), ['AMD FSR FG', 'fsr'], ['Intel XeSS FG', 'xess']],
-      provider => ({ provider, multiplier: 2 }))}
+       ['Off', 'off'], ...(!hlx ? [['HelixSR DLSS FG', 'helixsr'] as [string, string]] :
+         settings.fg_available ? [['HelixSR FG (DLSS FG games)', 'helixsr'] as [string, string]] : []),
+       ['AMD FSR FG', 'fsr'], ['Intel XeSS FG', 'xess']],
+      provider => ({ provider, multiplier: provider === 'helixsr' && hlx ? 0 : 2 }))}
     {!hlx && settings.provider === 'helixsr' && <>
       {select('Frame generation model', 'model', settings.model, [['Light (faster)', 'light'], ['Full', 'full']],
         (model): Record<string, string | number> => model === 'light' ? { model, quick_flow: 'off' } : { model })}
@@ -44,12 +66,9 @@ export function HelixSettings({ settings, disabled, save, advanced = false, togg
         [['Off', 'off'], ['Fast', 'fast'], ['Fastest', 'fastest']])}
     </>}
     {['helixsr', 'fsr', 'xess'].includes(settings.provider || '') && select('Frame multiplier', 'multiplier', settings.multiplier,
-      settings.provider === 'xess' ? [['2×', 2], ['3×', 3]] : [['2×', 2]])}
+      multiplierOptions(settings.provider, hlx))}
     <PanelSectionRow><div className="helix-muted">
-      {settings.provider === 'off' ? 'Plugin frame generation is off. In-game and external frame generation are separate.' :
-       settings.provider === 'helixsr' ? 'Requires DX12 and DLSS frame generation enabled in the game. If that option is missing, this route cannot generate frames.' :
-       settings.provider === 'fsr' || settings.provider === 'xess' ? 'Uses the active upscaler for frame generation. Keep the game\'s own frame generation off. HUD artifacts and compatibility depend on the game.' :
-       'A custom frame-generation route is configured. Select a provider to replace it.'}
+      {frameGenerationNote(settings.provider, hlx)}
       {' '}Close the game to save. Restart to apply. Saved settings do not confirm generated frames.
     </div></PanelSectionRow>
     <PanelSectionRow><ToggleField label="Show upscaler overlay in game" disabled={disabled}

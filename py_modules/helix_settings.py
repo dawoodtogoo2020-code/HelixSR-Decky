@@ -109,6 +109,11 @@ def update_settings(source, changes):
     if 'upscaler' in changes:
         edits.extend([('Libraries', 'FfxDx12SRPath', 'auto'),
                       ('FSR', 'UpscalerIndex', '0' if state['upscaler'] == 'helixsr' else '1')])
+    return apply_edits(source, edits)
+
+
+def apply_edits(source, edits):
+    """Write (section, key, value) settings in place; refuse if anything else would change."""
     bom = '\ufeff' if source.startswith('\ufeff') else ''
     result = source.removeprefix('\ufeff')
     before = parse_config(source)

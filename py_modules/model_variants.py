@@ -76,15 +76,17 @@ VARIANTS = {
     hlx_fsr_release.VARIANT_ID: dict(
         id=hlx_fsr_release.VARIANT_ID, label='HLX FSR 4 (FSR 4.1.2 Lite)',
         source='AMD FSR SDK 2.4.0 / FSR 4.1.2.4555', adapter=hlx_fsr_release.ADAPTER,
-        routes=['direct', 'optiscaler'], release_choices=['reviewed-3.3.0'],
+        routes=['direct', 'optiscaler'], release_choices=['reviewed-3.4.1'],
         source_license_url=hlx_fsr_release.SOURCE_LICENSE_URL,
         source_terms='Download the complete official HelixSR release. Its HLX FSR 4 runtimes, including '
-                     'HLX FSR 4 Full in 3.3.0, include shaders built from the MIT-licensed AMD FSR SDK. '
-                     'The HelixSR Freeware License covers the runtime; Scaler uses GPL-3.0.'),
+                     'HLX FSR 4 Full, include shaders built from the MIT-licensed AMD FSR SDK. '
+                     'The HelixSR Freeware License covers the runtime and HelixSR FG; Scaler uses GPL-3.0; '
+                     'NVIDIA Streamline is MIT.'),
 }
-FUTURE_NOTE = ('HLX FSR 4 runs the FSR 4.1.2 Lite model. With HelixSR 3.3.0 and Scaler, HLX FSR 4 Full '
-               '(the full FSR 4.1.2 network, sharper and slower) is also selectable. Scaler can also select '
-               'AMD’s native provider. Input routes and frame generation are separate from the model.')
+FUTURE_NOTE = ('HLX FSR 4 runs the FSR 4.1.2 Lite model. With HelixSR 3.4.1 and Scaler, HLX FSR 4 Full '
+               '(the full FSR 4.1.2 network, sharper and slower) and HelixSR FG (frame generation in games with '
+               'DLSS Frame Generation, 2× to 6×) are also selectable. Scaler can also select AMD’s native provider. '
+               'Input routes and frame generation are separate from the model.')
 
 
 def select_variant(variant_id=None):
@@ -117,7 +119,7 @@ def verify_recipe(package, variant_id=None):
     selected = select_variant(variant_id)
     if selected['id'] == hlx_fsr_release.VARIANT_ID:
         if not (package / hlx_fsr_release.MANIFEST_PATH).is_file():
-            raise ValueError('HLX FSR 4 needs the reviewed HelixSR 3.3.0 release')
+            raise ValueError(f'HLX FSR 4 needs the reviewed HelixSR {hlx_fsr_release.LATEST.MODERN_VERSION} release')
         return hlx_fsr_release.for_package(package)[1]
     if (package / 'HLX-FSR4').is_dir():
         raise ValueError('This release is reviewed for HLX FSR 4; select a Model E release')

@@ -175,7 +175,7 @@ def setup_report(target, route, options, proxy_files=(), proxy=None):
             if not marker.is_symlink() and marker.stat().st_size <= 4096:
                 record = json.loads(marker.read_text())
                 installed = record.get('helixsr')
-                if installed in ('3.2.0', '3.3.0') and (record.get('variant') or {}).get('id') == 'hlx-fsr4-1-2':
+                if installed in ('3.2.0', '3.3.0', '3.4.1') and (record.get('variant') or {}).get('id') == 'hlx-fsr4-1-2':
                     return _hlx_report(directory, route, options, values, error, installed, proxy)
                 modern = installed in ('1.9.3', '2.0.0')
                 modern20 = installed == '2.0.0'
@@ -253,7 +253,7 @@ def setup_report(target, route, options, proxy_files=(), proxy=None):
 
 def _hlx_report(directory, route, options, values, error, version='3.2.0', proxy=None):
     """Report the configured SR and FG providers without promising runtime success."""
-    from hlx_fsr_release import FULL_NAME, RELEASES
+    from hlx_fsr_release import FG_NAME, FULL_NAME, RELEASES
     release = RELEASES[version]
     scaler_pairs = release.scaler_pairs
     direct = route == 'direct'
@@ -271,7 +271,7 @@ def _hlx_report(directory, route, options, values, error, version='3.2.0', proxy
         checks.append('Select AMD FSR in the DX12 game. Check a fresh HLX_FSR.log, or an existing OptiScaler.log, beside the DLL the game loaded '
                       '(some games load a copy from a folder such as _storage_) for the active HLX runtime or fallback to the original AMD provider.')
         configured, paths_match = False, not missing
-        fg = None
+        fg = helixsr_fg = None
         backend = 'Native FSR 3.1 input'
     else:
         paths_match = (all(values.get(k, 'auto').lower() == 'auto' for k in ('OptiDllPath', 'FfxDx12Path', 'FfxDx12SRPath'))
@@ -288,13 +288,18 @@ def _hlx_report(directory, route, options, values, error, version='3.2.0', proxy
             checks.append(launch_check(launch, proxy_dll, proxy_env))
         if error:
             checks.append(error)
-        fg = None if error else (values.get('FGInput', '').lower() == 'upscaler'
-                                 and values.get('FGOutput', '').lower() in ('fsrfg', 'xefg')
-                                 and values.get('FrameGenEnabled', 'auto').lower() not in ('false', 'off', '0'))
-        checks.append('Scaler frame generation is a separate setting. Keep in-game FG off when testing Scaler FSR FG or XeSS FG.')
+        enabled = values.get('FrameGenEnabled', 'auto').lower() not in ('false', 'off', '0')
+        helixsr_fg = (release.FG and enabled and values.get('FGInput', '').lower() == 'nvngxfg'
+                      and values.get('FGNvngxReplacement', '').lower() == FG_NAME.lower())
+        fg = None if error else helixsr_fg or (values.get('FGInput', '').lower() == 'upscaler'
+                                               and values.get('FGOutput', '').lower() in ('fsrfg', 'xefg') and enabled)
+        checks.append('HelixSR FG runs through the game\'s DLSS Frame Generation: switch it on in the game. Check a fresh '
+                      'helixsr_fg.log or OptiScaler.log for generated frames.' if helixsr_fg else
+                      'Scaler frame generation is a separate setting. Keep in-game FG off when testing Scaler FSR FG or XeSS FG.')
     if missing:
         checks.append('Missing setup files: ' + ', '.join(missing))
     return dict(family='hlx-fsr', configured=configured, backend=backend, provider_paths_match=paths_match, override=launch,
+                helixsr_fg_available=release.FG and not direct, helixsr_fg=bool(helixsr_fg and not error),
                 overlay_shortcut=shortcut, settings=values, missing=missing, checks=checks, guide=GUIDE,
                 framegen_configured=fg, framegen_evidence=('game controls frame generation' if direct else
                     'configuration unavailable; state unknown' if fg is None else

@@ -1,10 +1,11 @@
-"""Pinned, prebuilt HLX FSR 4 from official HelixSR releases (3.3.0, and 3.2.0 for existing installs).
+"""Pinned, prebuilt HLX FSR 4 from official HelixSR releases (3.4.1; 3.3.0 and 3.2.0 for existing installs).
 
 AMD's SDK 2.4.0 supplies the FSR 4.1.2 network. Each release contains the HLX
 implementation and AMD's own provider; 3.3.0 adds HLX FSR 4 Full as a Scaler
-custom upscaler. Neither is Model E, and no upstream setup code is executed.
-New installs use 3.3.0 only. 3.2.0 stays recognized so its installs keep working
-and can update to 3.3.0.
+custom upscaler, and 3.4.1 adds HelixSR's own frame generation (Scaler's
+HelixSR-FG custom DLSS FG replacement) with NVIDIA Streamline 2.14.16. None is
+Model E, and no upstream setup code is executed. New installs use 3.4.1 only.
+3.3.0 and 3.2.0 stay recognized so their installs keep working and can update.
 """
 from collections.abc import Mapping
 import hashlib
@@ -21,9 +22,17 @@ SCALER_DIR = 'helixsr-scaler/'
 SCALER_INI = SCALER_DIR + 'OptiScaler.ini'
 FULL_NAME = 'HLX FSR 4 Full'
 FULL_DIR = SCALER_DIR + 'OptiScaler/custom/' + FULL_NAME + '/ffx/'
+# HelixSR's frame generation in 3.4.x: a Scaler custom folder with an nvngx_dlssg replacement,
+# selected by FGInput=nvngxfg with FGNvngxReplacement=HelixSR-FG in games with DLSS Frame Generation.
+FG_NAME = 'HelixSR-FG'
+FG_DIR = SCALER_DIR + 'OptiScaler/custom/' + FG_NAME + '/dlssg/'
+STREAMLINE_DIR = SCALER_DIR + 'OptiScaler/streamline/'
+# 0 keeps the game's own DLSS FG multiplier; 2-6 set [DLSSG] OverrideInterpolationCount (1-5 generated frames).
+FG_MULTIPLIERS = (0, 2, 3, 4, 5, 6)
 _OUTPUT_320 = 'b9f906ca669e444a9fc4d3727192a0d881c8e4c62557bf3a8063d2d694e806ae'
 _OUTPUT_330 = '4b90351a93cdfb055fb1f2b7224e0cb26fa6aecf3e5ef491acaf6f89dbb7da3b'
 _OUTPUT_330_20261111 = '143164cf365335d6abaa8a72707c06b6586ce487b22e61284aaba44b169e4108'
+_OUTPUT_341 = '8b3def5f363e3221c484ef6d196360c4695ac0ea66c02d8a88c26f51fc63fc94'
 
 # SHA-256 of each exact file consumed or kept as evidence. The plugin verifies the complete ZIP, then
 # caches only this reviewed subset locally. No setup code is executed.
@@ -95,6 +104,30 @@ _PINS_330_20261111 = {**_PINS_330,
 }
 
 
+# HelixSR 3.4.1 (2026-11-17), with HelixSR Scaler 2.3.1. 3.4.0 was replaced the next day and is not
+# reviewed. Same layout as 3.3.0: new HLX FSR 4 and HLX FSR 4 Full builds (Full no longer needs AMD's
+# DLL beside it), HelixSR frame generation in Scaler's custom folder, and NVIDIA Streamline 2.14.16
+# in OptiScaler/streamline (Scaler uses it in place of a game's older Streamline for up to 6x).
+_PINS_341 = {**_PINS_330,
+    OUTPUT_DLL: (58185808, _OUTPUT_341),
+    'THIRD_PARTY_NOTICES.md': (14665, '9b6481e2a7ae58f2d54c7015ecb253c6ec21f2f9e10ad59e9de279323a7f8f7b'),
+    'SOURCE.md': (1110, '49d56c50ab03f2396c35b209e8ad9d98704aee0c0ecb5af83d05dfe5d5efde9f'),
+    SCALER_INI: (62634, '1006eaf4dc706254c57ab6fba87ba7e76cec18d74fb4398b9d60ff3f3efed8d9'),
+    SCALER_DIR + 'OptiScaler.dll': (29667328, 'af976f52ceb60e90d8bb099267d734169b398511f5007144419179890f86f8f3'),
+    SCALER_DIR + 'Licenses/Streamline_LICENSE.txt': (1591, '7b6f23e7d6f3ad6292f9308d2b42cdc3d82ae4e9b2abb55f230279d83bedd43d'),
+    SCALER_DIR + 'OptiScaler/amd_fidelityfx_upscaler_dx12.dll': (58185808, _OUTPUT_341),
+    FULL_DIR + 'amd_fidelityfx_upscaler_dx12.dll': (22876979, '31d59a0f95bcdaf268d2f37ed6885c05037ad07b4d07131bb29835365d70fc57'),
+    FULL_DIR + 'hlx_fsr4.ini': (1104, 'd78dc1d929ed10b0d3fb2c9a9c5f8e420a9339a0f4fd5c261720eb49b392cab7'),
+    FG_DIR + 'helixsr.ini': (618, 'a386592daa86fc05040a5e1f233896d06d62bf7227bcc2df954228e9683834d8'),
+    FG_DIR + 'nvngx_dlssg.dll': (1256448, '81fbb36d5d318f2b2fda254e87f69e641d67a2a2cc026f23031912b609b9ec8a'),
+    STREAMLINE_DIR + 'sl.common.dll': (843904, '38eea3b4209afc455636ea372b5933d65fcc13becec6c84d101dcfc4d8648f75'),
+    STREAMLINE_DIR + 'sl.dlss_g.dll': (637056, '3ed9538df724993bea8a050195a6a78b9c8c8a566d5b05ade477aab3c390e90f'),
+    STREAMLINE_DIR + 'sl.interposer.dll': (652928, 'b1d7395aebd7b9722841d64dcf7433680020b6a8e421f851c16d5ba0c2182edf'),
+    STREAMLINE_DIR + 'sl.pcl.dll': (360064, '5698c38e722318681f215c9fe68e45b9bedd51378acc699d8eee26e961e57770'),
+    STREAMLINE_DIR + 'sl.reflex.dll': (388736, '443577e869352436ff7ec8f4d9c90418d3e95368436ce219261e0f4f07a38122'),
+}
+
+
 def _recipe(pins):
     return hashlib.sha256(b''.join((name + '\0' + digest + '\0').encode()
                                    for name, (_, digest) in sorted(pins.items()))).hexdigest()
@@ -105,12 +138,24 @@ def _custom_library(parsed):
                  if parsed.get('Libraries', key, fallback='auto').strip().lower() != 'auto'), None)
 
 
+def _helixsr_fg(parsed):
+    """FGInput=nvngxfg with Scaler's HelixSR-FG replacement, frame generation not switched off."""
+    get = lambda section, key: parsed.get(section, key, fallback='auto').strip().lower()
+    return (get('FrameGen', 'Enabled') not in ('false', 'off', '0') and get('FrameGen', 'FGInput') == 'nvngxfg'
+            and get('FrameGen', 'FGNvngxReplacement') == FG_NAME.lower())
+
+
+def _fg_multiplier(parsed):
+    count = parsed.get('DLSSG', 'OverrideInterpolationCount', fallback='auto').strip()
+    return int(count) + 1 if count in ('1', '2', '3', '4', '5') else 0
+
+
 class Release:
     """One reviewed HLX FSR 4 release. Attribute names match the other release adapters."""
     VARIANT_ID, ADAPTER, OUTPUT_DLL, MANIFEST_PATH = VARIANT_ID, ADAPTER, OUTPUT_DLL, MANIFEST_PATH
     SCALER_DIR, SCALER_INI = SCALER_DIR, SCALER_INI
 
-    def __init__(self, version, sha256, size, pins, full, replaced=()):
+    def __init__(self, version, sha256, size, pins, full, fg=False, replaced=()):
         self.MODERN_VERSION = version
         self.RELEASE_SHA256, self.RELEASE_SIZE = sha256, size
         self.RELEASE_URL = f'https://github.com/lonewolf0622/HelixSR/releases/download/v{version}/HelixSR-{version}.zip'
@@ -119,6 +164,7 @@ class Release:
         self.PINS = dict(pins)
         self.OUTPUT_SHA256 = self.PINS[OUTPUT_DLL][1]
         self.FULL = full
+        self.FG = fg
         self.RECIPE_SHA256 = _recipe(self.PINS)
         # Earlier builds of this same version that upstream replaced in place. Recognized for
         # installed games only: downloads, caches and repairs always use the current PINS.
@@ -180,10 +226,15 @@ class Release:
         else:
             state['upscaler'] = {'0': 'hlx-fsr', '1': 'fsr'}.get(index, 'unsupported') if backend == 'ffx' else 'unsupported'
         if state['provider'] == 'helixsr':
+            # HelixSR 2.0's own FG files are not part of any HLX release.
             state['provider'] = 'unsupported'
-        state.update(family='hlx-fsr', release=self.MODERN_VERSION, full_available=self.FULL,
+        if self.FG and _helixsr_fg(p):
+            state.update(provider='helixsr', multiplier=_fg_multiplier(p), multiplier_choices=list(FG_MULTIPLIERS))
+        state.update(family='hlx-fsr', release=self.MODERN_VERSION, full_available=self.FULL, fg_available=self.FG,
                      notes='AMD FSR uses the best version offered by the GPU. FSR and XeSS frame generation '
-                           f'require game support. HelixSR {self.MODERN_VERSION} has no HelixSR FG.')
+                           'require game support. ' + (
+                               'HelixSR FG needs a DirectX 12 game with DLSS Frame Generation switched on in the game.'
+                               if self.FG else f'HelixSR {self.MODERN_VERSION} has no HelixSR FG.'))
         return state
 
     def validate_scaler_source(self, source):
@@ -195,8 +246,12 @@ class Release:
         # An unused old replacement setting is harmless to an upscaler FG input.
         if (parsed.get('FrameGen', 'FGNvngxReplacement', fallback='auto').strip().lower() == 'helixsr'
                 and helix_settings.read_settings(source)['provider'] == 'helixsr'):
+            raise ValueError(f'HelixSR 2.0 frame generation does not carry over to HelixSR {self.MODERN_VERSION}. '
+                             'Select Off, FSR or XeSS FG before upgrading.' +
+                             (' HelixSR FG can be selected again afterwards.' if self.FG else ''))
+        if not self.FG and _helixsr_fg(parsed):
             raise ValueError(f'HelixSR {self.MODERN_VERSION} has no HelixSR frame generation. '
-                             'Select Off, FSR or XeSS FG before upgrading.')
+                             'Select Off, FSR or XeSS FG first.')
 
     def configuration(self, source, template, previous_version=None):
         self.validate_scaler_source(source)
@@ -214,11 +269,19 @@ class Release:
     def update_settings(self, source, changes):
         if not isinstance(changes, dict) or set(changes) - {'provider', 'upscaler', 'multiplier', 'overlay'}:
             raise ValueError('Unsupported HLX FSR setting')
-        if 'provider' in changes and changes['provider'] not in ('off', 'fsr', 'xess'):
-            raise ValueError(f'HelixSR {self.MODERN_VERSION} supports Off, FSR FG or XeSS FG')
+        providers = ('off', 'fsr', 'xess') + (('helixsr',) if self.FG else ())
+        if 'provider' in changes and changes['provider'] not in providers:
+            raise ValueError(f'HelixSR {self.MODERN_VERSION} supports Off, ' +
+                             ('HelixSR FG, FSR FG or XeSS FG' if self.FG else 'FSR FG or XeSS FG'))
         fg = {k: v for k, v in changes.items() if k != 'upscaler'}
-        if fg:
+        current = self.read_settings(source) if fg else None
+        if fg and changes.get('provider', current['provider']) == 'helixsr':
+            source = self._helixsr_fg_settings(source, fg, current)
+        elif fg:
             source = helix_settings.update_settings(source, fg)
+            if current['provider'] == 'helixsr' and _fg_multiplier(parse_config(source)):
+                # Leaving HelixSR FG: its multiplier override must not linger for the game's DLSS FG.
+                source = helix_settings.apply_edits(source, [('DLSSG', 'OverrideInterpolationCount', 'auto')])
         if 'upscaler' not in changes:
             return source
         allowed = ('hlx-fsr', 'fsr') + (('hlx-fsr-full',) if self.FULL else ())
@@ -233,13 +296,30 @@ class Release:
         return pin_config(source, template, [('Dx12Upscaler', 'ffx'),
                           ('UpscalerIndex', '0' if changes['upscaler'] == 'hlx-fsr' else '1')])
 
+    def _helixsr_fg_settings(self, source, changes, current):
+        multiplier = changes.get('multiplier', current['multiplier'] if current['provider'] == 'helixsr' else 0)
+        if type(multiplier) is not int or multiplier not in FG_MULTIPLIERS:
+            raise ValueError('HelixSR FG multipliers are 2× to 6×, or the game setting')
+        if 'overlay' in changes:
+            source = helix_settings.update_settings(source, {'overlay': changes['overlay']})
+        edits = []
+        if 'provider' in changes:
+            # Scaler's documented route: the game's DLSS FG through Scaler's HelixSR-FG replacement.
+            edits += [('FrameGen', 'Enabled', 'true'), ('FrameGen', 'FGInput', 'nvngxfg'),
+                      ('FrameGen', 'FGOutput', 'auto'), ('FrameGen', 'FGNvngxReplacement', FG_NAME)]
+        if 'provider' in changes or 'multiplier' in changes:
+            edits.append(('DLSSG', 'OverrideInterpolationCount', str(multiplier - 1) if multiplier else 'auto'))
+        return helix_settings.apply_edits(source, edits) if edits else source
+
 
 V320 = Release('3.2.0', 'a4e83da8b4335a886197aef10e8f8a8947a2e32e5e1eebfdf060ff00724c17c7', 217396302,
                _PINS_320, full=False)
 V330 = Release('3.3.0', '7d6c0a4adeb5237004fc6fbe211d39705d62d49f23c51cc8f4ea987281d0a56b', 279492763,
                _PINS_330, full=True, replaced=(_PINS_330_20261111,))
-RELEASES = {r.MODERN_VERSION: r for r in (V330, V320)}
-LATEST = V330
+V341 = Release('3.4.1', '31ab3fcee0aa385712c123c6717dc579c60aeaeff40f705dbe91753f96ac46da', 294792182,
+               _PINS_341, full=True, fg=True)
+RELEASES = {r.MODERN_VERSION: r for r in (V341, V330, V320)}
+LATEST = V341
 
 
 def output_sha256s():
@@ -272,4 +352,4 @@ def for_package(package):
             return release, release.verify_recipe(package)
         except (OSError, ValueError) as exc:
             errors.append(str(exc))
-    raise ValueError('HLX FSR 4 needs the reviewed HelixSR 3.3.0 release: ' + '; '.join(errors))
+    raise ValueError(f'HLX FSR 4 needs the reviewed HelixSR {LATEST.MODERN_VERSION} release: ' + '; '.join(errors))

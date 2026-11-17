@@ -1018,6 +1018,29 @@ test("HLX FSR 4 Full is offered only by a release that has it and saves its own 
   assert.match(selected.text(renderedHelixSettings(selected)), /full FSR 4\.1\.2 network/);
 });
 
+test("HelixSR 3.4.1 offers HelixSR FG, starts it at the game setting and allows 2x to 6x", async () => {
+  const h = harness({ set_game_settings: () => h.game });
+  enableSettings(h, { family: "hlx-fsr", upscaler: "hlx-fsr", provider: "off", full_available: true, fg_available: true, release: "3.4.1" });
+  await h.ready();
+  const provider = settingsDropdown(h, "Frame generation");
+  assert.deepEqual([...provider.props.rgOptions.map(o => o.data)], ["off", "helixsr", "fsr", "xess"]);
+  provider.props.onChange({ data: "helixsr" }); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls.at(-1))), { route: "set_game_settings", args: ["pragmata", { provider: "helixsr", multiplier: 0 }, "settings-rev-7"] });
+  const on = harness({ set_game_settings: () => on.game });
+  enableSettings(on, { family: "hlx-fsr", upscaler: "hlx-fsr", provider: "helixsr", multiplier: 0, fg_available: true, release: "3.4.1" });
+  await on.ready();
+  const multiplier = settingsDropdown(on, "Frame multiplier");
+  assert.deepEqual([...multiplier.props.rgOptions.map(o => o.data)], [0, 2, 3, 4, 5, 6]);
+  assert.equal(multiplier.props.rgOptions[0].label, "Game setting");
+  multiplier.props.onChange({ data: 4 }); await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(on.calls.at(-1))), { route: "set_game_settings", args: ["pragmata", { multiplier: 4 }, "settings-rev-7"] });
+  assert.match(on.text(renderedHelixSettings(on)), /Switch DLSS Frame Generation on in the game.*Not yet checked on a Steam Deck/);
+  const old = harness();
+  enableSettings(old, { family: "hlx-fsr", upscaler: "hlx-fsr", provider: "off", full_available: true, fg_available: false, release: "3.3.0" });
+  await old.ready();
+  assert.deepEqual([...settingsDropdown(old, "Frame generation").props.rgOptions.map(o => o.data)], ["off", "fsr", "xess"]);
+});
+
 test("a failed update stays on the game's panel with its reason until dismissed", async () => {
   const failed = { id: "job-failed", kind: "install_latest", gid: "pragmata", game: "PRAGMATA", state: "failed",
     started_at: 10, ended_at: 20, log: "",

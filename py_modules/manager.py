@@ -153,7 +153,8 @@ def license_key(release, variant_id=None):
 
 def require_model_release(selected, release):
     if (selected['id'] == hlx_fsr_release.VARIANT_ID) != hlx_fsr_release.modern(release):
-        raise ValueError('HLX FSR 4 needs the reviewed HelixSR 3.3.0 package. Model E needs HelixSR 2.0.0 or an older '
+        raise ValueError(f'HLX FSR 4 needs the reviewed HelixSR {hlx_fsr_release.LATEST.MODERN_VERSION} package. '
+                         'Model E needs HelixSR 2.0.0 or an older '
                          'reviewed release: the HLX DLSS (Model E) build in HelixSR 3.x is not reviewed by this plugin yet.')
 
 
@@ -1631,7 +1632,9 @@ class Manager:
                         warning=self.native_install_warning(data) + ('You explicitly selected the reviewed HelixSR 1.8.1 compatibility release. '
                                  'This does not install the latest upstream 1.9 Scaler engine. '
                                  if choice == COMPATIBLE_CHOICE else '') +
-                                ('Fetch the pinned HelixSR release and verify the SDK-built HLX provider. The native fallback may run on unsupported hardware. No HelixSR FG is included. Close the game.'
+                                ('Fetch the pinned HelixSR release and verify the SDK-built HLX provider. The native fallback may run on unsupported hardware. '
+                                 + ('With Scaler, HelixSR FG comes with it and stays off until you select it. '
+                                    if hlx_fsr_release.for_record(release).FG else 'No HelixSR FG is included. ') + 'Close the game.'
                                  if hlx_fsr_release.modern(release) else 'Download required files, prepare the local network and install or update HelixSR for this game. Existing native HelixSR is imported first. Close the game. Frame generation is preserved.'))
 
     def execute_latest(self, token):
