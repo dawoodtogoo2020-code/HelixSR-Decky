@@ -2122,17 +2122,30 @@ class TransactionTests(Fixtures):
         self.assertFalse((self.m.companion(self.game) / 'transaction').exists())
         self.assertEqual(list(self.root.rglob('*.helixsr-decky.tmp')), [])
 
+    def test_read_only_native_dll_can_be_backed_up_and_restored(self):
+        self.native.chmod(0o555)
+        self.package()
+
+        self.action('install')
+        self.assertNotEqual(self.native.read_bytes(), self.original)
+
+        self.action('remove')
+        self.assertEqual(self.native.read_bytes(), self.original)
+        self.assertEqual(stat.S_IMODE(self.native.stat().st_mode), 0o555)
+
     def test_interrupted_transaction_recovery(self):
         tx = self.m.companion(self.game) / 'transaction'
         relative = self.native.name
-        write(tx / 'snapshot' / relative, self.original)
+        snapshot = write(tx / 'snapshot' / relative, self.original)
+        snapshot.chmod(0o555)
         write(self.native, pe(ffx=True, helix=True))
-        original_hash = manager.sha(tx / 'snapshot' / relative)
+        original_hash = manager.sha(snapshot)
         manager.atomic_json(tx / 'journal.json', dict(state='prepared', action='install',
             before={relative: original_hash}, previous={}, game_build=None,
             allowed_live={relative: [original_hash, manager.sha(self.native)]}))
         self.action('recover')
         self.assertEqual(self.native.read_bytes(), self.original)
+        self.assertEqual(stat.S_IMODE(self.native.stat().st_mode), 0o555)
         self.assertFalse(tx.exists())
 
     def test_recovery_foreign_live_bytes_refuses_before_any_restore(self):

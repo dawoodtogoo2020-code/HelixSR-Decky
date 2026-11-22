@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import os
+import stat
 from unittest.mock import patch
 
 try:
@@ -28,6 +29,8 @@ class MissingFileRepairTests(Fixtures):
         installed = self.native.read_bytes()
         original = self.m.companion(self.game) / 'originals/amd_fidelityfx_upscaler_dx12.dll'
         self.assertEqual(original.read_bytes(), self.original)
+        _, package_path, package_record = self.m.package(self.game, 'direct', installed=receipt)
+        (package_path / manager.output_dll(package_record)).chmod(0o555)
         self.native.unlink()
 
         assessed = self.m.assess(self.game)
@@ -40,6 +43,7 @@ class MissingFileRepairTests(Fixtures):
 
         self.assertIn('Repair completed', result['message'])
         self.assertEqual(self.native.read_bytes(), installed)
+        self.assertEqual(stat.S_IMODE(self.native.stat().st_mode), 0o555)
         self.assertEqual(self.m.record(self.game)['baseline'], receipt['baseline'])
         self.assertEqual(self.m.record(self.game)['package_selection'], receipt['package_selection'])
 

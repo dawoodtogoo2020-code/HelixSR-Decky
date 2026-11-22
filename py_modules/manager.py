@@ -2688,7 +2688,7 @@ class Manager:
             shutil.copy2(src, temp)
             if sha(src) != expected or sha(temp) != expected:
                 raise ValueError('Copy verification failed')
-            with temp.open('r+b') as f:
+            with temp.open('rb' if os.name == 'posix' else 'r+b') as f:
                 os.fsync(f.fileno())
             os.replace(temp, dst)
             sync_directory(dst.parent)
@@ -2708,7 +2708,7 @@ class Manager:
             shutil.copy2(src, temp)
             if sha(src) != expected or sha(temp) != expected:
                 raise ValueError('Repair copy verification failed')
-            with temp.open('r+b') as f:
+            with temp.open('rb' if os.name == 'posix' else 'r+b') as f:
                 os.fsync(f.fileno())
             try:
                 os.link(temp, dst)
