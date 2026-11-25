@@ -237,18 +237,29 @@ def durable_directory(path):
         sync_directory(directory.parent)
 
 
+def sync_file(path):
+    """Flush a finished copy to disk. The copy may be read-only."""
+    # shutil.copy2 keeps the source's mode, so the copy of a read-only DLL is
+    # read-only too. POSIX permits syncing a read-only descriptor, preserving
+    # original modes. Windows' CRT requires a writable descriptor for its fsync
+    # implementation.
+    with Path(path).open('rb' if os.name == 'posix' else 'r+b') as stream:
+        os.fsync(stream.fileno())
+
+
 def durable_copy(src, dst, expected=None):
     """Persist verified recovery bytes and every newly created directory entry."""
     src, dst = Path(src), Path(dst)
     durable_directory(dst.parent)
     expected = expected or sha(src)
+    # An earlier copy at this path (a saved original kept by Reset) can be
+    # read-only and cannot be overwritten in place. Removing the entry needs
+    # only the directory, and never writes through a link left at this name.
+    dst.unlink(missing_ok=True)
     shutil.copy2(src, dst)
     if sha(dst) != expected or sha(src) != expected:
         raise ValueError('Recovery copy changed or failed verification')
-    # POSIX permits syncing a read-only descriptor, preserving original modes.
-    # Windows' CRT requires a writable descriptor for its fsync implementation.
-    with dst.open('rb' if os.name == 'posix' else 'r+b') as stream:
-        os.fsync(stream.fileno())
+    sync_file(dst)
     sync_directory(dst.parent)
 
 
@@ -2685,11 +2696,12 @@ class Manager:
         dst.parent.mkdir(parents=True, exist_ok=True)
         temp = dst.with_name(dst.name + '.helixsr-decky.tmp')
         try:
+            # A read-only temporary copy left by a crash cannot be overwritten in place.
+            temp.unlink(missing_ok=True)
             shutil.copy2(src, temp)
             if sha(src) != expected or sha(temp) != expected:
                 raise ValueError('Copy verification failed')
-            with temp.open('rb' if os.name == 'posix' else 'r+b') as f:
-                os.fsync(f.fileno())
+            sync_file(temp)
             os.replace(temp, dst)
             sync_directory(dst.parent)
         finally:
@@ -2705,11 +2717,11 @@ class Manager:
         dst.parent.mkdir(parents=True, exist_ok=True)
         temp = dst.with_name(dst.name + '.helixsr-decky.tmp')
         try:
+            temp.unlink(missing_ok=True)
             shutil.copy2(src, temp)
             if sha(src) != expected or sha(temp) != expected:
                 raise ValueError('Repair copy verification failed')
-            with temp.open('rb' if os.name == 'posix' else 'r+b') as f:
-                os.fsync(f.fileno())
+            sync_file(temp)
             try:
                 os.link(temp, dst)
             except FileExistsError as exc:
