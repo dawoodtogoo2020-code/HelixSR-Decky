@@ -87,6 +87,10 @@ def setup_guidance(game):
     else:
         action, headline = 'play', 'Files installed. Select AMD FSR in the game'
         steps = ['This native FSR replacement does not need an OptiScaler proxy launch option.']
+    if game.get('dx11_scaler'):
+        notes.append('DirectX 11 upscaling: use Model E (2.0.0) or HLX FSR 4 Lite (3.4.1). Frame generation stays off.')
+        if action in ('play', 'launch'):
+            steps[-1] = 'Launch the Windows game in DirectX 11 through Proton. Select DLSS in-game and check the active upscaler in the Scaler menu.'
     if managed and game.get('enabled'):
         if hlx:
             log = ('OptiScaler/HLX_FSR.log, or OptiScaler.log when OptiScaler file logging is on,' if route == 'optiscaler' else

@@ -93,7 +93,14 @@ def absent_path(path):
         return True
     return False
 # Official Steam requirements: https://store.steampowered.com/app/1593500/
-DX11_ONLY_STEAM_APPS = {'1593500': 'God of War (2018)'}
+DX11_STEAM_EXECUTABLES = {'1593500': 'gow.exe', '1086940': 'bin/bg3_dx11.exe'}
+DX11_RELEASE_GUIDANCE = 'For DirectX 11 upscaling, select Model E with HelixSR 2.0.0 or HLX FSR 4 Lite with HelixSR 3.4.1.'
+
+
+def require_scaler_release(data, release):
+    if data.get('dx11_scaler') and release.get('version') not in ('2.0.0', '3.4.1'):
+        raise ValueError(DX11_RELEASE_GUIDANCE)
+
 LICENSE_REV = 'helixsr-local-nvidia-network-2026-10'
 RELEASE_POLICY = 2
 AUTO_PACKAGE = object()
@@ -1000,7 +1007,10 @@ class Manager:
                 not anti_cheat_name(n) and
                 not any(anti_cheat_name(part) for part in p.relative_to(root).parts[:-1])]
         exes.sort(key=lambda p: (p.name.lower().endswith('-win64-shipping.exe'), p.stat().st_size), reverse=True)
-        main = exes[0] if exes else None
+        dx11_path = DX11_STEAM_EXECUTABLES.get(str(game.get('appid'))) if game.get('source') == 'Steam' else None
+        dx11_exe = next((p for p in exes if p.relative_to(root).as_posix().lower() == dx11_path
+                         and pe_info(p)['arch'] == 'x64'), None) if dx11_path else None
+        main = dx11_exe or (exes[0] if exes else None)
         rec = self.record(game)
         if rec.get('route') == 'direct':
             # Existing installations retain their owned targets, even if a
@@ -1023,6 +1033,8 @@ class Manager:
                                     'direct' if targets else None)
         if not rec and self.cfg.get('route_preferences', {}).get(game['id']) == 'optiscaler' and main:
             route = 'optiscaler'
+        if dx11_exe and inputs and not rec and not direct_legacy:
+            route = 'optiscaler'
         # Native API discovery uses the original heuristic independently of an
         # OptiScaler executable choice. An existing receipt owns its target.
         eligible = []
@@ -1030,7 +1042,7 @@ class Manager:
             for candidate in exes:
                 checked_path(root, str(candidate.relative_to(root)))
                 info = pe_info(candidate)
-                if info['arch'] == 'x64':
+                if info['arch'] == 'x64' and (not dx11_path or candidate == dx11_exe):
                     eligible.append(dict(path=candidate.relative_to(root).as_posix(), dx12=info['dx12']))
         if executable is not None:
             if rec or route != 'optiscaler':
@@ -1048,9 +1060,11 @@ class Manager:
                 main = None
         target = Path(rec['target']) if rec else main.parent if main else None
         reasons, blocked = [], []
-        dx11_title = DX11_ONLY_STEAM_APPS.get(str(game.get('appid', ''))) if game.get('source') == 'Steam' else None
-        if dx11_title:
-            reasons.append(f'{dx11_title} uses DirectX 11 only. This plugin currently installs HelixSR only through its validated DirectX 12 route. Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling, but that route is not enabled here.')
+        dx11_scaler = bool(dx11_exe and main == dx11_exe and route == 'optiscaler' and inputs)
+        renderer_unsupported = bool(dx11_path and not dx11_scaler)
+        if renderer_unsupported:
+            reasons.append(f'DirectX 11 Scaler requires {dx11_path} (x64 Windows) and a detected upscaling input. '
+                           + DX11_RELEASE_GUIDANCE)
         if platform.machine().lower() not in ('x86_64', 'amd64'):
             blocked.append('HelixSR requires an x86_64 host')
         if os.name == 'posix' and os.geteuid() == 0:
@@ -1066,7 +1080,7 @@ class Manager:
             blocked.append('Main executable is not x64 Windows PE (32-bit, native Linux or unknown architecture)')
         confirmed_dx12 = self.has_confirmed_dx12(
             rec, main, main.relative_to(root).as_posix() if main else None)
-        if not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']) and not confirmed_dx12:
+        if not dx11_path and route == 'optiscaler' and not (main and pe_info(main)['dx12']) and not confirmed_dx12:
             reasons.append('DX12 is not confirmed by executable imports; confirm the game runs DX12 before installation')
         directory_names = [str(d.relative_to(root)).lower() for d, _ in tree]
         if (any(anti_cheat_name(n) for _, ns in tree for n in ns)
@@ -1188,7 +1202,7 @@ class Manager:
             except ValueError as exc:
                 blocked.append(str(exc))
         if detailed:
-            aware = awareness(dict(game, managed=bool(rec), enabled=rec.get('enabled', False), scaler_proxy=proxy_status),
+            aware = awareness(dict(game, dx11_scaler=dx11_scaler, managed=bool(rec), enabled=rec.get('enabled', False), scaler_proxy=proxy_status),
                               tree, self.home, route, target)
         else:
             # Library rows only need the compatibility assessment. Read logs,
@@ -1224,11 +1238,11 @@ class Manager:
                            'Exact installed package is unavailable or changed; repair needs the recorded checksum-verified package')
         # HLX FSR 4 replaces only the split FSR 3.1 upscaler DLL. Older combined DLLs need Scaler.
         hlx_direct = (all(p.name.lower() == HLX_SPLIT_DLL for p in targets) if route == 'direct' and targets else None)
-        data = dict(game, compatibility='blocked' if blocked else 'unsupported' if dx11_title else 'candidate' if route else 'unsupported',
+        data = dict(game, compatibility='blocked' if blocked else 'unsupported' if renderer_unsupported else 'candidate' if route else 'unsupported',
                     reasons=blocked + reasons, route=route, inputs=inputs, target=str(target) if target else None,
                     targets=[str(p) for p in targets], main_exe=str(main) if main else None,
-                    renderer_unsupported=bool(dx11_title), executable_choices=[] if dx11_title else eligible,
-                    executable_selection_needed=bool(not dx11_title and eligible and not rec and blocked == [
+                    dx11_scaler=dx11_scaler, renderer_unsupported=renderer_unsupported, executable_choices=[] if renderer_unsupported else eligible,
+                    executable_selection_needed=bool(not renderer_unsupported and eligible and not rec and blocked == [
                         'Main executable is not x64 Windows PE (32-bit, native Linux or unknown architecture)']),
                     selected_executable=(main.relative_to(root).as_posix() if main else
                                          rec.get('selected_executable')) if route == 'optiscaler' else None,
@@ -1240,7 +1254,7 @@ class Manager:
                     recovery_available=self.recovery_available(game), steam_build_review=steam_build_review,
                     restore_eligible=restore_eligible,
                     repair_eligible=bool(repair_files), repair_files=repair_files,
-                    dx12_confirmation_needed=(not dx11_title and route == 'optiscaler'
+                    dx12_confirmation_needed=(not dx11_path and route == 'optiscaler'
                                               and not (main and pe_info(main)['dx12'])
                                               and not confirmed_dx12),
                     hlx_direct_supported=hlx_direct, scaler_proxy=proxy_status,
@@ -1272,6 +1286,9 @@ class Manager:
 
     def game_settings(self, game, rec=None):
         rec = self.record(game) if rec is None else rec
+        if (rec.get('enabled') and rec.get('route') == 'optiscaler' and game.get('source') == 'Steam'
+                and str(game.get('appid')) in DX11_STEAM_EXECUTABLES):
+            return dict(available=False, reason='DirectX 11 upscaling uses the Scaler FFX bridge. Frame generation is off. Check the active upscaler in the in-game Scaler menu.')
         if not (rec.get('enabled') and (helix20_release.modern(rec) or hlx_fsr_release.modern(rec)) and rec.get('route') == 'optiscaler'):
             return dict(available=False, reason='Install and enable HelixSR 2.0 (Model E) or 3.2 (HLX FSR 4) with Scaler to edit provider settings.')
         try:
@@ -1615,6 +1632,7 @@ class Manager:
             if data['compatibility'] != 'candidate':
                 raise ValueError('; '.join(data['reasons']))
             self.validate_install_executable(data)
+            require_scaler_release(data, release)
             if (hlx_fsr_release.modern(release) and data['route'] == 'optiscaler' and not data.get('managed')
                     and not data.get('inputs') and not any(pe_info(Path(p)).get('ffx') for p in data.get('targets', []))):
                 raise ValueError('HLX Scaler requires a detected DLSS, XeSS or FSR input. A DX12 executable alone does not establish an upscaling route.')
@@ -2116,6 +2134,7 @@ class Manager:
                 if not package:
                     raise ValueError('Exact installed package is unavailable; use Update HelixSR and review the change'
                                      if action in ('enable', 'repair') else 'Prepare HelixSR on this drive first')
+                require_scaler_release(data, package[2])
                 if not self._verify_package_payloads(package, data['route']):
                     raise ValueError('Prepared package manifest is incomplete or changed. Rebuild required.')
                 for n, expected in package[2]['files'].items():
@@ -2190,6 +2209,7 @@ class Manager:
                 paths.append(fg)
         files = {}
         files['route'] = data['route']
+        files['dx11_scaler'] = data.get('dx11_scaler', False)
         files['target'] = data.get('target')
         files['selected_executable'] = data.get('selected_executable')
         executable = data.get('main_exe')
@@ -2361,6 +2381,8 @@ class Manager:
                                        variant_id=rec['variant']['id'] if valid_variant(rec.get('variant')) else None,
                                        selection=rec.get('package_selection') if action in ('enable', 'repair') else None,
                                        installed=rec if action in ('enable', 'repair') and not rec.get('package_selection') else None)
+        if package and action in ('install', 'update', 'enable', 'repair'):
+            require_scaler_release(data, package[2])
         paths = self.planned_paths(game, data, action, package)
         size = sum((root / p).stat().st_size for p in paths if (root / p).is_file())
         if shutil.disk_usage(root).free < size * 3 + (128 << 20):
@@ -3003,6 +3025,10 @@ class Manager:
             configured = (adapter.configuration(template if source is None else source, template, previous_version=previous_version)
                           if helix20_release.modern(package_record) or hlx_fsr_release.modern(package_record) else
                           adapter.configuration(template if source is None else source, template))
+            if data.get('dx11_scaler'):
+                from optiscaler_setup import pin_config
+                configured = pin_config(configured, template, [('Dx11Upscaler', 'ffx_12')])
+                configured = helix_settings.update_settings(configured, {'provider': 'off'})
             pairs = scaler_proxy.remap(release_adapter(package_record).scaler_pairs(), scaler_proxy.recorded(rec))
             modern_paths = {str((target / dest).relative_to(root)) for _, dest in pairs}
             modern_paths |= {str((target / name).relative_to(root)) for name in ('OptiScaler.ini', 'HelixSR/helixsr-install.json')}

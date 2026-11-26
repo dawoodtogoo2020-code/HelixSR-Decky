@@ -14,7 +14,7 @@ import modern_release
 from tests.test_backend import Fixtures, pe, write
 
 
-INI_20 = '''[Upscalers]\nDx12Upscaler=auto\n[FrameGen]\nEnabled=true\nFGInput=nvngxfg\nFGOutput=auto\nFGNvngxReplacement=HelixSR\n[HelixSR]\nFGPreset=full\nQuickFlow=off\n[XeFG]\nInterpolationCount=1\n[User]\nKeep=exact\n'''
+INI_20 = '''[Upscalers]\nDx12Upscaler=auto\nDx11Upscaler=auto\n[FrameGen]\nEnabled=true\nFGInput=nvngxfg\nFGOutput=auto\nFGNvngxReplacement=HelixSR\n[HelixSR]\nFGPreset=full\nQuickFlow=off\n[XeFG]\nInterpolationCount=1\n[User]\nKeep=exact\n'''
 INI_19 = INI_20.replace('FGPreset=full', 'FrameGeneration=off\nFGPreset=full')
 
 
@@ -71,6 +71,25 @@ class Helix20InstallTests(Fixtures):
                       recipe_sha256=helix20_release.RECIPE_SHA256), files=files)
         self.m.cfg['packages'][str(folder)] = record
         return folder, record
+
+    def test_bg3_dx11_install_prefers_game_over_vulkan_exe(self):
+        self.scaler_game()
+        self.game.update(source='Steam', appid='1086940')
+        write(self.root / 'bin/bg3.exe', pe() + b'larger Vulkan executable' * 1000)
+        write(self.root / 'bin/bg3_dx11.exe', pe())
+        data = self.m.assess(self.game)
+        self.assertEqual(data['selected_executable'], 'bin/bg3_dx11.exe')
+        self.assertFalse(data['dx12_confirmation_needed'])
+        self.modern19_package()
+        with self.assertRaisesRegex(ValueError, 'DirectX 11 upscaling'):
+            self.m.preview(self.game['id'], 'install', dx12_confirmed=True)
+        self.modern20_package()
+        self.action('install')
+        ini = (self.root / 'bin/OptiScaler.ini').read_text()
+        self.assertIn('Dx11Upscaler=ffx_12', ini)
+        self.assertIn('FGInput=nofg', ini)
+        self.action('remove')
+        self.assertFalse((self.root / 'bin/dxgi.dll').exists())
 
     def test_fresh_scaler_install_rejects_missing_fg_payload_before_writes(self):
         self.scaler_game()

@@ -1496,7 +1496,7 @@ class TransactionTests(Fixtures):
                 self.assertFalse(data['installation_status']['can_modify'])
                 self.assertTrue(data['reasons'])
 
-    def test_god_of_war_2018_is_unsupported_even_with_dlss_and_dx12_confirmation(self):
+    def test_god_of_war_missing_game_exe_is_unsupported_even_with_dx12_confirmation(self):
         self.native.unlink()
         write(self.root / 'nvngx_dlss.dll', pe())
         self.game.update(source='Steam', appid='1593500', name='God of War')
@@ -1508,10 +1508,8 @@ class TransactionTests(Fixtures):
         status = data['installation_status']
         self.assertEqual(status['label'], 'Unsupported')
         self.assertIn('DirectX 11', status['summary'])
-        self.assertIn('plugin currently installs HelixSR only through its validated DirectX 12 route', status['summary'])
-        self.assertIn('Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling', status['summary'])
-        self.assertEqual(status['issues'][0]['title'], 'DX11 route not verified')
-        self.assertIn('Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling', status['issues'][0]['steps'][0])
+        self.assertIn('gow.exe', status['summary'])
+        self.assertEqual(status['issues'][0]['code'], 'unsupported_renderer')
         self.assertFalse(status['can_modify'])
         self.assertFalse(status['can_restore'])
         for action in ('install', 'update', 'enable', 'adopt'):

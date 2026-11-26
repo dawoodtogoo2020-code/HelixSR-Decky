@@ -9,7 +9,7 @@ import shlex
 
 
 GUIDE = 'https://github.com/dawoodtogoo2020-code/HelixSR-Decky/blob/main/OPTISCALER_GUIDE.md'
-KEYS = ('Dx12Upscaler', 'FfxDx12Path', 'FfxDx12SRPath', 'EnableDlssInputs',
+KEYS = ('Dx11Upscaler', 'Dx12Upscaler', 'FfxDx12Path', 'FfxDx12SRPath', 'EnableDlssInputs',
         'NvapiPath', 'OverrideNvapiDll', 'UseFakenvapi', 'Dxgi', 'ShortcutKey',
         'FGInput', 'FGNvngxReplacement')
 
@@ -155,7 +155,7 @@ def remap_required(required, name):
     return tuple(name if item == 'dxgi.dll' else item for item in required)
 
 
-def setup_report(target, route, options, proxy_files=(), proxy=None):
+def setup_report(target, route, options, proxy_files=(), proxy=None, dx11=False):
     proxy_file, proxy_dll, proxy_env = proxy_names(proxy)
     directory = Path(target) if target else None
     if directory and (directory.is_file() or directory.suffix.lower() == '.dll'):
@@ -176,7 +176,7 @@ def setup_report(target, route, options, proxy_files=(), proxy=None):
                 record = json.loads(marker.read_text())
                 installed = record.get('helixsr')
                 if installed in ('3.2.0', '3.3.0', '3.4.1') and (record.get('variant') or {}).get('id') == 'hlx-fsr4-1-2':
-                    return _hlx_report(directory, route, options, values, error, installed, proxy)
+                    return _hlx_report(directory, route, options, values, error, installed, proxy, dx11)
                 modern = installed in ('1.9.3', '2.0.0')
                 modern20 = installed == '2.0.0'
         except (OSError, ValueError, AttributeError):
@@ -186,7 +186,8 @@ def setup_report(target, route, options, proxy_files=(), proxy=None):
         required = tuple(dest for _, dest in scaler_pairs())
         paths_match = (directory / 'HelixSR-fsrfg/amd_fidelityfx_dx12.dll').is_file()
         configured = (route == 'optiscaler'
-                      and values.get('Dx12Upscaler', '').lower() in ('auto', 'ffx')
+                      and (values.get('Dx11Upscaler', '').lower() == 'ffx_12' if dx11 else
+                           values.get('Dx12Upscaler', '').lower() in ('auto', 'ffx'))
                       and paths_match and not error)
     elif modern:
         from modern_release import scaler_pairs
@@ -226,7 +227,8 @@ def setup_report(target, route, options, proxy_files=(), proxy=None):
             checks.append('An existing nvapi64.dll may affect DLSS input. It is not replaced; review OptiScaler.log and NvapiPath.')
         if values.get('NvapiPath', 'auto').lower() != 'auto':
             checks.append('Custom NvapiPath is configured. Verify it points to your intended per-game NVAPI provider.')
-        checks.append(('Run the game in DX12. Select an upscaler supported by the game. Open HelixSR Scaler using ' + shortcut + '; auto selects the embedded HelixSR FidelityFX backend.' if modern20 else
+        checks.append(('Launch in DirectX 11, select DLSS and open the Scaler menu using ' + shortcut + ' to check the upscaler.' if dx11 else
+                       'Run the game in DX12. Select an upscaler supported by the game. Open HelixSR Scaler using ' + shortcut + '; auto selects the embedded HelixSR FidelityFX backend.' if modern20 else
                        'Run the game in DX12. Select DLSS (or a supported FSR/XeSS input). Open HelixSR Scaler using ' + shortcut + '; HelixSR uses the DLSS backend.' if modern else
                        'Run the game in DX12. Open OptiScaler using ' + shortcut + '. Select Upscaling → Upscalers → FFX: FSR HelixSR (3.1.5).'))
         checks.append('If DLSS is unavailable, use a supported FSR or XeSS input if the game offers one. Input name alone does not identify the output backend. Otherwise collect a fresh OptiScaler.log.')
@@ -251,7 +253,7 @@ def setup_report(target, route, options, proxy_files=(), proxy=None):
                                    'not selected; runtime unknown' if modern20 else 'not provided by this release'))
 
 
-def _hlx_report(directory, route, options, values, error, version='3.2.0', proxy=None):
+def _hlx_report(directory, route, options, values, error, version='3.2.0', proxy=None, dx11=False):
     """Report the configured SR and FG providers without promising runtime success."""
     from hlx_fsr_release import FG_NAME, FULL_NAME, RELEASES
     release = RELEASES[version]
@@ -276,12 +278,12 @@ def _hlx_report(directory, route, options, values, error, version='3.2.0', proxy
     else:
         paths_match = (all(values.get(k, 'auto').lower() == 'auto' for k in ('OptiDllPath', 'FfxDx12Path', 'FfxDx12SRPath'))
                        and all((directory / 'OptiScaler' / dll).is_file() for dll in (upscaler, amd)))
-        output = values.get('Dx12Upscaler', '').lower()
-        backend = ({'0': 'HLX FSR 4 (FSR 4.1.2)', '1': 'AMD FSR (native)'}.get(values.get('UpscalerIndex')) if output == 'ffx' and paths_match
-                   else FULL_NAME if release.FULL and output == FULL_NAME.lower() and paths_match else None)
+        output = values.get('Dx11Upscaler' if dx11 else 'Dx12Upscaler', '').lower()
+        backend = ({'0': 'HLX FSR 4 (FSR 4.1.2)', '1': 'AMD FSR (native)'}.get(values.get('UpscalerIndex')) if output == ('ffx_12' if dx11 else 'ffx') and paths_match
+                   else FULL_NAME if not dx11 and release.FULL and output == FULL_NAME.lower() and paths_match else None)
         configured = bool(backend and not missing and not error)
         backend = backend or 'Custom or unknown Scaler output'
-        checks.append(f'Configured output: {backend}. Select a supported DLSS, FSR or XeSS input in the DX12 game. Check a fresh log to identify the active provider: '
+        checks.append(f'Configured output: {backend}. Select a supported DLSS, FSR or XeSS input in the {"DX11" if dx11 else "DX12"} game. Check a fresh log to identify the active provider: '
                       'HLX writes OptiScaler/HLX_FSR.log, or OptiScaler.log when OptiScaler file logging is on (LogToFile=true; also set LogLevel=2, '
                       'because the default Trace level grows too fast for the status monitor). Turn file logging off for benchmarks.')
         if launch != 'correct':

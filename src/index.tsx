@@ -57,7 +57,7 @@ type Game = { id: string; name: string; folder: string; source: string; compatib
     running: boolean; selectable: boolean; can_modify: boolean; can_restore?: boolean; can_repair?: boolean; can_reset?: boolean; issues: {code: string; title: string; reason: string; steps: string[]; blocking: boolean}[] };
   appid?: string;
   reasons: string[]; route: string | null; inputs: string[]; managed: boolean; enabled: boolean;
-  legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean;
+  legacy: boolean; recovery_available?: boolean; installed_version?: string; package_version?: string; dx12_confirmation_needed: boolean; dx11_scaler?: boolean;
   main_exe?: string; target?: string; installed_model?: string; installed_variant?: string;
   hlx_direct_supported?: boolean | null; hlx_scaler_reason?: string | null; scaler_proxy?: ScalerProxy | null;
   executable_choices?: { path: string; dx12: boolean }[]; selected_executable?: string; executable_selection_needed?: boolean;
@@ -871,9 +871,9 @@ function Content() {
         {!game.managed && game.route === "optiscaler" && !!game.executable_choices?.length && (game.executable_choices.length > 1 || !game.executable_choices.some(choice => choice.path === game.selected_executable)) && <>
           <PanelSectionRow><DropdownItem layout="below" label="Game executable" menuLabel="Choose the executable you launch"
             selectedOption={game.selected_executable} strDefaultLabel="Choose a game executable" disabled={disabled}
-            rgOptions={game.executable_choices!.map(choice => ({ data: choice.path, label: `${choice.path} · ${choice.dx12 ? "DX12 detected" : "Confirm DX12"}` }))}
+            rgOptions={game.executable_choices!.map(choice => ({ data: choice.path, label: `${choice.path} · ${game.dx11_scaler ? "DirectX 11" : choice.dx12 ? "DX12 detected" : "Confirm DX12"}` }))}
             onChange={option => void chooseExecutable(String(option.data))} /></PanelSectionRow>
-          <PanelSectionRow><div className="helix-muted">Choose the DX12 executable you actually launch. HelixSR will be installed beside it. Existing installs keep their recorded folder; remove them before choosing another executable.</div></PanelSectionRow>
+          <PanelSectionRow><div className="helix-muted">Choose the game executable you actually launch. HelixSR will be installed beside it. Existing installs keep their recorded folder; remove them before choosing another executable.</div></PanelSectionRow>
         </>}
         {game.dx12_confirmation_needed && <PanelSectionRow><ToggleField label="Confirm DX12 mode"
           description="Choose DX12 in the game first, then confirm it here." checked={dx12} onChange={setDx12} disabled={disabled} /></PanelSectionRow>}
@@ -1108,7 +1108,7 @@ function Content() {
       <PanelSectionRow><ButtonItem layout="below" disabled={modalOpen} onClick={() => void interact(async () => openDialog(<ConfirmModal bDisableBackgroundDismiss strTitle="Installation guide" strOKButtonText="Done"
         strDescription={<div><p>1. Choose a detected game from the Game dropdown. Green means HelixSR is present; purple highlights the install/update action.</p>
           <p>2. Choose Install HelixSR or Update HelixSR and review the change. Required downloads and the local network build happen automatically.</p>
-          <p>3. Wait for completion, then launch the game with DirectX 12. Choose AMD FSR for a native replacement, or the appropriate DLSS/XeSS/FSR input for OptiScaler.</p>
+          <p>3. Wait for completion, then launch the game with the renderer in its setup guidance. Choose AMD FSR for a native replacement, or the appropriate DLSS/XeSS/FSR input for OptiScaler.</p>
           <p>For an OptiScaler Steam game, use Review Proton proxy launch option to save its required override while preserving your other options.</p>
           <p>For launcher games, open Import games, choose Import Games From, select Heroic or Lutris, then Import Now. Supported installed games appear in the Game dropdown. For other locations, open Manage Games Folders, add each game folder, then Import selected folders.</p>
           <p>Administrator access is unnecessary for writable folders owned by you.</p>

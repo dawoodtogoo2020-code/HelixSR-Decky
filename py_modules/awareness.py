@@ -266,7 +266,7 @@ def awareness(game, tree, home, route, target=None):
         evidence_state = 'historical log available; current runtime unverified'
     elif processes:
         evidence_state = 'game running; current HelixSR output unverified'
-    setup = setup_report(target, route, options, opti_files, game.get('scaler_proxy'))
+    setup = setup_report(target, route, options, opti_files, game.get('scaler_proxy'), dx11=game.get('dx11_scaler', False))
     configured_helix = setup['configured']
     hlx = setup.get('family') == 'hlx-fsr'
     if (not hlx or route == 'optiscaler') and setup.get('framegen_evidence') != 'not provided by this release':

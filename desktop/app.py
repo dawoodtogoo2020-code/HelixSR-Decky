@@ -639,7 +639,7 @@ class MainWindow(QMainWindow):
         self.executables.blockSignals(True)
         self.executables.clear()
         for executable in game.get("executable_choices", []):
-            renderer = "DX12 detected" if executable.get("dx12") else "Confirm DX12"
+            renderer = "DirectX 11" if game.get("dx11_scaler") else "DX12 detected" if executable.get("dx12") else "Confirm DX12"
             self.executables.addItem(f"{executable['path']} · {renderer}", executable['path'])
         self.executables.setCurrentIndex(self.executables.findData(game.get("selected_executable")))
         self.executables.blockSignals(False)

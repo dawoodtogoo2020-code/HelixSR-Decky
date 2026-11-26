@@ -22,7 +22,7 @@ from optiscaler_setup import parse_config
 import test_helix20_install
 
 ZIP_ENV = {'3.2.0': 'HELIXSR_VERIFIED_ZIP', '3.3.0': 'HELIXSR_VERIFIED_ZIP_330', '3.4.1': 'HELIXSR_VERIFIED_ZIP_341'}
-TEMPLATE = b'[Upscalers]\nDx12Upscaler=auto\n[FSR]\nUpscalerIndex=auto\n[Libraries]\nFfxDx12Path=auto\nFfxDx12SRPath=auto\n[FrameGen]\nEnabled=false\nFGInput=auto\nFGOutput=auto\nFGNvngxReplacement=auto\n'
+TEMPLATE = b'[Upscalers]\nDx12Upscaler=auto\nDx11Upscaler=auto\n[FSR]\nUpscalerIndex=auto\n[Libraries]\nFfxDx12Path=auto\nFfxDx12SRPath=auto\n[FrameGen]\nEnabled=false\nFGInput=auto\nFGOutput=auto\nFGNvngxReplacement=auto\n'
 
 
 class LifecycleTests(Fixtures):
@@ -321,6 +321,28 @@ class Lifecycle341Tests(Lifecycle330Tests):
     CHOICE = 'reviewed-3.4.1'
     FG = 'OptiScaler/custom/HelixSR-FG/dlssg/nvngx_dlssg.dll'
     INTERPOSER = 'OptiScaler/streamline/sl.interposer.dll'
+
+    def test_god_of_war_dx11_scaler_lifecycle(self):
+        self.native.unlink()
+        self.game.update(source='Steam', appid='1593500', name='God of War')
+        write(self.root / 'GoW.exe', pe())
+        write(self.root / 'nvngx_dlss.dll', pe())
+        data = self.m.assess(self.game)
+        self.assertTrue(data['dx11_scaler'])
+        self.assertFalse(data['dx12_confirmation_needed'])
+        self.assertEqual(data['selected_executable'], 'GoW.exe')
+        self.install()
+        ini = self.root / 'OptiScaler.ini'
+        config = parse_config(ini.read_text())
+        self.assertEqual(config.get('Upscalers', 'Dx11Upscaler'), 'ffx_12')
+        self.assertEqual(config.get('FSR', 'UpscalerIndex'), '0')
+        self.assertEqual(config.get('FrameGen', 'FGInput'), 'nofg')
+        self.act('disable')
+        self.act('enable')
+        self.assertEqual(parse_config(ini.read_text()).get('Upscalers', 'Dx11Upscaler'), 'ffx_12')
+        self.act('remove')
+        self.assertFalse(ini.exists())
+        self.assertTrue((self.root / 'GoW.exe').is_file())
 
     def test_scaler_helixsr_fg_is_installed_selectable_and_survives_disable(self):
         self.m.set_installation_route(self.game['id'], 'optiscaler')

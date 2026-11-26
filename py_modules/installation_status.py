@@ -53,6 +53,8 @@ def _steam_build_steps(game):
 def _issue(reason, game=None):
     """Classify a manager diagnostic without altering its original wording."""
     lower = reason.lower()
+    if lower.startswith('directx 11 scaler requires'):
+        return ('unsupported_renderer', 'DX11 game executable or input missing', [reason])
     if 'uses directx 11 only' in lower:
         steps = ["This plugin's validated installation route requires DirectX 12. Upstream HelixSR 2.0 Scaler supports DirectX 11 upscaling, but this plugin has not enabled that route. A plugin setting or launch option cannot change the game's renderer."]
         if (game or {}).get('managed'):
