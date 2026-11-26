@@ -121,6 +121,11 @@ def _issue(reason, game=None):
     if 'without root permissions' in lower:
         return ('root_host', 'Unsupported host context',
                 ['Run the plugin in the normal Steam user session.'])
+    if 'game scan file limit' in lower or 'game scan directory limit' in lower:
+        return ('scan_limit', 'Game folder too large to scan',
+                ['HelixSR Decky stops scanning a folder this large, so nothing in it was checked or changed.',
+                 'Check that this entry is one game folder, not a whole drive or library folder. '
+                 'If it is one game, report its name and file count so the limit can be raised.'])
     if 'permission' in lower or 'access denied' in lower or 'read' in lower and 'failed' in lower:
         return ('file_access', 'File access failed',
                 ['Restore normal access to the named path, then rescan.',

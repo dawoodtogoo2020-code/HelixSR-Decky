@@ -163,6 +163,9 @@ async function liveLaunchOptions(appid: number): Promise<string> {
 
 let lastSelected = "";
 const selectionListeners = new Set<(id: string) => void>();
+// The executable menu also unmounts the panel, so its choice goes to the shared
+// session first; whichever panel is mounted then loads the game with it.
+const executableListeners = new Set<(id: string) => void>();
 function chooseGame(id: string) {
   if (lastSelected !== id && latestOverlayStatus?.enabled)
     void setStatusOverlay(null, false).then(publishOverlayStatus).catch(() => {});
@@ -355,6 +358,14 @@ function Content() {
     return () => { selectionListeners.delete(changed); };
   }, []);
   useEffect(() => {
+    const changed = (id: string) => {
+      const path = executableSession.get(id);
+      if (path) void loadExecutable(id, path);
+    };
+    executableListeners.add(changed);
+    return () => { executableListeners.delete(changed); };
+  }, []);
+  useEffect(() => {
     folderListeners.add(setFolders); setFolders(pendingFolders);
     return () => { folderListeners.delete(setFolders); };
   }, []);
@@ -445,9 +456,16 @@ function Content() {
       if (!stopped) return;
       publishOverlayStatus(stopped);
     }
+    // Steam has usually unmounted this panel by the time the menu reports the
+    // option. Checking this panel's mount state here dropped the choice, so the
+    // next panel asked for the executable again (Jedi Survivor, 0.1.50).
+    if (lastSelected !== id) return;
+    executableSession.choose(id, path);
+    executableListeners.forEach(listener => listener(id));
+  }
+  async function loadExecutable(id: string, path: string) {
     if (!mountedRef.current || selectedRef.current !== id) return;
     executableRef.current = path;
-    executableSession.choose(id, path);
     setDx12(false);
     const updated = await run(() => gameDetailsRead.get(id, path));
     if (!mountedRef.current || selectedRef.current !== id || executableRef.current !== path) return;

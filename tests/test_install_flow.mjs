@@ -1187,3 +1187,64 @@ test("a native HLX install switches to Scaler in one reviewed step and keeps its
   const blocked = running.walk(running.render(), n => n.type === "ButtonItem" && running.text(n) === "Switch this game to Scaler")[0];
   assert.equal(blocked.props.disabled, true, "a running game cannot switch");
 });
+
+// Star Wars Jedi Survivor (Steam 1774580): the largest executable is EA's 32-bit
+// installer, so the panel asks for the game executable. Steam closes the panel
+// while the executable menu is open, exactly like the model and release menus.
+function launcherGameHarness(extra = {}) {
+  const ROOT = "JediSurvivor.exe", GAME = "SwGame/Binaries/Win64/JediSurvivor.exe";
+  const h = modelChoiceHarness(game => [Object.assign(game, {id: "swjs", name: "STAR WARS Jedi: Survivor",
+    route: "optiscaler", compatibility: "blocked", executable_selection_needed: true,
+    reasons: ["Main executable is not x64 Windows PE (32-bit, native Linux or unknown architecture)"],
+    selected_executable: "__Installer/EAappInstaller.exe",
+    executable_choices: [{path: GAME, dx12: true}, {path: ROOT, dx12: false}]})], {
+    game_details: (id, executable) => {
+      const base = {...h.game, id: "swjs"};
+      return executable ? {...base, compatibility: "candidate", reasons: [], executable_selection_needed: false,
+        selected_executable: executable} : base;
+    },
+    preview_latest: (gid, _dx12, id, exe, choice) => ({token: "preview", name: gid, files: [], variant_id: id,
+      model: id, route: "optiscaler", select_upscaler: "DLSS", release_version: choice, selected_executable: exe}),
+    ...extra,
+  });
+  return {...h, ROOT, GAME};
+}
+
+test("an executable picked from the menu survives Steam's panel remount (Jedi Survivor loop)", async () => {
+  const h = launcherGameHarness();
+  await h.ready();
+  const exe = () => h.control("Game executable")?.props.selectedOption;
+  assert.deepEqual(await h.pickInMenu("HelixSR model", HLX), [HLX, "reviewed-3.2.0"]);
+  await h.pickInMenu("Game executable", h.GAME);
+  assert.equal(exe(), h.GAME, "the remounted panel shows the picked executable");
+  assert.deepEqual(h.shown(), [HLX, "reviewed-3.2.0"], "picking the executable keeps the model and release");
+  assert.equal(h.calls.filter(call => call.route === "game_details").at(-1).args[1], h.GAME);
+  // Choosing the model again must not drop the executable either.
+  await h.pickInMenu("HelixSR model", MODEL_E);
+  assert.equal(exe(), h.GAME, "picking the model keeps the executable");
+  await h.pickInMenu("HelixSR model", HLX);
+  assert.equal(exe(), h.GAME);
+  const button = h.walk(h.render(), n => n.type === "ButtonItem" && /Install HelixSR for this game/.test(h.text(n)))[0];
+  assert.ok(button); assert.equal(button.props.disabled, false, "install is available after one pick of each");
+  button.props.onClick(); await flush(); h.render();
+  const args = h.calls.filter(call => call.route === "preview_latest").at(-1).args;
+  assert.deepEqual([args[2], args[3], args[4]], [HLX, h.GAME, "reviewed-3.2.0"]);
+});
+
+
+test("an executable picked while the status overlay is on still reaches the panel that mounted first", async () => {
+  const off = {enabled: false, game_id: null, overlay: {state: "off", label: "Off", detail: "", responding: false, visible_verified: false},
+    runtime: {state: "off", label: "Off", detail: ""}};
+  let overlay = {...off, enabled: true, game_id: "swjs"};
+  const stop = deferred();
+  const h = launcherGameHarness({overlay_status: () => overlay,
+    set_status_overlay: async () => { await stop.promise; overlay = off; return off; }});
+  await h.ready();
+  // The old panel waits for the overlay to stop, so the new panel mounts and
+  // reads the game with the old executable before the choice is recorded.
+  await h.pickInMenu("Game executable", h.GAME);
+  assert.notEqual(h.control("Game executable")?.props.selectedOption, h.GAME);
+  stop.resolve(); await flush(); h.render(); await flush(); h.render();
+  assert.equal(h.control("Game executable")?.props.selectedOption, h.GAME, "the new panel loads the recorded choice");
+  assert.equal(h.calls.filter(call => call.route === "game_details").at(-1).args[1], h.GAME);
+});

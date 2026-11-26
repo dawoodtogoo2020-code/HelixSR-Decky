@@ -24,7 +24,7 @@ from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from library import discover, discover_launcher, safe_root, scan_tree, text
 from discovery_records import normalize_imports
-from awareness import awareness, active_processes, text_tail, optiscaler_proxy
+from awareness import OPTISCALER_PROXIES, awareness, active_processes, text_tail, optiscaler_proxy
 from game_guidance import setup_guidance
 from operation_lock import operation_lock, game_locked
 from host_environment import host_environment
@@ -74,6 +74,8 @@ PACKAGE_FILES = NETWORK + (DLL, 'optiscaler/OptiScaler.dll',
                            'amd-fsr/amd_fidelityfx_upscaler_dx12.dll')
 INPUTS = {'nvngx_dlss.dll': 'DLSS', 'libxess.dll': 'XeSS',
           'ffx_fsr2_api_x64.dll': 'FSR 2', 'ffx_fsr2_api_dx12_x64.dll': 'FSR 2'}
+# Every file name assess() looks at, besides executables and anti-cheat names.
+ASSESSED_NAMES = frozenset(INPUTS) | {'amd_fidelityfx_upscaler_dx12.dll', DLL} | frozenset(OPTISCALER_PROXIES)
 ANTI = ('easyanticheat', 'battleye', 'beclient', 'equ8', 'faceit', 'vanguard')
 
 
@@ -987,7 +989,10 @@ class Manager:
     def assess(self, game, detailed=True, executable=None):
         root = safe_root(game['folder'])
         tree = scan_tree(root)
-        names = [(d / n, n.lower()) for d, ns in tree for n in ns]
+        # Paths only for the file names read below; large games list
+        # hundreds of thousands of asset files that none of these checks use.
+        names = [(d / n, lower) for d, ns in tree for n in ns
+                 for lower in (n.lower(),) if lower in ASSESSED_NAMES or lower.endswith('.exe')]
         inputs = sorted({INPUTS[n] for _, n in names if n in INPUTS})
         targets = [p for p, n in names if n in ('amd_fidelityfx_upscaler_dx12.dll', DLL)]
         exes = [p for p, n in names if n.endswith('.exe') and
@@ -1064,7 +1069,8 @@ class Manager:
         if not dx11_title and route == 'optiscaler' and not (main and pe_info(main)['dx12']) and not confirmed_dx12:
             reasons.append('DX12 is not confirmed by executable imports; confirm the game runs DX12 before installation')
         directory_names = [str(d.relative_to(root)).lower() for d, _ in tree]
-        if any(anti_cheat_name(n) for _, n in names) or any(anti_cheat_name(n) for n in directory_names):
+        if (any(anti_cheat_name(n) for _, ns in tree for n in ns)
+                or any(anti_cheat_name(n) for n in directory_names)):
             blocked.append('Anti-cheat files detected; injection is blocked')
         if game.get('manifest'):
             from library import vdf

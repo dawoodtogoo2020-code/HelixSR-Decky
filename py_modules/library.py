@@ -494,18 +494,49 @@ def discover_launcher(home, key):
     return discover(home, sources=sources)
 
 
-def scan_tree(folder, depth=9, max_files=50000, max_dirs=10000):
-    root, result, count = Path(folder).resolve(), [], 0
-    for directory, dirs, files in os.walk(root, followlinks=False):
+SCAN_SKIPPED_DIRECTORIES = frozenset(('helixsr', '.git', 'node_modules'))
+# Some games ship hundreds of thousands of loose files: God of War (2018) passed
+# the old limit of 50,000 files. These limits only stop a scan of something that
+# is not one game folder, such as a whole drive added as a game.
+SCAN_MAX_FILES = 1_000_000
+SCAN_MAX_DIRECTORIES = 200_000
+
+
+def scan_tree(folder, depth=9, max_files=SCAN_MAX_FILES, max_dirs=SCAN_MAX_DIRECTORIES):
+    """Return (directory, file names) pairs below a game folder, top-down.
+
+    Symbolic links are neither listed nor followed, and unreadable folders are
+    skipped. File types come from the directory listing itself, so a large game
+    costs one listing per folder instead of one more stat call per file.
+    """
+    root = Path(folder).resolve()
+    result, count, pending = [], 0, [(root, 0)]
+    while pending:
+        directory, level = pending.pop()
+        if directory.is_symlink():
+            continue
         if len(result) >= max_dirs:
-            raise ValueError('Game scan directory limit exceeded')
-        p = Path(directory)
-        level = len(p.relative_to(root).parts)
-        dirs[:] = [d for d in dirs if d.lower() not in ('helixsr', '.git', 'node_modules')
-                   and not (p / d).is_symlink()] if level < depth else []
-        names = [n for n in files if not (p / n).is_symlink()]
-        count += len(names)
-        if count > max_files:
-            raise ValueError('Game scan file limit exceeded')
-        result.append((p, names))
+            raise ValueError(f'Game scan directory limit exceeded: more than {max_dirs:,} folders')
+        names, folders = [], []
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            if level < depth and entry.name.lower() not in SCAN_SKIPPED_DIRECTORIES:
+                                folders.append(entry.name)
+                            continue
+                    except OSError:
+                        pass  # Listed as a file, as os.walk did when the type was unreadable.
+                    count += 1
+                    if count > max_files:
+                        raise ValueError(f'Game scan file limit exceeded: more than {max_files:,} files')
+                    names.append(entry.name)
+        except OSError:
+            continue
+        result.append((directory, names))
+        # Depth first in listing order, the order os.walk used.
+        pending.extend((directory / name, level + 1) for name in reversed(folders))
     return result

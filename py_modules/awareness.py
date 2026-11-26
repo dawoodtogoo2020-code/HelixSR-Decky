@@ -11,6 +11,10 @@ from optiscaler_setup import setup_report
 
 OPTISCALER_PROXIES = ('dxgi.dll', 'winmm.dll', 'version.dll', 'dbghelp.dll',
                      'd3d12.dll', 'wininet.dll', 'winhttp.dll', 'optiscaler.asi')
+FG_CONFIG_NAMES = ('config.ini', 'user.settings', 'dx12user.settings', 'engine.ini',
+                   'gameusersettings.ini', 'optiscaler.ini')
+# The only file names awareness() reads; every other file is skipped.
+EVIDENCE_NAMES = frozenset(OPTISCALER_PROXIES + FG_CONFIG_NAMES)
 
 
 def optiscaler_proxy(path):
@@ -158,6 +162,8 @@ def awareness(game, tree, home, route, target=None):
     for d, names in tree:
         for name in names:
             lower = name.lower()
+            if lower not in EVIDENCE_NAMES:
+                continue  # Large games list hundreds of thousands of unrelated assets.
             p = d / name
             if lower == 'optiscaler.ini' and (p.is_symlink() or not p.is_file()):
                 continue
@@ -170,7 +176,7 @@ def awareness(game, tree, home, route, target=None):
                         fg.append(evidence('OptiScaler', 'FrameGen.Enabled', value[1].strip(), p))
             if optiscaler_proxy(p):
                 opti_files.append(str(p))
-            if lower in ('config.ini', 'user.settings', 'dx12user.settings', 'engine.ini', 'gameusersettings.ini', 'optiscaler.ini'):
+            if lower in FG_CONFIG_NAMES:
                 src = text(p, 256 << 10)
                 for k, value in re.findall(r'(?im)^\s*([^;#\r\n=]*(?:framegen|framegeneration|dlssg|xessfg|fginput|fgoutput|fgnvngxreplacement|fgpreset|quickflow)[^=\r\n]*)\s*=\s*([^\r\n;]+)', src):
                     source = 'OptiScaler' if lower == 'optiscaler.ini' else 'Native game'

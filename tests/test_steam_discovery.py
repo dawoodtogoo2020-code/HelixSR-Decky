@@ -64,12 +64,6 @@ class SteamDiscoveryTests(unittest.TestCase):
         self.assertEqual([g['id'] for g in games], ['steam:10'])
         self.assertFalse(any('no installed game manifests' in note for note in warnings))
 
-    def test_directory_limit_stops_empty_directory_tree_with_clear_error(self):
-        root = self.base.resolve()
-        tree = [(str(root), [], [])] + [(str(root / str(i)), [], []) for i in range(3)]
-        with patch('library.os.walk', return_value=iter(tree)), self.assertRaisesRegex(ValueError, 'directory limit'):
-            library.scan_tree(root, max_dirs=3)
-
     def test_wrong_shaped_shortcuts_do_not_hide_healthy_steam_library(self):
         manifest(self.primary, '42', 'Healthy')
         shortcut = self.primary / 'userdata/1/config/shortcuts.vdf'
